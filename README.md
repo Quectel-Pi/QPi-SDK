@@ -1,180 +1,184 @@
-# simple-h1 — Quectel PI H1 (QCS6490) 简化 SDK
+# Quectel H1 SDK
 
-基于 Quectel PI H1 (QCS6490) 原生 SDK 裁剪的轻量 SDK，**脱离 Yocto/bitbake**，只保留两个核心功能：
+Quectel PI H1 (QCS6490) 开发 SDK，支持两个核心功能，**脱离原生 SDK 实现**：
 
-1. **内核编译打包** — 修改内核源码 → 独立交叉编译 → ko 驱动放入 overlay → 内核 + 设备树打包进启动镜像 (efi.bin)
-2. **应用层自定义开发** — 通过 overlay 机制向 system.img 追加/删除客户自定义应用、脚本、服务等文件，重新打包文件系统
+1. **内核编译打包** — 修改内核源码 → 编译 ko 驱动放 overlay → 内核二进制 + 设备树打包到启动镜像 (efi.bin)
+2. **应用层自定义开发** — 开放文件系统镜像 (system.img, BTRFS)，通过 overlay 机制追加客户自定义应用/脚本/服务等文件
 
 ## 目录结构
 
 ```
-simple-h1/
-├── kernel/            # 内核源码 (QCOM 6.6.116, 完整可编译)
-├── overlay/           # ★ 文件系统增量目录 (打包时合并进 system.img)
-│   └── lib/modules/6.6.116-qli-1.7-ver.1.1/updates/  # 外置驱动 ko (rt6801/wlan 等, 仅 ko 无源码)
-├── apps/              # 预置源码 (github 开源项目等, make install 安装到 overlay)
-├── prebuilds/         # 原始固件 (system.img / efi.bin / dtb.bin / 分区表 / firehose)
-├── tools/             # adb / qdl / flash 工具 / ukify / stub / initramfs / dtbo
-├── toolchains/        # 独立交叉编译链 (aarch64-qcom-linux-gcc 13.4.0)
-├── skills/            # AI Agent skills
-├── docs/              # 文档 / 原理图
-├── scripts/           # 构建与烧录脚本 (见下)
-└── build/             # 编译产物与最终输出 (build/output/)
+qpi-h1/
+├── kernel/               # 内核源码 (QCOM 6.6.116) + 编译产物
+├── overlay/              # ★ 增量预置目录 (应用层文件覆盖; 目录结构 == 镜像内路径)
+├── prebuilds/            # 预构建镜像
+│   ├── system.img        #   原始根文件系统镜像 (BTRFS, 只读基准)
+│   ├── efi.bin           #   启动分区底包 (FAT, UKI 所在)
+│   ├── dtb.bin           #   设备树分区底包 (FAT)
+│   ├── base_rootfs/      #   system.img 解出的基准目录 (可复现打包)
+│   └── sysroot/          #   system.img 解出的应用编译 sysroot
+├── tools/                # ★ 工具与脚本
+│   ├── build-kernel.sh   #   内核编译打包 (kernel/boot/all/check/clean)
+│   ├── build-rootfs.sh   #   应用层 overlay 打包 (extract/apply/repack/build/remove)
+│   ├── extract-sysroot.sh#   提取 sysroot (免 root, btrfs restore)
+│   ├── environment-setup.sh  # 交叉编译环境
+│   └── cmake/            #   CMake toolchain
+├── scripts/              # 底层实现脚本 (build-kernel/pack-efi/pack-dtb/install-app)
+├── toolchains/           # 工具链
+│   └── qcom-rootfs-toolchain/  # 应用交叉编译 qemu wrapper (sysroot 内 gcc-14)
+├── hooks/                # pre-pack hooks (打包前镜像内容调整)
+├── skills/               # AI skills (simple-h1-build / simple-h1-flash)
+├── docs/                 # 文档 (templates 参考)
+├── build.sh              # source 后注册 build* 命令，并导出交叉编译变量
+└── Makefile              # 顶层便捷入口
 ```
 
-## 与 QPi-SDK (M2) 命令兼容（推荐入口）
-
-本 SDK 提供与 QPi-SDK (M2, RK3576) **同一套命令**的兼容层，两套 SDK 命令/脚本通用，
-无需记忆两套用法（以 M2 为准，不改 M2，simple-h1 向上兼容）：
+## 推荐入口：source build.sh
 
 ```bash
-source build.sh          # 与 M2 的 build.sh 同款: 注册命令 + 打印帮助
+cd <SDK_ROOT>
+source build.sh
 
-newapp myapp             # 从模板创建应用 (docs/templates/, 创建到 apps/)
-buildapp apps/myapp      # 编译应用 (自动识别 Makefile/CMake)
-buildcheck               # 环境检查
-buildkernel              # 编译内核 (Image + dtb + modules)
-buildboot                # 打包启动镜像 (efi.bin + dtb.bin)
-buildoverlays            # 设备树 overlays 说明 (simple-h1 为预置 dtbo)
-buildrootfs              # 应用 overlay/ → build/output/system.img
-buildall                 # 完整打包 (内核 + efi.bin + dtb.bin + system.img)
-buildmenuconfig          # 内核 menuconfig
-builddefconfig           # 恢复基准配置
-buildclean               # 清理构建产物
+newapp myapp           # 从模板创建应用
+buildapp apps/myapp    # 编译应用
+buildcheck             # 环境检查
+buildkernel            # 编译内核
+buildboot              # 打包启动镜像 (efi.bin + dtb.bin)
+buildoverlays          # 设备树 overlays
+buildrootfs            # 打包 system.img (base + overlay)
+buildall               # 完整打包 (内核 + 启动镜像 + system.img)
+buildmenuconfig        # 内核 menuconfig
+buildclean             # 清理构建产物
 ```
 
-或使用顶层 Makefile（目标集与 M2 一致）：
+`source build.sh` 会导出 `SYSROOT`、`TOOLCHAIN`、`CMAKE_TOOLCHAIN_FILE`、`CROSS_COMPILE`、`CC/CXX` 等变量，后续进入 app 工程可直接 `make` 或运行 CMake。
+
+H1 应用开发默认使用 `toolchains/qcom-rootfs-toolchain/`：它通过 qemu/binfmt 运行 `prebuilds/sysroot` 内的 Debian GCC 14.2 + binutils，与 system.img 内的 glibc 完全匹配。内核编译使用 `aarch64-qcom-linux` 13.4 工具链（位于 `toolchains/gcc/`，独立分发，需自行放置）。
+
+## 功能 1：内核编译打包
 
 ```bash
-make check               # 环境检查
-make kernel              # 编译内核
-make all                 # 完整打包 (应用层改动: SKIP_KERNEL=1 make all)
-make rootfs              # 打包 system.img
-make clean               # 清理
+# 修改内核源码后编译
+./tools/build-kernel.sh kernel      # 编译内核 (Image + dtb + modules)
+./tools/build-kernel.sh boot        # 打包启动镜像 (efi.bin + dtb.bin)
+./tools/build-kernel.sh all         # 完整: 内核 + 启动镜像 + system.img
+./tools/build-kernel.sh check       # 环境检查
+./tools/build-kernel.sh clean       # 清理
+
+# 或使用顶层 Makefile（内部同样 source build.sh）
+make check
+make kernel
+make all
+make clean
+
+# 产物
+build/output/efi.bin                # 启动镜像 (UKI: Image + dtb + initramfs)
+build/output/dtb.bin                # 设备树 (combined-dtb.dtb)
+build/output/system.img             # 根文件系统 (base + overlay 重新打包)
 ```
 
-脚本路径也兼容 M2 形态：
+**ko 驱动**：编译的内核模块（`.ko`）放到 `overlay/` 对应路径（如 `overlay/lib/modules/6.6.116-qli-1.7-ver.1.1/updates/`），打包时随 system.img 安装。
+
+## 功能 2：应用层自定义开发
 
 ```bash
-./tools/build-kernel.sh check|kernel|boot|overlays|all|clean|menuconfig|defconfig|savedefconfig
-./tools/build-rootfs.sh check|apply|remove|extract|repack|clean
-source tools/environment-setup.sh     # 等价于 source scripts/env.sh
+# 把客户自定义文件放进 overlay/ (目录结构 == 镜像内路径)
+# 例: overlay/etc/xxx.conf → /etc/xxx.conf; overlay/usr/local/bin/app → /usr/local/bin/app
+
+# 打包 system.img (目录级可复现: base + overlay → staging → 全新生成, 免 root)
+./tools/build-rootfs.sh build               # = apply + repack → build/output/system.img
+./tools/build-rootfs.sh apply               # 合成 staging (base + overlay + hooks)
+./tools/build-rootfs.sh repack              # staging → system.img (fakeroot + btrfs)
+./tools/build-rootfs.sh extract             # 一次性: system.img → prebuilds/base_rootfs
+./tools/build-rootfs.sh remove /opt/xxx     # 登记删除 (overlay-remove.list)
 ```
 
-> 命令内部映射到 `scripts/` 原生实现；`./scripts/*.sh` 直接调用仍然可用。
-> 差异说明: M2 产物为 FIT boot.img + ext4 rootfs.img；simple-h1 产物为
-> efi.bin (UKI) + dtb.bin + BTRFS system.img。两边的 buildrootfs apply 都
-> 是"overlay → 新镜像"，remove 在 M2 直接删镜像文件、在 simple-h1 登记到
-> overlay-remove.list（下次打包生效）。
-
-## system.img 可复现打包模型 (目录级, 免挂载修改)
-
-simple-h1 的 system.img 采用**目录级可复现**模型 (与 M2 的
-extract/apply/repack 对齐), 不直接挂载修改镜像:
-
-```
-prebuilds/base_rootfs/   ← 基准目录 (从原始 system.img 提取一次, 只读)
-     │  cp --reflink (每次构建)
-     ▼
-build/rootfs-staging/    ← base + overlay + 删除清单 + hooks (目录操作, 免 root)
-     │  fakeroot + mkfs.btrfs --rootdir
-     ▼
-build/output/system.img  ← 全新生成 (内容由 base+overlay 决定, 可复现)
-```
-
-命令:
+## 环境
 
 ```bash
-./tools/build-rootfs.sh extract   # 一次性: system.img → prebuilds/base_rootfs
-./tools/build-rootfs.sh apply     # base + overlay → build/rootfs-staging (免 root)
-./tools/build-rootfs.sh repack    # staging → system.img (fakeroot 保属主)
-./tools/build-rootfs.sh build     # = apply + repack  (buildrootfs 同)
+# 交叉编译环境，推荐 source 顶层 build.sh
+source build.sh
+# 或 CMake 工程: -DCMAKE_TOOLCHAIN_FILE=tools/cmake/aarch64-qcom-rootfs-toolchain.cmake
 ```
 
-要点:
-- base_rootfs 提取: 有 sudo 走 mount+rsync (保真属主); 无 sudo 走 btrfs restore (免 root)
-- overlay/ 与 hooks/ 在目录级应用, 全程免 root (hooks 的 IMG_MNT=staging)
-- 打包用 fakeroot 伪装属主 + mkfs.btrfs --rootdir, UUID 固定为原镜像 UUID
-- 镜像大小: 默认按原镜像 (SYSTEM_IMG_SIZE 可调); 注意 btrfs-progs 5.16 的
-  --rootdir 会按内容自动扩展 (9.2GB 内容 → ~16.7GB 镜像), 若需严格控大小
-  请用新版 btrfs-progs (≥6.x, -b 参数对 rootdir 生效)
-- 旧挂载模型保留在 scripts/pack-system.sh (legacy, 需要 root)
+Makefile 示例默认按当前目录结构查找 `prebuilds/sysroot` 和 `toolchains/`。
 
-## 快速开始
+应用工具链选择顺序：`QPI_CROSS_COMPILE` 显式指定 > SDK 内置 qcom-rootfs-toolchain (qemu wrapper) > 宿主 `aarch64-linux-gnu-`。普通应用建议保持默认。sysroot 缺失时先执行 `./tools/extract-sysroot.sh`（从 system.img 提取，免 root，符号链接原生保留）。
 
-### 0. 环境
+## 烧录
 
 ```bash
-cd simple-h1
-source scripts/env.sh          # 设置环境 (工具链 PATH、版本号等)
+./scripts/flash.sh        # 自动: adb shell reboot edl → 9008 → qdl (UFS)
 ```
 
-> 编译内核需要: `make`、`bc`、`bison`、`flex`、`libssl-dev`、`libelf-dev` 等宿主工具
-> 打包镜像需要: `sudo` (挂载 loop 镜像)、`rsync`、`fdtoverlay` (dtc 包)
-> 脚本会提示输入 sudo 密码; 若需免交互, 可先 `sudo -v` 缓存凭证
+## AI Skills
 
-### 1. 编译内核 (可选, 已内置官方 .config)
+`skills/` 提供 SKILL.md 技能包（AI 助手按关键词自动加载）：
+- `simple-h1-build`：内核编译打包 + overlay 文件系统定制
+- `simple-h1-flash`：EDL 模式烧录
+
+## 应用开发（创建 + 编译）
+
+### 方式 A：用 SDK 命令（推荐）
 
 ```bash
-./scripts/build-kernel.sh          # 编译 Image + dtb + modules
-./scripts/build-kernel.sh clean    # 清理后重新编译
+cd <SDK_ROOT>
+source build.sh
+
+# 1. 创建应用（从 hello 模板复制，已替换项目名/打印内容）
+newapp myapp
+
+# 2. 编译应用（自动识别 Makefile/CMake，产出 aarch64 可执行文件）
+buildapp apps/myapp
+
+# 3. 安装到 overlay (随 system.img 打包)
+./scripts/install-app.sh apps/myapp
+
+# 4. 重新打包
+buildrootfs     # 或 SKIP_KERNEL=1 buildall
 ```
 
-产物:
-- `build/kernel/arch/arm64/boot/Image` — 内核二进制
-- `build/kernel/arch/arm64/boot/dts/qcom/qcs6490-idp-pi.dtb` — 设备树
-- `build/modules-staging/lib/modules/6.6.116-qli-1.7-ver.1.1/` — ko 驱动
+指定模板：`newapp myapp hello`。模板位于 `docs/templates/`。
 
-### 2. 修改 overlay (应用层自定义)
-
-在 `overlay/` 下按根文件系统路径放置文件，例如:
-
-```
-overlay/
-├── usr/local/bin/myapp          # 自定义应用
-├── etc/systemd/system/myapp.service
-├── lib/modules/6.6.116-qli-1.7-ver.1.1/updates/my_driver.ko   # 自定义 ko
-└── overlay-remove.list          # (可选) 要删除的文件清单, 每行一个路径
-```
-
-**从源码安装应用** (github 开源项目等):
+### 方式 B：Makefile
 
 ```bash
-# 将项目源码放入 apps/<app>/, 要求含 Makefile (install 目标)
-./scripts/install-app.sh apps/myapp            # make install DESTDIR=overlay/usr/local
-./scripts/install-app.sh apps/myapp PREFIX=/opt/myapp
+make newapp NAME=myapp          # 创建
+make app DIR=apps/myapp         # 编译
 ```
 
-### 3. 全量打包
+### 方式 C：手动创建
+
+在任意目录建 `main.c` + `Makefile`（参考 `docs/templates/hello/`），然后：
 
 ```bash
-SKIP_KERNEL=1 ./scripts/build-all.sh   # 只打包镜像 (推荐日常使用)
-./scripts/build-all.sh                 # 完整流程 (含内核编译)
+cd <SDK_ROOT>
+source build.sh
+buildapp <你的工程目录>
 ```
 
-输出到 `build/output/`:
-- `efi.bin` — 启动分区 (UKI: 内核 Image + dtb + initramfs)
-- `dtb.bin` — 设备树分区 (combined-dtb.dtb)
-- `system.img` — 根文件系统 (已合并 overlay)
-
-### 4. 烧录
-
-```bash
-./scripts/flash.sh        # 自动: adb shell reboot edl -> 9008 -> qdl 烧录 (UFS)
+```c
+// main.c 示例
+#include <stdio.h>
+int main(void) {
+    printf("Hello from my app!\n");
+    return 0;
+}
 ```
 
-## 内核版本
+```makefile
+# Makefile 示例 (source build.sh 后 CC/CFLAGS 已由 SDK 导出)
+TARGET = myapp
+all: $(TARGET)
+$(TARGET): main.c
+	$(CC) $(CFLAGS) $< -o $@ $(LDFLAGS)
+clean:
+	rm -f $(TARGET)
+```
 
-- 内核: `6.6.116` (QCOM quectel 定制源码, 位于 `kernel/`)
-- 版本串: `6.6.116-qli-1.7-ver.1.1` (与官方固件一致, 见 `scripts/env.sh`)
-- 外置驱动 (rt6801/yt6801、wlan/qca6490 等) 不随内核编译, 直接以 ko 形式预置在 overlay
+## 详细文档
 
-## 与原生 SDK 的差异
-
-| 项目 | 原生 SDK | simple-h1 |
-|------|---------|-----------|
-| 构建系统 | Yocto/bitbake | 纯 make + 脚本 |
-| 内核编译 | bitbake virtual/kernel | `build-kernel.sh` (独立交叉工具链) |
-| 启动镜像 | esp-qcom-image (vfat) | ukify 打包 UKI → 更新 efi.bin |
-| 应用定制 | recipe/IMAGE_INSTALL | overlay 文件合并 (rsync) |
-| 依赖 | 40G+ 源码/缓存 | 源码 1.6G + 原始镜像 14G |
+- `tools/build-kernel.sh` — 内核打包脚本 (查看头部注释)
+- `tools/build-rootfs.sh` — 应用层打包脚本 (查看头部注释)
+- `hooks/README.md` — pre-pack hooks 机制说明
+- `skills/` — AI 技能包说明
