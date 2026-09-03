@@ -4,8 +4,9 @@ overlay/usr/local/bin/hello-h1
 overlay/usr/local/share/
 *.o
 *.ko~
-*.ko
 apps/hello-h1/hello-h1
+# 注意: overlay/lib/modules/ 下的 .ko 是厂商预置驱动 (SDK 输入资源, 入库),
+#       不在此排除; 内核编译产物在 build/ (O= 输出) 已整体忽略
 
 # 原始固件镜像 (超大二进制, 不入库; 由厂商发布/单独分发)
 prebuilds/
