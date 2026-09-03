@@ -1,0 +1,105 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+
+/ {
+	vcc_3v3_en0: vcc-3v3-en0 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_3v3_en0";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		enable-active-high;
+		regulator-boot-on;
+		regulator-always-on;
+		gpios = <&gpio3 RK_PA0 GPIO_ACTIVE_HIGH>;
+		vin-supply = <&vcc_3v3_s0>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&vcc_3v3_en0_gpio>;
+	};
+
+	vcc_3v3_en1: vcc-3v3-en1 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_3v3_en1";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		enable-active-high;
+		regulator-boot-on;
+		regulator-always-on;
+		gpios = <&gpio3 RK_PA1 GPIO_ACTIVE_HIGH>;
+		vin-supply = <&vcc_3v3_s0>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&vcc_3v3_en1_gpio>;
+	};
+
+	vcc_3v3_en2: vcc-3v3-en2 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_3v3_en2";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		enable-active-high;
+		regulator-boot-on;
+		regulator-always-on;
+		gpios = <&gpio3 RK_PA2 GPIO_ACTIVE_HIGH>;
+		vin-supply = <&vcc_3v3_s0>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&vcc_3v3_en2_gpio>;
+	};
+};
+
+&vcc_avdd_csi0 {
+	gpio = <&gpio0 RK_PB0 GPIO_ACTIVE_HIGH>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&vcc_avdd_csi0_en>;
+	vin-supply = <&vcc_3v3_s3>;
+};
+
+&vcc_iovdd {
+	gpio = <&gpio0 RK_PB1 GPIO_ACTIVE_HIGH>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&vcc_iovdd_en>;
+	vin-supply = <&vcc_3v3_s3>;
+};
+
+&sdio_pwrseq{
+	reset-gpios = <&gpio3 RK_PD0 GPIO_ACTIVE_LOW>;
+};
+
+&wireless_wlan{
+	//WIFI,poweren_gpio = <&gpio3 RK_PD0 GPIO_ACTIVE_HIGH>;
+};
+
+&wireless_bluetooth{
+	BT,reset_gpio    = <&gpio3 RK_PC5 GPIO_ACTIVE_HIGH>;
+};
+
+&pinctrl {
+	vcc_3v3_en {
+		vcc_3v3_en0_gpio:vcc-3v3-en0-gpio{
+			rockchip,pins = <3 RK_PA0 RK_FUNC_GPIO &pcfg_pull_down>;
+		};
+
+		vcc_3v3_en1_gpio:vcc-3v3-en1-gpio{
+			rockchip,pins = <3 RK_PA1 RK_FUNC_GPIO &pcfg_pull_down>;
+		};
+
+		vcc_3v3_en2_gpio:vcc-3v3-en2-gpio{
+			rockchip,pins = <3 RK_PA2 RK_FUNC_GPIO &pcfg_pull_down>;
+		};
+	};
+
+	cam_en{
+		vcc_iovdd_en: vcc-iovdd-en {
+			rockchip,pins =
+				<0 RK_PB1 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		vcc_avdd_csi0_en: vcc-avdd-csi0-en {
+			rockchip,pins =
+				<0 RK_PB0 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	wireless-wlan {
+		wifi_poweren_gpio: wifi-poweren-gpio {
+			rockchip,pins = <3 RK_PD0 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
+};

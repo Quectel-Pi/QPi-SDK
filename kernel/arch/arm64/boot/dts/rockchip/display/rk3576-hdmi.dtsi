@@ -1,0 +1,168 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+#include <dt-bindings/gpio/gpio.h>
+/*
+ * RK3576 原生 HDMI 显示配置。
+ *
+ * 当板级 DTS/DTSI 默认显示输出使用 RK3576 HDMI TX 通路时，
+ * include 本文件。
+ */
+
+&display_subsystem {
+	status = "okay";
+	clocks = <&hdptxphy_hdmi>;
+	clock-names = "hdmi0_phy_pll";
+	memory-region = <&drm_logo>, <&drm_cubic_lut>;
+	memory-region-names = "drm-logo", "drm-cubic-lut";
+	/* devfreq = <&dmc>; */
+};
+
+/ {
+	vcc_hdmi_m2: vcc-hdmi-m2 {
+		status = "okay";
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_hdmi_m2";
+		regulator-boot-on;
+		regulator-always-on;
+		/* AW9535 P00：HDMI&M.2_VDD_EN，高电平打开 HDMI/M.2 相关供电。 */
+		gpio = <&aw9535_gpio 0 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+};
+
+&leds {
+	/* GPIO0_B4 已作为 pcie0 reset-gpios 使用，禁用 EVB 默认心跳灯，避免 leds-gpio probe -EBUSY。 */
+	work_led: work {
+		status = "disabled";
+	};
+
+	m2_b_rst: m2-b-rst {
+		gpios = <&aw9535_gpio 2 GPIO_ACTIVE_HIGH>;
+		/* AW9535 P02：M.2-B_RST 默认低；brightness=1 输出高复位 M.2-B。 */
+		default-state = "off";
+	};
+
+	m2_b_en: m2-b-en {
+		gpios = <&aw9535_gpio 4 GPIO_ACTIVE_HIGH>;
+		/* AW9535 P04：M.2-B_EN 默认高；brightness=0 关电后可触发 PCIe re-training。 */
+		default-state = "on";
+	};
+};
+
+&hdmi {
+	status = "okay";
+	pinctrl-names = "default";
+	/*
+	 * GPIO4_C0 原 SoC 默认 HDMI_CEC 复用，本板改作 HDMI/eDP 选择 GPIO；
+	 * GPIO4_C1 单独保留 HDMI HPD 输入功能；
+	 * HDMI_TX_SCL / HDMI_TX_SDA 已在 rk3576-pinctrl.dtsi 中独立定义，这里直接引用即可。
+	 */
+	pinctrl-0 = <&switch_he_gpio &hdmi_tx_hpdin_m0 &hdmi_tx_scl &hdmi_tx_sda>;
+	/*
+	 * HDMI_EDP_CTL / HDMI_DISP_SEL:
+	 * GPIO4_C0 默认输出高选择 HDMI，输出低选择 eDP。
+	 * 该引脚与 HDMI_CEC 复用，本板用于 HDMI/eDP 显示通道选择。
+	 */
+	switch-he-gpios = <&gpio4 RK_PC0 GPIO_ACTIVE_HIGH>;
+	/* GPIO4_C0 已用于 HDMI/eDP 显示通道选择，不启用 HDMI CEC。 */
+	/* HDMI/M.2 供电由 vcc_hdmi_m2 常开电源管理，不在 HDMI 驱动内重复占用。 */
+	rockchip,sda-falling-delay-ns = <360>;
+};
+
+&i2c7 {
+	status = "okay";
+	pinctrl-names = "default";
+	/* SMARC 底板 AW9535 使用 I2C7 M1 引脚组。 */
+	pinctrl-0 = <&i2c7m1_xfer>;
+
+	aw9535_gpio: gpio@27 {
+		compatible = "nxp,pca9535";
+		status = "okay";
+		reg = <0x27>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		gpio-line-names =
+			"HDMI_M2_VDD_EN",
+			"DP_VDD_EN",
+			"M2_B_RST",
+			"HOST_WAKE_BT",
+			"BT_WAKE_HOST",
+			"WLAN_WAKE_HOST",
+			"HOST_WAKE_WLAN",
+			"CHIP_EN",
+			"GPIO1",
+			"GPIO2",
+			"GPIO3",
+			"GPIO4",
+			"GPIO5",
+			"GPIO6",
+			"GPIO7",
+			"GPIO8";
+	};
+};
+
+&pinctrl {
+	hdmi {
+		switch_he_gpio: switch-he-gpio {
+			rockchip,pins =
+				/* HDMI_EDP_CTL / HDMI_DISP_SEL：高电平选择 HDMI，低电平选择 eDP */
+				<4 RK_PC0 RK_FUNC_GPIO &pcfg_output_high>;
+		};
+
+		hdmi_tx_hpdin_m0: hdmi-tx-hpdin-m0 {
+			rockchip,pins =
+				/* HDMI 热插拔检测脚 HPD，保留 GPIO4_C1 的 HDMI HPD 复用功能 */
+				<4 RK_PC1 9 &pcfg_pull_none>;
+		};
+	};
+};
+
+&vp0 {
+	status = "okay";
+};
+
+&hdptxphy_hdmi {
+	status = "okay";
+};
+
+&hdmi_in_vp0 {
+	status = "okay";
+};
+
+&hdmi_in_vp1 {
+	status = "disabled";
+};
+
+&hdmi_in_vp2 {
+	status = "disabled";
+};
+
+&route_hdmi {
+	status = "okay";
+	logo,uboot = "quectel_720p.bmp";
+	logo,kernel = "quectel_720p_kernel.bmp";
+	connect = <&vp0_out_hdmi>;
+};
+
+&edp {
+	status = "disabled";
+};
+
+&edp_in_vp0 {
+	status = "disabled";
+};
+
+&edp_in_vp1 {
+	status = "disabled";
+};
+
+&edp_in_vp2 {
+	status = "disabled";
+};
+
+&route_edp {
+	status = "disabled";
+};
+
+&hdptxphy {
+	status = "disabled";
+};

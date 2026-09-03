@@ -1,0 +1,4 @@
+/* #include "dsi-panel-ili9881d-720p-video.dtsi"
+#include "dsi-panel-NV3052-720p-vido.dtsi" */
+// #include "dsi-panel-waveshare-8inch-c.dtsi"
+// #include "rk3576-hdmi.dtsi"

@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Motorcomm device configuration
+#
+
+config NET_VENDOR_MOTORCOMM
+	bool "Motorcomm devices"
+	default y
+	depends on PCI
+	help
+	  If you have a network (Ethernet) card belonging to this class, say Y.
+
+	  Note that the answer to this question doesn't directly affect the
+	  kernel: saying N will just cause the configurator to skip all
+	  the questions about Motorcomm devices. If you say Y, you will be
+	  asked for your specific card in the following questions.
+
+if NET_VENDOR_MOTORCOMM
+
+config YT6801
+	tristate "Motorcomm YT6801 PCI Express Gigabit Ethernet support"
+	depends on PCI
+	select CRC32
+	select PHYLIB
+	select MOTORCOMM_PHY
+	help
+	  Say Y here if you have a Motorcomm YT6801 PCI-Express Gigabit
+	  Ethernet adapter.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called yt6801.
+
+endif # NET_VENDOR_MOTORCOMM

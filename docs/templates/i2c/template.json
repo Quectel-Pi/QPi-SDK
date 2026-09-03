@@ -1,0 +1,45 @@
+{
+  "id": "i2c",
+  "name": "I2C 传感器读写",
+  "icon": "🔬",
+  "tag": "I2C",
+  "category": "外设",
+  "description": "通过 I2C 总线扫描设备并读写寄存器。可用于 GT911 触摸（I2C0@0x14）、背光（I2C0@0x45）、各类 I2C 传感器。",
+  "expected": "扫描到总线上的设备地址列表；对指定地址读取寄存器值并打印。",
+  "difficulty": 2,
+  "peripherals": [
+    "I2C",
+    "GT911",
+    "传感器"
+  ],
+  "files": [
+    "main.c",
+    "CMakeLists.txt"
+  ],
+  "variables": {
+    "PROJECT_NAME": {
+      "label": "项目名称",
+      "type": "text",
+      "default": "i2c_scan",
+      "hint": "仅限字母、数字、下划线"
+    },
+    "I2C_BUS": {
+      "label": "I2C 总线号",
+      "type": "text",
+      "default": "0",
+      "hint": "GT911 触摸/背光在 i2c0；板子上 ls /dev/i2c-* 查看"
+    },
+    "DEV_ADDR": {
+      "label": "设备地址 (0x..)",
+      "type": "text",
+      "default": "0x14",
+      "hint": "GT911=0x14, 背光=0x45; 留空则只扫描不读写"
+    },
+    "REG_ADDR": {
+      "label": "寄存器地址",
+      "type": "text",
+      "default": "0xba",
+      "hint": "要读取的寄存器, 例如 GT911 的 ID 寄存器 0xba"
+    }
+  }
+}

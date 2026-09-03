@@ -1,0 +1,8 @@
+# 本文件用于让 git 跟踪空目录（空目录无法直接上传到 git）。
+#
+# docs/examples/ 存放应用示例工程：
+#   - docs/examples/hello/          基础 hello world
+#   - docs/examples/hello-module/   内核模块示例
+#   - docs/examples/myapp_1/        自定义应用示例
+#
+# 实际工程文件编译生成时会产生 build/ 目录及产物，已被 .gitignore 忽略。

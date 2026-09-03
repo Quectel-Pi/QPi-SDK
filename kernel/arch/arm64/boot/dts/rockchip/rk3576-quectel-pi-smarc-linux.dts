@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Quectel SMARC SH603ZA (RK3576) — Linux boot DTS
+ *
+ * Hardware: rk3576-quectel-pi-smarc-linux.dtsi → rk3576-quectel-pi-common.dtsi
+ * Keep only Linux-specific system-level overrides in this file.
+ */
+
+/dts-v1/;
+
+#include "rk3576.dtsi"
+#include "rk3576-linux.dtsi"
+#include "rk3576-quectel-pi-smarc-linux.dtsi"
+
+/ {
+	model = "Quectel PI SMARC RK3576 Board";
+	compatible = "quectel,pi-smarc-rk3576", "rockchip,rk3576";
+};

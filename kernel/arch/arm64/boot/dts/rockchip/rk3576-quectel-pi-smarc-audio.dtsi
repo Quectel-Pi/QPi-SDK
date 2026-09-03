@@ -1,0 +1,122 @@
+/{
+    es8389_sound: es8389-sound {
+		status = "okay";
+		compatible = "rockchip,multicodecs-card";
+		rockchip,card-name = "rockchip-es8389";
+
+		// hp-det-gpio = <&gpio2 RK_PB7 GPIO_ACTIVE_LOW>;  // GPIO2_B7 used for UART8 CTS
+		io-channels = <&saradc 3>;
+		io-channel-names = "adc-detect";
+		keyup-threshold-microvolt = <1800000>;
+		poll-interval = <100>;
+		//spk-con-gpio = <&gpio2 RK_PD7 GPIO_ACTIVE_HIGH>;
+		//hp-con-gpio = <&gpio3 RK_PD6 GPIO_ACTIVE_HIGH>;
+		rockchip,pre-power-on-delay-ms = <30>;
+		rockchip,post-power-down-delay-ms = <40>;
+		rockchip,format = "i2s";
+		rockchip,mclk-fs = <256>;
+		rockchip,cpu = <&sai1>;
+		rockchip,codec = <&es8389>;
+		// pinctrl-names and pinctrl-0 removed: hp-det GPIO disabled due to UART8 CTS conflict
+		play-pause-key {
+			label = "playpause";
+			linux,code = <KEY_PLAYPAUSE>;
+			press-threshold-microvolt = <2000>;
+		};
+	};
+
+    pdmics: dummy-codec {
+		status = "disabled";
+		compatible = "rockchip,dummy-codec";
+		#sound-dai-cells = <0>;
+	};
+
+	pdm_mic_array: pdm-mic-array {
+		status = "disabled";
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "rockchip,pdm-mic-array";
+		simple-audio-card,cpu {
+			sound-dai = <&pdm1>;
+		};
+		simple-audio-card,codec {
+			sound-dai = <&pdmics>;
+		};
+	};
+
+    // codec_vdd3v3 regulator disabled: GPIO3_B0 used for USB_PCIE_CTL on SMARC board
+    // speak_pa_en regulator disabled: GPIO2_D7 used for Ethernet on SMARC board
+};
+
+&i2c7 {
+	status = "okay";
+	clock-frequency = <100000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c7m1_xfer>;  // Try i2c7m0 first: GPIO1_B0(SCL) + GPIO1_B3(SDA)
+	es8389: es8389@12 {
+		status = "okay";
+		#sound-dai-cells = <0>;
+		compatible = "everest,es8389";
+        // vdd_3v3-supply = <&codec_vdd3v3>;  // codec_vdd3v3 disabled on SMARC board
+		reg = <0x12>;
+		clocks = <&mclkout_sai1>;
+		clock-names = "mclk";
+		assigned-clocks = <&mclkout_sai1>;
+		assigned-clock-rates = <12288000>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&sai1m0_mclk>;
+	};
+};
+
+
+
+&es8389_sound {
+	// hp-det-gpio = <&gpio2 RK_PB7 GPIO_ACTIVE_LOW>;  // GPIO2_B7 used for UART8 CTS
+	io-channels = <&saradc 4>;
+	io-channel-names = "adc-detect";
+	keyup-threshold-microvolt = <595000>;
+	poll-interval = <100>;
+    play-pause-key {
+            label = "playpause";
+            linux,code = <KEY_PLAYPAUSE>;
+            press-threshold-microvolt = <33000>;
+    };
+               
+    vol-up-key {
+            label = "vol_up";
+            linux,code = <KEY_VOLUMEUP>;
+            press-threshold-microvolt = <110000>;
+    };
+     vol-down-key {
+             label = "vol_down";
+             linux,code = <KEY_VOLUMEDOWN>;
+             press-threshold-microvolt = <195000>;
+    };	
+};
+
+&pinctrl {
+	// Minimal configuration - I2C7 pinctrl is handled by &i2c7m0_xfer reference
+	// All other pinctrl entries removed due to GPIO conflicts on SMARC board:
+	// - GPIO2_B7 (hp-det) used for UART8 CTS
+	// - GPIO2_D7 (speak_pa_en) used for Ethernet
+	// - GPIO3_B0 (codec_vdd3v3) used for USB_PCIE_CTL
+};
+
+&sai1 {
+    status = "okay";
+    pinctrl-names = "default";
+    rockchip,sai-tx-route = <2 1 0 3>;
+    //rockchip,sai-rx-route = <0 1 2 3>;  // 标准RX路由：SDI0→Slot0, SDI1→Slot1, SDI2→Slot2, SDI3→Slot3
+    pinctrl-0 = <&sai1m0_lrck
+             &sai1m0_sclk
+             &sai1m0_sdi0
+             &sai1m0_sdo2>;
+};
+
+&hdmi_sound {
+	status = "okay";
+};
+
+&sai6 {
+	status = "okay";
+	rockchip,sai-tx-route = <0 1 2 3>;
+};

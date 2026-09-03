@@ -1,0 +1,14 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "quectel,pi-m2-rk3576";
+
+	fragment@0 {
+		target-path = "/pwm@2ade3000";
+
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+};

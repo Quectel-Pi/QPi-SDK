@@ -1,0 +1,8 @@
+config PCIE_MHI_QUECTEL
+	bool "Quectel PCIe MHI driver (V1.3.7)"
+	default y
+	help
+	  Quectel out-of-tree PCIe MHI host driver (V1.3.7).
+	  Produces /dev/mhi_QMI0, rmnet_mhi0 etc. for RM520N-GL.
+	  This driver's bus type name is "mhi_q"; it does NOT conflict
+	  with mainline CONFIG_MHI_BUS (bus name "mhi").

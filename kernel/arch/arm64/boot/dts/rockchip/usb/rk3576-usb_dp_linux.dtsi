@@ -1,0 +1,78 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	vcc_dp: vcc-dp {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_dp";
+		regulator-boot-on;
+		regulator-always-on;
+		/* AW9535 P01: DP_VDD_EN, high level enables DP port power. */
+		gpio = <&aw9535_gpio 1 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+};
+
+&dp {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&dp_hpd_gpio>;
+	hpd-gpios = <&gpio1 RK_PD0 GPIO_ACTIVE_HIGH>;
+};
+
+&dp0 {
+	status = "okay";
+};
+
+&route_dp0 {
+	status = "okay";
+	logo,uboot = "quectel_720p.bmp";
+	logo,kernel = "quectel_720p_kernel.bmp";
+	connect = <&vp2_out_dp0>;
+};
+
+&dp0_in_vp2 {
+	status = "okay";
+};
+
+&dp0_sound {
+	status = "okay";
+};
+
+&usbdp_phy {
+	/* Native DP only: remove Type-C DP Alt Mode dependencies on this board. */
+	/delete-property/ sbu1-dc-gpios;
+	/delete-property/ sbu2-dc-gpios;
+	/delete-property/ orientation-switch;
+	/delete-property/ svid;
+
+	/* Config 5: keep USB3 on lanes 0/1 and route native DP to lanes 2/3. */
+	rockchip,dp-lane-mux = <2 3>;
+	status = "okay";
+
+	/delete-node/ port;
+};
+
+&usbdp_phy_dp {
+	status = "okay";
+};
+
+&usbdp_phy_u3 {
+	status = "okay";
+};
+
+&usb_con0 {
+	/delete-property/ mode-switch;
+	/delete-node/ altmodes;
+	/delete-node/ ports;
+};
+
+&pinctrl {
+	dp {
+		dp_hpd_gpio: dp-hpd-gpio {
+			rockchip,pins =
+				/* DP_HPD: GPIO1_D0 */
+				<1 RK_PD0 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};

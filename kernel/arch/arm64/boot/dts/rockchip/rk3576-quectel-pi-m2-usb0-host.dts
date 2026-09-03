@@ -1,0 +1,29 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * rk3576-quectel-pi-m2-usb0-host overlay
+ *
+ * Switch usb_drd0_dwc3 (USB0) to host mode.
+ * Base dtsi default is dr_mode = "peripheral"; this overlay flips dr_mode
+ * to "host". The extcon / usb-role-switch properties already present on
+ * the node are harmless in host mode (dwc3 only consumes extcon in its
+ * OTG branch; see dwc3_core_init_mode() USB_DR_MODE_HOST case), so the
+ * overlay intentionally does not try to remove them (dtc 1.6.1 drops
+ * /delete-property/ inside __overlay__ anyway).
+ *
+ * Applied by U-Boot (qpi_apply_usb0_host) when the
+ * /etc/qpi-config/usb0_host marker file exists. Reboot to take effect.
+ */
+
+/ {
+	compatible = "quectel,pi-m2-rk3576";
+
+	fragment@0 {
+		target-path = "/usb@23000000";
+
+		__overlay__ {
+			dr_mode = "host";
+		};
+	};
+};

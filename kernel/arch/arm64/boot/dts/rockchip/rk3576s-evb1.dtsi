@@ -1,0 +1,134 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2024 Rockchip Electronics Co., Ltd.
+ *
+ */
+
+#include <dt-bindings/usb/pd.h>
+#include "rk3576s-evb.dtsi"
+#include "rk3576-rk806.dtsi"
+#include "usb/rk3576-usb.dtsi"
+#include "usb/rk3576-usb_dp.dtsi"
+#include "display/rk3576s-display.dtsi"
+#include "M.2_external/rk3576_M.2_wifibt.dtsi"
+#include "camera/rk3576-cam.dtsi"
+#include "rk3576-audio.dtsi"
+
+/ {
+	vcc_1v8_s0: vcc-1v8-s0 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_1v8_s0";
+		regulator-boot-on;
+		regulator-always-on;
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		vin-supply = <&vcc_1v8_s3>;
+	};
+
+	vcc_3v3_s0: vcc-3v3-s0 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_3v3_s0";
+		regulator-boot-on;
+		regulator-always-on;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		vin-supply = <&vcc_3v3_s3>;
+	};
+
+	vcc_ufs_s0: vcc-ufs-s0 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_ufs_s0";
+		regulator-boot-on;
+		regulator-always-on;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		vin-supply = <&vcc_sys>;
+	};
+
+	vcc1v8_ufs_vccq2_s0: vcc1v8-ufs-vccq2-s0 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc1v8_ufs_vccq2_s0";
+		regulator-boot-on;
+		regulator-always-on;
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		vin-supply = <&vcc_1v8_s3>;
+	};
+
+	vcc1v2_ufs_vccq_s0: vcc1v2-ufs-vccq-s0 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc1v2_ufs_vccq_s0";
+		regulator-boot-on;
+		regulator-always-on;
+		regulator-min-microvolt = <1200000>;
+		regulator-max-microvolt = <1200000>;
+		vin-supply = <&vcc_sys>;
+	};
+};
+
+&i2c2 {
+	status = "okay";
+		rtc@32 {
+			reg = <0x32>;
+			compatible = "epson,rx8130";
+			interrupt-parent = <&gpio0>;
+			interrupts = <RK_PA5 IRQ_TYPE_LEVEL_LOW>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&rx8130_gpio>;
+ 	};
+};
+
+&combphy0_ps {
+	status = "okay";
+};
+
+&pcie0 {
+	reset-gpios = <&gpio0 RK_PB4 GPIO_ACTIVE_HIGH>;
+	rockchip,skip-scan-in-resume;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pcie_wifi_rts>;
+	status = "okay";
+};
+
+&pdm1 {
+        status = "disabled";
+        pinctrl-names = "default";
+        pinctrl-0 = <&pdm1m1_clk0
+                     &pdm1m1_clk1
+                     &pdm1m1_sdi0
+                     &pdm1m1_sdi1
+                     &pdm1m1_sdi2
+                     &pdm1m1_sdi3>;
+};
+
+&pinctrl {
+		rx8130_gpio {
+			rx8130_gpio:rx8130_gpio{
+ 				rockchip,pins = <0 RK_PA5 RK_FUNC_GPIO &pcfg_pull_up>;
+ 		};
+ 	};
+	pcie_wifi_rts{
+		pcie_wifi_rts:pcie-wifi-rts{
+			rockchip,pins = <0 RK_PB4 RK_FUNC_GPIO &pcfg_pull_down>;
+		};
+	};
+};
+
+&sdmmc {
+	status = "okay";
+};
+
+&spdif_tx3 {
+	status = "okay";
+};
+
+&ufs {
+	vcc-supply = <&vcc_ufs_s0>;
+	vccq-supply = <&vcc1v2_ufs_vccq_s0>;
+	vccq2-supply = <&vcc1v8_ufs_vccq2_s0>;
+	status = "okay";
+};
+
+&vp0 {
+	status = "okay";
+};

@@ -1,0 +1,273 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Quectel PI common board hardware (shared between M2 and SMARC).
+ * Only put content that is byte-identical across both boards here.
+ * Any difference, no matter how small, stays in the platform-specific files.
+ *
+ * Copyright (c) 2024 Rockchip Electronics Co., Ltd.
+ *
+ */
+
+#include <dt-bindings/usb/pd.h>
+#include "rk3576-evb.dtsi"
+#include "rk3576-rk806.dtsi"
+#include "usb/rk3576-usb.dtsi"
+#include "usb/rk3576-usb_dp.dtsi"
+#include "display/rk3576-display.dtsi"
+#include "M.2_external/rk3576_M.2_wifibt.dtsi"
+#include "camera/rk3576-cam.dtsi"
+
+/ {
+	adc_keys_ch1:adc-keys-ch1{
+		compatible = "adc-keys";
+		io-channels = <&saradc 1>;
+		io-channel-names = "buttons";
+		keyup-threshold-microvolt = <1800000>;
+		poll-interval = <100>;
+
+		v_up_key:v-up-key{
+			label = "volume_up";
+			linux,code = <KEY_VOLUMEUP>;
+			press-threshold-microvolt = <45000>;
+		};
+	};
+
+	adc_keys_ch5:adc-keys-ch5{
+		compatible = "adc-keys";
+		io-channels = <&saradc 5>;
+		io-channel-names = "buttons";
+		keyup-threshold-microvolt = <1800000>;
+		poll-interval = <100>;
+
+		v_down_key:v-down-key{
+			label = "volume_down";
+			linux,code = <KEY_VOLUMEDOWN>;
+			press-threshold-microvolt = <45000>;
+		};
+	};
+
+	vcc_1v8_s0: vcc-1v8-s0 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_1v8_s0";
+		regulator-boot-on;
+		regulator-always-on;
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		vin-supply = <&vcc_1v8_s3>;
+	};
+
+	vcc_3v3_s0: vcc-3v3-s0 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_3v3_s0";
+		regulator-boot-on;
+		regulator-always-on;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		vin-supply = <&vcc_3v3_s3>;
+	};
+
+	vcc_ufs_s0: vcc-ufs-s0 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_ufs_s0";
+		regulator-boot-on;
+		regulator-always-on;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		vin-supply = <&vcc_sys>;
+	};
+
+	vcc1v8_ufs_vccq2_s0: vcc1v8-ufs-vccq2-s0 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc1v8_ufs_vccq2_s0";
+		regulator-boot-on;
+		regulator-always-on;
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		vin-supply = <&vcc_1v8_s3>;
+	};
+
+	vcc1v2_ufs_vccq_s0: vcc1v2-ufs-vccq-s0 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc1v2_ufs_vccq_s0";
+		regulator-boot-on;
+		regulator-always-on;
+		regulator-min-microvolt = <1200000>;
+		regulator-max-microvolt = <1200000>;
+		vin-supply = <&vcc_sys>;
+	};
+
+	/*vcc3v3_lcd_n: vcc3v3-lcd0-n {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc3v3_lcd0_n";
+		regulator-boot-on;
+		enable-active-high;
+		gpio = <&gpio0 RK_PC6 GPIO_ACTIVE_HIGH>;
+		vin-supply = <&vcc_3v3_s0>;
+	};*/
+
+	vcc3v3_pcie0: vcc3v3-pcie0 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc3v3_pcie0";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+		regulator-boot-on;
+		startup-delay-us = <5000>;
+		vin-supply = <&vcc_sys>;
+	};
+
+	vcc3v3_pcie1: vcc3v3-pcie1 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc3v3_pcie1";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		enable-active-high;
+		gpios = <&gpio4 RK_PA7 GPIO_ACTIVE_HIGH>;
+		regulator-always-on;
+		startup-delay-us = <5000>;
+		vin-supply = <&vcc_sys>;
+	};
+};
+
+&can0 {
+	assigned-clocks = <&cru CLK_CAN0>;
+	assigned-clock-rates = <150000000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&can0m2_pins>;
+	status = "okay";
+};
+
+&can1 {
+	assigned-clocks = <&cru CLK_CAN1>;
+	assigned-clock-rates = <150000000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&can1m2_pins>;
+	status = "disabled";
+};
+
+&combphy0_ps {
+	status = "okay";
+};
+
+/* combphy1_psu: USB1 3.0 与 PCIE1 共用的 SerDes PHY */
+&combphy1_psu {
+	status = "okay";
+};
+
+&i2c2 {
+	status = "okay";
+	rtc@32 {
+		reg = <0x32>;
+		compatible = "epson,rx8130";
+		/* GPIO0_A5 reused for SATA/PCIE0 MUX, interrupt and pinctrl disabled */
+	};
+};
+
+&mdio0 {
+	rgmii_phy0: phy@0 {
+		compatible = "ethernet-phy-ieee802.3-c22";
+		reg = <0x0>;
+		clocks = <&cru REFCLKO25M_GMAC0_OUT>;
+	};
+};
+
+&mipidcphy0 {
+	status = "disabled";
+};
+
+&pinctrl {
+	rx8130_gpio {
+		rx8130_gpio: rx8130_gpio {
+			rockchip,pins = <0 RK_PA5 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
+};
+
+/* SH603ZA has no USB-C DP Alt Mode circuit.
+ * usbdp_phy holds GPIO4_PC4 as sbu1-dc-gpios — the same pin that
+ * PCIe1 uses as reset-gpios. Disable it to release the GPIO.
+ */
+&usbdp_phy {
+	status = "disabled";
+};
+
+/* SH603ZA does not route these EVB-only peripherals */
+&adc_keys_ch1 {
+	status = "disabled";
+};
+
+&adc_keys_ch5 {
+	status = "disabled";
+};
+
+&pdm1 {
+	status = "disabled";
+	pinctrl-names = "default", "idle", "clk";
+	pinctrl-0 = <&pdm1m1_sdi0
+		     &pdm1m1_sdi1
+		     &pdm1m1_sdi2
+		     &pdm1m1_sdi3>;
+	pinctrl-1 = <&pdm1m1_clk0_idle
+		     &pdm1m1_clk1_idle>;
+	pinctrl-2 = <&pdm1m1_clk0
+		     &pdm1m1_clk1>;
+};
+
+&sdmmc {
+	status = "okay";
+};
+
+&spdif_tx3 {
+	status = "okay";
+};
+
+&ufs {
+	vcc-supply = <&vcc_ufs_s0>;
+	vccq-supply = <&vcc1v2_ufs_vccq_s0>;
+	vccq2-supply = <&vcc1v8_ufs_vccq2_s0>;
+	status = "okay";
+};
+
+&vp0 {
+	status = "disabled";
+};
+
+&vp1 {
+	status = "okay";
+};
+
+&sata0 {
+	status = "okay";
+};
+
+&spi1 {
+	status = "okay";
+
+	spidev@0 {
+		compatible = "rockchip,spidev";
+		reg = <0>;
+		spi-max-frequency = <12000000>;
+		status = "okay";
+	};
+};
+
+&i2c7 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c7m1_xfer>;
+	status = "okay";
+};
+
+&pwm0_2ch_0 {
+	status = "okay";
+	pinctrl-0 = <&pwm0m0_ch0>;
+};
+
+&pwm1_6ch_1 {
+	status = "okay";
+	pinctrl-0 = <&pwm1m0_ch1>;
+};
+
+&saradc {
+	status = "okay";
+	vref-supply = <&vcca_1v8_s0>;
+};

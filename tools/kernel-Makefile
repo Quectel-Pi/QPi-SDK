@@ -1,0 +1,87 @@
+# ============================================================================
+# Quectel M2 Kernel SDK - 内核便捷 Makefile
+#
+# 用法:
+#   make -f tools/kernel-Makefile menuconfig  # 在 SDK 根目录执行
+#   make menuconfig                           # 在 tools/ 目录执行
+#
+# 目标:
+#   make menuconfig         # 图形化配置内核 (Kernel Configuration TUI)
+#   make defconfig          # 恢复默认配置 (rockchip_linux_defconfig + fragments)
+#   make savedefconfig      # 把当前 .config 精简保存为 defconfig
+#   make kernel             # 仅编译内核
+#   make boot               # 仅生成 FIT boot.img
+#   make                    # 完整构建: 内核 + boot.img + update.img (等价 ./build.sh)
+#   make clean              # 清理构建产物
+#
+# 注意: 用 make menuconfig 修改配置后, 下次 make/build.sh 会保留你的定制
+#       (不会覆盖 .config)。如需重置, 执行 make defconfig。
+# ============================================================================
+
+export ARCH := arm64
+
+TOOLS_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+ROOT_DIR := $(abspath $(TOOLS_DIR)/..)
+
+# --- 自动检测交叉编译工具链 (位于 ../toolchains/) ---
+TC_SELF := $(ROOT_DIR)/toolchains/gcc-arm-10.3-2021.07-x86_64-aarch64-none-linux-gnu
+
+ifneq ($(wildcard $(TC_SELF)/bin/aarch64-none-linux-gnu-gcc),)
+export CROSS_COMPILE := $(TC_SELF)/bin/aarch64-none-linux-gnu-
+else
+export CROSS_COMPILE := aarch64-none-linux-gnu-
+endif
+
+export PATH := $(dir $(CROSS_COMPILE)):$(PATH)
+
+# --- 板级配置 (与 build.sh 保持一致) ---
+DEFCONFIG := rockchip_linux_defconfig
+# 与官方 M2 构建 (mk-kernel.sh do_make_kernel_config) 保持一致:
+#   芯片级 rk3576.config + defconfig fragments + RT 优化 + Panfrost GPU
+FRAGMENTS := rk3576.config cma.config quectel-pwm-fan.config rockchip-debug.config rockchip_rt.config rockchip_panfrost.config quectel-overlays.config
+DTS_NAME  := rk3576-quectel-pi-m2-linux
+KERNEL_DIR := $(ROOT_DIR)/kernel
+
+.PHONY: menuconfig defconfig savedefconfig kernel boot all clean help
+
+# 图形化配置: 首次自动加载默认配置, 已有 .config 则直接打开编辑
+menuconfig:
+	@cd $(KERNEL_DIR) && { [ -f .config ] || make $(DEFCONFIG) $(FRAGMENTS); } && \
+		make menuconfig
+	@echo ""
+	@echo "配置已保存到 kernel/.config"
+	@echo "  - 直接 make 或 ./build.sh 会保留你的定制配置"
+	@echo "  - 如需固化修改: make savedefconfig 生成精简 defconfig"
+
+# 恢复默认配置 (rockchip_linux_defconfig + fragments), 丢弃定制
+defconfig:
+	cd $(KERNEL_DIR) && make $(DEFCONFIG) $(FRAGMENTS)
+	@echo "已恢复默认配置"
+
+# 把当前 .config 精简为 defconfig, 输出到内核根目录
+savedefconfig:
+	cd $(KERNEL_DIR) && make savedefconfig
+	@echo "精简 defconfig 已生成: kernel/defconfig"
+	@echo "可对比 kernel/arch/arm64/configs/$(DEFCONFIG) 查看差异"
+
+kernel:
+	$(TOOLS_DIR)/build-kernel.sh kernel
+
+boot:
+	$(TOOLS_DIR)/build-kernel.sh boot
+
+all:
+	$(TOOLS_DIR)/build-kernel.sh all
+
+clean:
+	$(TOOLS_DIR)/build-kernel.sh clean
+
+help:
+	@echo "用法: make <目标>"
+	@echo "  menuconfig     图形化配置内核"
+	@echo "  defconfig      恢复默认配置"
+	@echo "  savedefconfig  保存当前配置为精简 defconfig"
+	@echo "  kernel         仅编译内核"
+	@echo "  boot           仅生成 FIT boot.img"
+	@echo "  (默认)         完整构建 update.img"
+	@echo "  clean          清理构建产物"

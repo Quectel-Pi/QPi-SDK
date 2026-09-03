@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+WRAPPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$WRAPPER_DIR/../../.." && pwd)"
+SYSROOT="${QPI_SYSROOT:-$ROOT_DIR/prebuilds/sysroot}"
+TOOL_NAME="${QPI_ROOTFS_TOOL_NAME:-$(basename "$0")}" 
+
+if [ ! -d "$SYSROOT" ]; then
+    echo "[$TOOL_NAME] sysroot not found: $SYSROOT" >&2
+    exit 127
+fi
+
+if [ ! -x "$SYSROOT/usr/bin/$TOOL_NAME" ]; then
+    echo "[$TOOL_NAME] tool not found in sysroot: $SYSROOT/usr/bin/$TOOL_NAME" >&2
+    exit 127
+fi
+
+if [ ! -r /proc/sys/fs/binfmt_misc/qemu-aarch64 ] || ! grep -q '^enabled$' /proc/sys/fs/binfmt_misc/qemu-aarch64; then
+    echo "[$TOOL_NAME] qemu-aarch64 binfmt is not registered (install/enable qemu-user-static)" >&2
+    exit 127
+fi
+
+export QEMU_LD_PREFIX="$SYSROOT"
+export PATH="$SYSROOT/usr/libexec/gcc/aarch64-linux-gnu/14:$SYSROOT/usr/bin:$PATH"
+
+exec "$SYSROOT/usr/bin/$TOOL_NAME" "$@"

@@ -1,0 +1,95 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Quectel PI M2 RK3576 原生 HDMI 显示配置。
+ *
+ * 该文件和 MIPI-DSI 屏幕配置保持独立，便于后续按需要单独调试
+ * M2 HDMI；当前 M2 Linux wrapper 同时包含 DSI 和 HDMI 配置。
+ */
+
+#include <dt-bindings/gpio/gpio.h>
+
+&display_subsystem {
+	status = "okay";
+	clocks = <&hdptxphy_hdmi>;
+	clock-names = "hdmi0_phy_pll";
+	memory-region = <&drm_logo>, <&drm_cubic_lut>;
+	memory-region-names = "drm-logo", "drm-cubic-lut";
+	/* devfreq = <&dmc>; */
+};
+
+&hdmi {
+	status = "okay";
+	pinctrl-names = "default";
+	/*
+	 * M2 使用 RK3576 原生 HDMI 引脚。
+	 * 这里不沿用 SMARC 的 AW9535 HDMI/M.2 电源 GPIO，
+	 * 因为 M2 载板映射不同，当前 M2 DTS 里也没有确认的
+	 * AW9535 HDMI 供电控制。
+	 */
+	pinctrl-0 = <&hdmi_txm0_pins &hdmi_tx_scl &hdmi_tx_sda
+		     &m2_hdmi_tx_on_h>;
+
+	rockchip,sda-falling-delay-ns = <360>;
+	ddc-i2c-scl-high-time-ns = <10000>;
+	ddc-i2c-scl-low-time-ns = <10000>;
+};
+
+&pinctrl {
+	hdmi-m2 {
+		m2_hdmi_tx_on_h: m2-hdmi-tx-on-h {
+			/* HDMI_TX_ON_H: GPIO4_C6, high enables HDMI external matching. */
+			rockchip,pins = <4 RK_PC6 RK_FUNC_GPIO &pcfg_output_high>;
+		};
+	};
+};
+
+&vp0 {
+	status = "okay";
+};
+
+&hdptxphy_hdmi {
+	status = "okay";
+};
+
+&hdmi_in_vp0 {
+	status = "okay";
+};
+
+&hdmi_in_vp1 {
+	status = "disabled";
+};
+
+&hdmi_in_vp2 {
+	status = "disabled";
+};
+
+&route_hdmi {
+	status = "okay";
+	logo,uboot = "quectel_720p.bmp";
+	logo,kernel = "quectel_720p_kernel.bmp";
+	connect = <&vp0_out_hdmi>;
+};
+
+&edp {
+	status = "disabled";
+};
+
+&edp_in_vp0 {
+	status = "disabled";
+};
+
+&edp_in_vp1 {
+	status = "disabled";
+};
+
+&edp_in_vp2 {
+	status = "disabled";
+};
+
+&route_edp {
+	status = "disabled";
+};
+
+&hdptxphy {
+	status = "disabled";
+};

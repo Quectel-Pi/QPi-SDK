@@ -1,0 +1,42 @@
+{
+  "id": "nvme",
+  "name": "NVMe SSD 检测",
+  "icon": "💽",
+  "tag": "存储",
+  "category": "外设",
+  "description": "检测 PCIe 上的 NVMe SSD 是否枚举成功，读取型号、容量，并演示挂载到 /mnt。M2 的 PCIe 与 5G 模组二选一。",
+  "expected": "打印 NVMe 设备型号/容量；可选挂载分区到 /mnt 并读写测试文件。",
+  "difficulty": 2,
+  "peripherals": [
+    "PCIe",
+    "NVMe",
+    "存储"
+  ],
+  "files": [
+    "main.c",
+    "CMakeLists.txt"
+  ],
+  "variables": {
+    "PROJECT_NAME": {
+      "label": "项目名称",
+      "type": "text",
+      "default": "nvme_check",
+      "hint": "仅限字母、数字、下划线"
+    },
+    "ACTION": {
+      "label": "操作",
+      "type": "choice",
+      "default": "info",
+      "choices": [
+        {
+          "value": "info",
+          "label": "仅查看设备信息"
+        },
+        {
+          "value": "mount",
+          "label": "查看信息并挂载第一分区到 /mnt"
+        }
+      ]
+    }
+  }
+}

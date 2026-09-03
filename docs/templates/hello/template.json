@@ -1,0 +1,29 @@
+{
+  "id": "hello",
+  "name": "Hello World",
+  "icon": "👋",
+  "tag": "入门",
+  "description": "最基础的入门程序：打印一条消息并显示系统信息。适合验证 SDK 工具链与开发流程是否正常。",
+  "expected": "在板子上运行后，终端打印你的消息、Linux 版本号和设备架构。",
+  "difficulty": 1,
+  "peripherals": [
+    "无"
+  ],
+  "files": [
+    "main.c",
+    "CMakeLists.txt"
+  ],
+  "variables": {
+    "PROJECT_NAME": {
+      "label": "项目名称",
+      "type": "text",
+      "default": "hello",
+      "hint": "仅限字母、数字、下划线"
+    },
+    "MESSAGE": {
+      "label": "打印内容",
+      "type": "text",
+      "default": "Hello from Quectel M2!"
+    }
+  }
+}

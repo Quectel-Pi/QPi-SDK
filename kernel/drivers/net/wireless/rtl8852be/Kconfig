@@ -1,0 +1,5 @@
+config RTL8852BE
+	tristate "Realtek 8852B PCIE WiFi"
+	#depends on PCIE
+	default m
+

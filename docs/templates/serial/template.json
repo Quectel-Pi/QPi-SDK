@@ -1,0 +1,54 @@
+{
+  "id": "serial",
+  "name": "串口通信（UART）",
+  "icon": "🔌",
+  "tag": "外设",
+  "description": "打开指定串口设备，配置波特率，回显收到的数据。适合对接串口外设（GPS、传感器、MCU 等）。",
+  "expected": "用 USB-TTL 连接对应串口，发送字符会在板子日志中回显。",
+  "difficulty": 2,
+  "peripherals": [
+    "UART",
+    "40Pin"
+  ],
+  "files": [
+    "main.c",
+    "CMakeLists.txt"
+  ],
+  "variables": {
+    "PROJECT_NAME": {
+      "label": "项目名称",
+      "type": "text",
+      "default": "serial_demo",
+      "hint": "仅限字母、数字、下划线"
+    },
+    "SERIAL_DEV": {
+      "label": "串口设备",
+      "type": "text",
+      "default": "/dev/ttyS3",
+      "hint": "在板子上执行 ls /dev/ttyS* 查看可用串口"
+    },
+    "BAUD": {
+      "label": "波特率",
+      "type": "choice",
+      "default": "115200",
+      "choices": [
+        {
+          "value": "9600",
+          "label": "9600"
+        },
+        {
+          "value": "115200",
+          "label": "115200"
+        },
+        {
+          "value": "460800",
+          "label": "460800"
+        },
+        {
+          "value": "921600",
+          "label": "921600"
+        }
+      ]
+    }
+  }
+}

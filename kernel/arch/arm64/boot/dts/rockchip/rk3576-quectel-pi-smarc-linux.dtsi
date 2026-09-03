@@ -1,0 +1,334 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Linux board include wrapper for Quectel PI SMARC (SH603ZA).
+ * Common hardware shared with M2 lives in rk3576-quectel-pi-common.dtsi.
+ * SMARC-specific hardware (dual GMAC, MUX, PCIe1, display, etc.) lives here.
+ */
+
+#include "rk3576-quectel-pi-common.dtsi"
+#include "rk3576-quectel-pi-smarc-audio.dtsi"
+#include "display/dsi-panel-waveshare-8inch-c.dtsi"
+#include "display/rk3576-hdmi.dtsi"
+#include "usb/rk3576-usb_dp_linux.dtsi"
+
+/* ========== SMARC Linux WiFi/BT and USB path selection ========== */
+
+/* Disable WiFi/BT M.2 to free GPIO0_B0/B1 for USB */
+&sdio_pwrseq { status = "disabled"; };
+&wireless_wlan { status = "disabled"; };
+&wireless_bluetooth { status = "disabled"; };
+&sdio { status = "disabled"; };
+
+&gpio0 {
+	ch634f-hub-select-hog {
+		gpio-hog;
+		gpios = <RK_PA0 GPIO_ACTIVE_HIGH>;
+		/* GPIO0_A0=0 selects the CH634F Hub path. */
+		output-low;
+		line-name = "ch634f-hub-select";
+	};
+};
+
+&aw9535_gpio {
+	fcu760k-wlan-wake-host-hog {
+		gpio-hog;
+		gpios = <5 GPIO_ACTIVE_LOW>;
+		input;
+		line-name = "fcu760k-wlan-wake-host";
+	};
+
+	fcu760k-host-wake-wlan-hog {
+		gpio-hog;
+		gpios = <6 GPIO_ACTIVE_LOW>;
+		/* Keep the unused low-active wake request deasserted (physical high). */
+		output-low;
+		line-name = "fcu760k-host-wake-wlan";
+	};
+
+	fcu760k-chip-enable-hog {
+		gpio-hog;
+		gpios = <7 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "fcu760k-chip-enable";
+	};
+};
+
+/* Disable WiFi/BT to free GPIO0_B0/B1 */
+&sdio_pwrseq { status = "disabled"; };
+&wireless_wlan { status = "disabled"; };
+&wireless_bluetooth { status = "disabled"; };
+&sdio { status = "disabled"; };
+
+/* USB3.0 channel: GPIO0_C7=HIGH selects CC2 */
+&gpio0 {
+	usb3-cc-sel-hog {
+		gpio-hog;
+		gpios = <RK_PC7 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "usb3_cc_sel";
+	};
+};
+
+/* USB3 PHY always on */
+&usbdp_phy { status = "okay"; };
+&usbdp_phy_u3 { status = "okay"; };
+
+/* USB0: OTG + USB3, AW35616动态控制GPIO0_B1 */
+&usb_drd0_dwc3 {
+	dr_mode = "otg";
+	maximum-speed = "super-speed";
+	phys = <&u2phy0_otg>, <&usbdp_phy_u3>;
+	phy-names = "usb2-phy", "usb3-phy";
+};
+
+&usbc0 {
+	usb0-sel-gpios = <&gpio0 RK_PB1 GPIO_ACTIVE_HIGH>;
+};
+
+/* ========== SMARC-specific MUX nodes ========== */
+
+/ {
+	vcc_eth0_phy: vcc-eth0-phy {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_eth0_phy";
+		enable-active-high;
+		gpio = <&gpio4 RK_PC5 GPIO_ACTIVE_HIGH>;
+		startup-delay-us = <10000>;
+		regulator-boot-on;
+		regulator-always-on;
+		vin-supply = <&vcc_3v3_s0>;
+	};
+
+	vcc_eth1_phy: vcc-eth1-phy {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_eth1_phy";
+		enable-active-high;
+		gpio = <&gpio4 RK_PC7 GPIO_ACTIVE_HIGH>;
+		startup-delay-us = <10000>;
+		regulator-boot-on;
+		regulator-always-on;
+		vin-supply = <&vcc_3v3_s0>;
+	};
+
+	usb_pcie_mux: usb-pcie-mux {
+		compatible = "rockchip,rk3576-usb-pcie-mux";
+		mux-gpios = <&gpio3 RK_PB0 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
+
+	sata_pcie_mux: sata-pcie-mux {
+		compatible = "rockchip,rk3576-sata-pcie-mux";
+		mux-gpios = <&gpio0 RK_PA5 GPIO_ACTIVE_HIGH>;
+		/*
+		 * Default to PCIE0: the board carries YT6801 GbE + ASM1182e + M.2-B
+		 * 5G modem on PCIE0 permanently. Cold-booting into SATA mode leaves
+		 * the on-board NIC and 5G modem dead, and hot-switching to PCIE0
+		 * cannot bring up the 5G modem (link fails to train). SATA users
+		 * switch via usb-pcie-switch.sh sata.
+		 */
+		rockchip,default-mode = "pcie";
+		status = "okay";
+	};
+
+	system_fan: pwm-fan {
+		compatible = "pwm-fan";
+		#cooling-cells = <2>;
+		pwms = <&pwm1_6ch_1 0 200000 0>;
+		cooling-levels = <0 64 128 192 255>;
+		rockchip,temp-trips = <
+			30000 1
+			40000 2
+			50000 3
+			60000 4
+		>;
+	};
+};
+
+/* ========== SMARC GMAC0 (snps,reset-* style) ========== */
+
+&gmac0 {
+	phy-mode = "rgmii";
+	clock_in_out = "output";
+
+	snps,reset-gpio = <&gpio0 RK_PC3 GPIO_ACTIVE_LOW>;
+	snps,reset-active-low;
+	snps,reset-delays-us = <0 20000 100000>;
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&eth0m0_miim
+		     &eth0m0_tx_bus2
+		     &eth0m0_rx_bus2
+		     &eth0m0_rgmii_clk
+		     &eth0m0_rgmii_bus
+		     &ethm0_clk0_25m_out>;
+
+	tx_delay = <0x1a>;
+	rx_delay = <0x20>;
+
+	phy-handle = <&rgmii_phy0>;
+	phy-supply = <&vcc_eth0_phy>;
+	status = "okay";
+};
+
+/* ========== SMARC GMAC1 ========== */
+
+&gmac1 {
+	phy-mode = "rgmii";
+	clock_in_out = "output";
+
+	snps,reset-gpio = <&gpio2 RK_PB4 GPIO_ACTIVE_LOW>;
+	snps,reset-active-low;
+	snps,reset-delays-us = <0 20000 100000>;
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&eth1m0_miim
+		     &eth1m0_tx_bus2
+		     &eth1m0_rx_bus2
+		     &eth1m0_rgmii_clk
+		     &eth1m0_rgmii_bus
+		     &ethm0_clk1_25m_out>;
+
+	tx_delay = <0x1a>;
+	rx_delay = <0x20>;
+
+	phy-handle = <&rgmii_phy1>;
+	phy-supply = <&vcc_eth1_phy>;
+	status = "okay";
+};
+
+&rgmii_phy0 {
+	interrupt-parent = <&gpio3>;
+	interrupts = <RK_PA3 IRQ_TYPE_LEVEL_LOW>;
+};
+
+&mdio1 {
+	rgmii_phy1: phy@1 {
+		compatible = "ethernet-phy-ieee802.3-c22";
+		reg = <0x1>;
+		clocks = <&cru REFCLKO25M_GMAC1_OUT>;
+		interrupt-parent = <&gpio2>;
+		interrupts = <RK_PD7 IRQ_TYPE_LEVEL_LOW>;
+	};
+};
+
+/* ========== SMARC PCIe0 (Gen1 limited, mux-gated with SATA0) ========== */
+
+&pcie0 {
+	max-link-speed = <1>;
+	phy-names = "pcie-phy";
+	reset-gpios = <&gpio0 RK_PB4 GPIO_ACTIVE_HIGH>;
+	mux-gpios = <&gpio0 RK_PA5 GPIO_ACTIVE_HIGH>;
+	rockchip,mux-node = <&sata_pcie_mux>;
+	rockchip,mux-skip-when-high;
+	rockchip,skip-scan-in-resume;
+	/*
+	 * Hold PERST low for 6s before releasing. RM520N HW manual (3.4
+	 * 表11) requires PERST# active (Ton) min 100ms / typ 3s for the
+	 * modem's PCIe de-assert-reset init; the old 200ms default was far
+	 * too short, ASM1182e port#7 trained before the modem PCIe was ready
+	 * and the link stayed down 60-90s. 6s > typ 3s gives full init.
+	 */
+	rockchip,perst-inactive-ms = <6000>;
+	pinctrl-names = "default";
+	vpcie3v3-supply = <&vcc3v3_pcie0>;
+	status = "okay";
+};
+
+/* ========== SMARC SATA0 (shared combphy0_ps with PCIe0, mux-gated) ========== */
+
+&sata0 {
+	mux-gpios = <&gpio0 RK_PA5 GPIO_ACTIVE_HIGH>;
+	rockchip,mux-node = <&sata_pcie_mux>;
+	status = "okay";
+};
+
+/* ========== SMARC PCIe1 ========== */
+
+&pcie1 {
+	mux-gpios = <&gpio3 RK_PB0 GPIO_ACTIVE_HIGH>;
+	rockchip,mux-node = <&usb_pcie_mux>;
+	rockchip,perst-inactive-ms = <500>;
+	reset-gpios = <&gpio4 RK_PC4 GPIO_ACTIVE_HIGH>;
+	vpcie3v3-supply = <&vcc3v3_pcie1>;
+	status = "okay";
+};
+
+/* ========== SMARC DSI (HW default disabled) ========== */
+
+&dsi {
+	status = "disabled";
+};
+
+/* ========== SMARC USB ========== */
+
+&usbc1 {
+	status = "disabled";
+	/delete-node/ port;
+};
+
+&usb_drd1_dwc3 {
+	dr_mode = "host";
+	/delete-property/ usb-role-switch;
+	/delete-node/ port;
+};
+
+/* ========== SMARC Display ========== */
+
+&display_subsystem {
+	status = "okay";
+	clocks = <&hdptxphy_hdmi>;
+	clock-names = "hdmi0_phy_pll";
+	memory-region = <&drm_logo>, <&drm_cubic_lut>;
+	memory-region-names = "drm-logo", "drm-cubic-lut";
+};
+
+&route_dsi {
+	status = "okay";
+	logo,uboot = "quectel_720p.bmp";
+	logo,kernel = "quectel_720p_kernel.bmp";
+};
+
+&dsi_in_vp0 {
+	status = "disabled";
+};
+
+&dsi_in_vp1 {
+	status = "okay";
+};
+
+&dsi_in_vp2 {
+	status = "disabled";
+};
+
+&dsi_in_vopl {
+	status = "disabled";
+};
+
+&mipidcphy0 {
+	status = "okay";
+};
+
+&dsi {
+	status = "okay";
+};
+
+&uart2 {
+	status = "okay";
+	dma-names = "tx", "rx";
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart2m0_xfer>;
+};
+
+&uart4 {
+	status = "okay";
+	dma-names = "tx", "rx";
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart4m1_xfer &uart4m1_ctsn &uart4m1_rtsn>;
+};
+
+&uart8 {
+	status = "okay";
+	dma-names = "tx", "rx";
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart8m1_xfer &uart8m1_ctsn &uart8m1_rtsn>;
+};

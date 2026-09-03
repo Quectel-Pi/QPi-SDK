@@ -1,0 +1,12 @@
+config QDEVINFO_EMMC
+    bool "Device Information support"
+    help
+      Enable Get device information.
+
+config DEVINFO_EMMC
+    bool "Get device emmc information"
+    depends on QDEVINFO_EMMC
+    default y
+    help
+      If you say yes here you will get support for reading eMMC health,
+      capacity, and PMU information through the proc file system.

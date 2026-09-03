@@ -1,0 +1,42 @@
+{
+  "id": "pcie",
+  "name": "PCIe 设备枚举",
+  "icon": "🔗",
+  "tag": "PCIe",
+  "category": "外设",
+  "description": "枚举 PCIe 总线上的设备（5G 模组 RM520N / NVMe SSD），显示 VID/PID 和链路信息。帮助判断模组是否被正确识别。",
+  "expected": "列出 PCIe 设备及厂商/设备 ID；如插了 5G 模组显示 RM520N 相关 ID。",
+  "difficulty": 1,
+  "peripherals": [
+    "PCIe",
+    "5G模组",
+    "NVMe"
+  ],
+  "files": [
+    "main.c",
+    "CMakeLists.txt"
+  ],
+  "variables": {
+    "PROJECT_NAME": {
+      "label": "项目名称",
+      "type": "text",
+      "default": "pcie_enum",
+      "hint": "仅限字母、数字、下划线"
+    },
+    "DETAIL": {
+      "label": "信息详细度",
+      "type": "choice",
+      "default": "detail",
+      "choices": [
+        {
+          "value": "detail",
+          "label": "详细（含 VID/PID 与链路速率）"
+        },
+        {
+          "value": "brief",
+          "label": "简要（仅设备地址列表）"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,9 @@
+# 本文件用于让 git 跟踪空目录（空目录无法直接上传到 git）。
+#
+# prebuilds/ 存放运行前预置资源，均为脚本可再生成的大文件，不入 git：
+#   - base_image/    M2 底包镜像（由 ./tools/fetch-base-image.sh 从官方 zip 下载解压生成）
+#   - sysroot/       M2 Debian 应用编译 sysroot（由 ./tools/extract-sysroot.sh 从 rootfs.img 生成）
+#
+# 需要时执行：
+#   ./tools/fetch-base-image.sh        # 下载底包 zip -> base_image -> 生成 sysroot
+#   ./tools/extract-sysroot.sh         # 已有 base_image/rootfs.img 时只重新生成 sysroot

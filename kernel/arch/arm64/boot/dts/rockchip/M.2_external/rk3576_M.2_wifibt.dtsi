@@ -1,0 +1,80 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+
+/{
+    sdio_pwrseq: sdio-pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		// pinctrl-names = "default";
+		// pinctrl-0 = <&wifi_poweren_gpio>;
+
+		/*
+		 * On the module itself this is one of these (depending
+		 * on the actual card populated):
+		 * - SDIO_RESET_L_WL_REG_ON
+		 * - PDN (power down when low)
+		 */
+		post-power-on-delay-ms = <200>;
+		//reset-gpios = <&gpio0 RK_PB0 GPIO_ACTIVE_LOW>;
+		status = "okay";
+	};
+	
+	wireless_wlan: wireless-wlan {
+		compatible = "wlan-platdata";
+		rockchip,grf = <&sys_grf>;
+		wifi_chip_type = "rtl8821cs";
+		pinctrl-names = "default";
+		pinctrl-0 = <&wifi_host_wake_irq &wifi_poweren_gpio>;
+		WIFI,host_wake_irq = <&gpio0 RK_PD3 GPIO_ACTIVE_HIGH>;
+		WIFI,poweren_gpio = <&gpio0 RK_PB0 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
+
+	wireless_bluetooth: wireless-bluetooth {
+		compatible = "bluetooth-platdata";
+		clock-names = "ext_clock";
+		bt_port = "/dev/ttyS4";
+		uart_rts_gpios = <&gpio1 RK_PC2 GPIO_ACTIVE_LOW>;
+		pinctrl-names = "default", "rts_gpio";
+		pinctrl-0 = <&uart4m1_rtsn>;
+		pinctrl-1 = <&uart4_gpios>;
+		BT,reset_gpio    = <&gpio0 RK_PB1 GPIO_ACTIVE_HIGH>;
+		//BT,wake_gpio     = <&gpio1 RK_PC7 GPIO_ACTIVE_HIGH>; //UART2_RX_M0
+		//BT,wake_host_irq = <&gpio1 RK_PC6 GPIO_ACTIVE_HIGH>; //UART2_TX_M0
+		status = "okay";
+	};
+};
+
+&sdio {
+	max-frequency = <100000000>;
+	no-sd;
+	no-mmc;
+	bus-width = <4>;
+	// disable-wp;
+	cap-sd-highspeed;
+	cap-sdio-irq;
+	keep-power-in-suspend;
+	mmc-pwrseq = <&sdio_pwrseq>;
+	//non-removable;
+	logic-remove-card;
+	pinctrl-names = "default";
+	pinctrl-0 = <&sdmmc1m0_bus4 &sdmmc1m0_clk &sdmmc1m0_cmd>;
+	sd-uhs-sdr50;
+	status = "okay";
+};
+
+&pinctrl{
+    wireless-wlan {
+		wifi_poweren_gpio: wifi-poweren-gpio {
+			rockchip,pins = <0 RK_PB0 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+
+		wifi_host_wake_irq: wifi-host-wake-irq {
+			rockchip,pins = <0 RK_PD3 RK_FUNC_GPIO &pcfg_pull_down>;
+		};
+	};
+
+    wireless-bluetooth {
+		uart4_gpios: uart4-gpios {
+			rockchip,pins = <1 RK_PC2 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};

@@ -1,0 +1,51 @@
+{
+  "id": "camera",
+  "name": "摄像头抓帧（V4L2）",
+  "icon": "📷",
+  "tag": "摄像头",
+  "category": "外设",
+  "description": "通过 V4L2 从 M2 摄像头（IMX477 / IMX219）抓取一帧 RAW 图像并保存为 PPM 文件，验证摄像头链路。",
+  "expected": "板子上生成 .ppm 图片文件，可用 adb pull 到电脑查看；或配合 rkaiq 输出可用预览。",
+  "difficulty": 3,
+  "peripherals": [
+    "摄像头",
+    "MIPI-CSI",
+    "IMX477"
+  ],
+  "files": [
+    "main.c",
+    "CMakeLists.txt"
+  ],
+  "variables": {
+    "PROJECT_NAME": {
+      "label": "项目名称",
+      "type": "text",
+      "default": "camera_capture",
+      "hint": "仅限字母、数字、下划线"
+    },
+    "VIDEO_DEV": {
+      "label": "视频设备节点",
+      "type": "text",
+      "default": "/dev/video0",
+      "hint": "IMX477 主链路通常为 /dev/video0；板子上 ls /dev/video* 查看"
+    },
+    "WIDTH": {
+      "label": "宽度 (像素)",
+      "type": "text",
+      "default": "1920",
+      "hint": "IMX477 当前支持 1920x1080"
+    },
+    "HEIGHT": {
+      "label": "高度 (像素)",
+      "type": "text",
+      "default": "1080",
+      "hint": "IMX477 当前支持 1920x1080"
+    },
+    "FRAMES": {
+      "label": "抓帧数量",
+      "type": "text",
+      "default": "1",
+      "hint": "抓取多少帧，每帧保存为 frameN.ppm"
+    }
+  }
+}

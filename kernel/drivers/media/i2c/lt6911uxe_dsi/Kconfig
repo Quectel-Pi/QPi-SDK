@@ -1,0 +1,11 @@
+
+config CONFIG_VIDEO_LT6911UXE
+	tristate "Lontium LT6911UXE HDMI to MIPI DSI firmware driver"
+	depends on VIDEO_DEV && I2C
+	select FW_LOADER
+	help
+	  Support firmware loading and upgrade for the LT6911UXE
+	  HDMI to MIPI DSI converter.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called lt6911uxe_dsi.

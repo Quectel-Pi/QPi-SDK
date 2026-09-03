@@ -1,0 +1,38 @@
+# 运行时生成
+__pycache__/
+*.pyc
+
+# 构建产物
+build/
+kernel/.config
+kernel/.config.old
+kernel/boot.img
+kernel/resource.img
+kernel/zboot.img
+kernel/arch/arm64/boot/Image*
+kernel/arch/arm64/boot/dts/rockchip/*.dtbo
+kernel/vmlinux*
+kernel/System.map
+kernel/modules.order
+kernel/Module.symvers
+kernel/*.o
+kernel/*.a
+kernel/*.cmd
+kernel/.*.cmd
+kernel/.tmp_*
+kernel/.built-in*
+kernel/out/
+
+# 示例编译产物
+docs/examples/**/hello
+docs/examples/**/*.o
+docs/examples/**/*.ko
+docs/examples/**/*.cmd
+docs/examples/**/*.mod
+docs/examples/**/*.mod.c
+docs/examples/**/modules.order
+docs/examples/**/Module.symvers
+
+# 大文件 (rootfs 镜像等, 用脚本生成)
+prebuilds/base_image/rootfs.img
+prebuilds/base_image/update.img

@@ -1,0 +1,45 @@
+{
+  "id": "network",
+  "name": "TCP 网络通信",
+  "icon": "🌐",
+  "tag": "网络",
+  "category": "网络",
+  "description": "作为 TCP 客户端连接服务器并收发数据。可用于 M2 与云端/局域网服务器通信，对接物联网场景。",
+  "expected": "连接到指定服务器 IP:端口，发送消息并打印服务器响应。",
+  "difficulty": 2,
+  "peripherals": [
+    "以太网",
+    "WiFi",
+    "TCP/IP"
+  ],
+  "files": [
+    "main.c",
+    "CMakeLists.txt"
+  ],
+  "variables": {
+    "PROJECT_NAME": {
+      "label": "项目名称",
+      "type": "text",
+      "default": "tcp_client",
+      "hint": "仅限字母、数字、下划线"
+    },
+    "SERVER_IP": {
+      "label": "服务器 IP",
+      "type": "text",
+      "default": "192.168.1.100",
+      "hint": "局域网内电脑/服务器 IP; 公网地址亦可"
+    },
+    "SERVER_PORT": {
+      "label": "服务器端口",
+      "type": "text",
+      "default": "8080",
+      "hint": "1-65535"
+    },
+    "MESSAGE": {
+      "label": "发送内容",
+      "type": "text",
+      "default": "Hello from M2!",
+      "hint": "连接建立后发送的文本"
+    }
+  }
+}

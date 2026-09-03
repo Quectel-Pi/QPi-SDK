@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+
+/dts-v1/;
+
+#include "rk3576.dtsi"
+#include "rk3576-evb1.dtsi"
+#include "rk3576-linux.dtsi"
+#include "rk3576-evb1-v12-v31.dtsi"
+#include "rk3576-qtl-socketevb.dtsi"
+
+/ {
+	model = "Rockchip RK3576 Quectel Socket EVB Board";
+	compatible = "rockchip,rk3576-qtl-socketevb", "rockchip,rk3576";
+};

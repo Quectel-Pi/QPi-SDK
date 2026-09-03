@@ -1,0 +1,230 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+
+/ {
+	vcc5v0_usb: vcc5v0-usb {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc5v0_usb";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		vin-supply = <&vcc_3v3_s3>;	// By the voltage boosting circuit
+	};
+
+	vbus5v0_typec: vbus5v0-typec {
+		compatible = "regulator-fixed";
+		regulator-name = "vbus5v0_typec";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		enable-active-high;
+		gpio = <&gpio1 RK_PD4 GPIO_ACTIVE_HIGH>;
+		vin-supply = <&vcc5v0_usb>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&usb_otg0_pwren>;
+	};
+
+	vbus5v0_typec_evb: vbus5v0-typec_evb {
+		compatible = "regulator-fixed";
+		regulator-name = "vbus5v0_typec_evb";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		enable-active-high;
+		gpio = <&gpio4 RK_PB2 GPIO_ACTIVE_HIGH>;
+		vin-supply = <&vcc5v0_usb>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&usb_otg1_pwren>;
+	};
+};
+
+&combphy1_psu {
+	status = "okay";
+};
+
+&u2phy0 {
+	orientation-switch;
+	status = "okay";
+
+	port {
+		u2phy0_orientation_switch: endpoint {
+			remote-endpoint = <&usbc0_orien_sw>;
+		};
+	};
+};
+
+&u2phy0_otg {
+	status = "okay";
+	rockchip,sel-pipe-phystatus;
+	rockchip,dis-u2-susphy;
+};
+
+&usb_drd0_dwc3 {
+	status = "okay";
+	dr_mode = "otg";
+	maximum-speed = "high-speed";
+	phys = <&u2phy0_otg>;
+	phy-names = "usb2-phy";
+	usb-role-switch;
+	snps,dis_u2_susphy_quirk;
+	snps,usb2-lpm-disable;
+	port {
+		usb_drd0_role_switch: endpoint {
+			remote-endpoint = <&usbc0_role_sw>;
+		};
+	};
+};
+
+&u2phy1 {
+	status = "okay";
+};
+
+&u2phy1_otg {
+    status = "okay";
+	vbus-supply = <&vbus5v0_typec_evb>;
+};
+
+&usb_drd1_dwc3 {
+    status = "okay";
+	dr_mode = "otg";
+	usb-role-switch;
+	port {
+        usb_drd1_role_switch: endpoint {
+            remote-endpoint = <&pericom_role_ep1>;
+        };
+	};
+};
+
+&i2c7 {
+	status = "okay";
+	clock-frequency = <400000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c7m1_xfer>;
+
+	usbc0: usb_type_c_aw35616@60 {
+		compatible = "awinic,usb_type_c_aw35616";
+		reg = <0x60>;
+		interrupt-parent = <&gpio0>;
+		interrupts = <RK_PC6 IRQ_TYPE_LEVEL_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&usbc0_int>;
+		vbus-supply = <&vbus5v0_typec>;
+		aw35616-tcpc,role_def = <5>; /* 1: SNK, 2: SRC, 3: DRP, 4: Try.SRC, 5: Try.SNK */
+		aw35616,rp_level = <0>; /* 0: Default, 1: 1.5A, 2: 3.0A */
+		aw35616_acc_support = <0>; /* 0: support, 1: no support */
+		aw35616_toggle_cycle = <0>; /* 0: Disable, 1: 40ms, 2: 80ms, 3: 160ms */
+		status = "okay";
+
+		port {
+			usbc0_role_sw: endpoint {
+				remote-endpoint = <&usb_drd0_role_switch>;
+			};
+		};
+
+		usb_con0: connector {
+			compatible = "usb-c-connector";
+			label = "USB-C";
+			data-role = "dual";
+			power-role = "dual";
+			try-power-role = "sink";
+			op-sink-microwatt = <1000000>;
+			sink-pdos =
+				<PDO_FIXED(5000, 1325, PDO_FIXED_USB_COMM)>;
+			source-pdos =
+				<PDO_FIXED(5000, 500, PDO_FIXED_USB_COMM)>;
+
+			port {
+				usbc0_orien_sw: endpoint {
+					remote-endpoint = <&u2phy0_orientation_switch>;
+				};
+			};
+		};
+	};
+
+	usb_type_c_aw35616@68 {
+		pinctrl-names = "default";
+		pinctrl-0 = <&usb3_int>;
+		compatible = "awinic,usb_type_c_aw35616";
+		reg = <0x68>;
+		interrupt-parent = <&gpio1>;
+		interrupts = <RK_PC0 IRQ_TYPE_LEVEL_LOW>;
+		aw35616-tcpc,role_def = <5>;
+		aw35616,rp_level = <0>;
+		aw35616_acc_support = <0>;
+		aw35616_toggle_cycle = <0>;
+		status = "okay";
+
+		connector {
+			compatible = "usb-c-connector";
+			label = "USB-C-3";
+			data-role = "dual";
+		};
+	};
+};
+
+&i2c2 {
+	status = "disabled";
+	clock-frequency = <1000000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c2m0_xfer>;
+
+	usbc1: pericom_30216c@1d {
+		compatible = "pericom,30216c";
+		reg = <0x1d>;
+		interrupt-parent = <&gpio2>;
+		interrupts = <RK_PB3 IRQ_TYPE_LEVEL_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&usbc1_int>;
+        swcc-gpios = <&gpio4 RK_PB0 GPIO_ACTIVE_HIGH>;
+		status = "disabled";
+
+		port {
+			pericom_role_ep1: endpoint {
+				remote-endpoint = <&usb_drd1_role_switch>;
+			};
+		};
+
+		usb_con1: connector {
+            compatible = "usb-c-connector";
+            label = "USB-C";
+            data-role = "dual";
+            power-role = "dual";
+			port {
+                pericom_role_ep: endpoint {};
+            };
+        };
+    };
+};
+
+&usbdp_phy {
+	status = "disabled";
+};
+
+&usbdp_phy_dp {
+	status = "disabled";
+};
+
+&usbdp_phy_u3 {
+	status = "disabled";
+};
+
+&pinctrl {
+	usb {
+		usb_otg0_pwren: usb-otg0-pwren {
+			rockchip,pins = <1 RK_PD4 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+		usbc0_int: usbc0-int {
+			rockchip,pins = <0 RK_PC6 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+
+		usb3_int: usb3-int {
+			rockchip,pins = <1 RK_PC0 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+
+
+		usb_otg1_pwren: usb-otg1-pwren {
+			rockchip,pins = <4 RK_PB2 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+		usbc1_int: usbc1-int {
+			rockchip,pins = <2 RK_PB3 RK_FUNC_GPIO &pcfg_pull_up>,<4 RK_PB0 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};

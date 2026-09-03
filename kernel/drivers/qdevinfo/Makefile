@@ -1,0 +1,1 @@
+obj-$(CONFIG_DEVINFO_EMMC)	+= devinfo.o

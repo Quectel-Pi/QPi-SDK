@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Quectel PI M2 (RK3576) — Linux (Buildroot) boot DTS
+ *
+ * Hardware: rk3576-quectel-pi-m2-linux.dtsi → rk3576-quectel-pi-common.dtsi
+ * Keep only Linux-specific system-level overrides in this file.
+ */
+
+/dts-v1/;
+
+#include "rk3576.dtsi"
+#include "rk3576-linux.dtsi"
+#include "rk3576-quectel-pi-m2-linux.dtsi"
+
+/ {
+	model = "Quectel PI M2 RK3576 Board";
+	compatible = "quectel,pi-m2-rk3576", "rockchip,rk3576";
+};
+
+/* TODO: Add M2 Linux-specific overrides here */
+

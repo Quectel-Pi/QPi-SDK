@@ -1,0 +1,40 @@
+{
+  "id": "sysinfo",
+  "name": "系统信息监控",
+  "icon": "🖥️",
+  "tag": "系统",
+  "category": "系统",
+  "description": "读取 CPU 型号/温度、内存、负载、磁盘等系统信息，用于设备巡检与运行状态监控。",
+  "expected": "打印 RK3576 CPU 信息、当前温度、内存占用、负载与磁盘空间。",
+  "difficulty": 1,
+  "peripherals": [
+    "无"
+  ],
+  "files": [
+    "main.c",
+    "CMakeLists.txt"
+  ],
+  "variables": {
+    "PROJECT_NAME": {
+      "label": "项目名称",
+      "type": "text",
+      "default": "sysinfo",
+      "hint": "仅限字母、数字、下划线"
+    },
+    "MONITOR": {
+      "label": "监控模式",
+      "type": "choice",
+      "default": "once",
+      "choices": [
+        {
+          "value": "once",
+          "label": "单次采集并退出"
+        },
+        {
+          "value": "loop",
+          "label": "每 2 秒刷新一次 (Ctrl+C 退出)"
+        }
+      ]
+    }
+  }
+}

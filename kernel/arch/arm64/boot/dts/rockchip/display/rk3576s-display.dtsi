@@ -1,0 +1,404 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+
+/*
+*   RK3576S only has one Vop0 port, 
+*   and can only use one of the following ports at a time: 
+*   dsi_in_vp0, hdmi_in_vp0, dp0_in_vp0, or edp_in_vpo.
+*   Enable MIPI function by default(dsi_in_vp0).
+*/
+
+#define ENABLE_MIPI 1
+#define ENABLE_HDMI 0
+#define ENABLE_EDP  0
+#define ENABLE_DP   0
+
+#if ENABLE_MIPI
+#include "dsi-panel-ili9881d-720p-video.dtsi"
+#include "dsi-panel-NV3052-720p-vido.dtsi"
+/ {
+	backlight: backlight {
+		compatible = "pwm-backlight";
+		pwms = <&pwm0_2ch_0 0 25000 0>;
+		brightness-levels = <
+			  0  20  20  21  21  22  22  23
+			 23  24  24  25  25  26  26  27
+			 27  28  28  29  29  30  30  31
+			 31  32  32  33  33  34  34  35
+			 35  36  36  37  37  38  38  39
+			 40  41  42  43  44  45  46  47
+			 48  49  50  51  52  53  54  55
+			 56  57  58  59  60  61  62  63
+			 64  65  66  67  68  69  70  71
+			 72  73  74  75  76  77  78  79
+			 80  81  82  83  84  85  86  87
+			 88  89  90  91  92  93  94  95
+			 96  97  98  99 100 101 102 103
+			104 105 106 107 108 109 110 111
+			112 113 114 115 116 117 118 119
+			120 121 122 123 124 125 126 127
+			128 129 130 131 132 133 134 135
+			136 137 138 139 140 141 142 143
+			144 145 146 147 148 149 150 151
+			152 153 154 155 156 157 158 159
+			160 161 162 163 164 165 166 167
+			168 169 170 171 172 173 174 175
+			176 177 178 179 180 181 182 183
+			184 185 186 187 188 189 190 191
+			192 193 194 195 196 197 198 199
+			200 201 202 203 204 205 206 207
+			208 209 210 211 212 213 214 215
+			216 217 218 219 220 221 222 223
+			224 225 226 227 228 229 230 231
+			232 233 234 235 236 237 238 239
+			240 241 242 243 244 245 246 247
+			248 249 250 251 252 253 254 255
+		>;
+		default-brightness-level = <200>;
+	};
+
+	vcc2v8_lcd_n: vcc2v8-lcd0-n {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc2v8_lcd_n";
+		regulator-always-on;
+		regulator-boot-on;
+		enable-active-high;
+		gpio = <&gpio0 RK_PC6 GPIO_ACTIVE_HIGH>;
+		vin-supply = <&vcc_3v3_s0>;
+	};
+
+	vcc1v8_lcd_n: vcc1v8-lcd0-n {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc1v8_lcd_n";
+		regulator-always-on;
+		regulator-boot-on;
+		enable-active-high;
+		gpio = <&gpio0 RK_PC7 GPIO_ACTIVE_HIGH>;
+		vin-supply = <&vcc_3v3_s0>;
+	};
+};
+
+&pwm0_2ch_0 {
+	status = "okay";
+	pinctrl-0 = <&pwm0m0_ch0>;
+};
+
+&pinctrl {
+	touch {
+		touch_gpio: touch-gpio {
+			rockchip,pins =
+				<0 RK_PD0 RK_FUNC_GPIO &pcfg_pull_up>,
+				<0 RK_PC5 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
+
+     lcd {
+         lcd_rst: lcd-rst {
+                 rockchip,pins =
+                        <0 RK_PD1 RK_FUNC_GPIO &pcfg_pull_up>;
+         };
+	};
+};
+
+&display_subsystem {
+	status = "okay";
+	memory-region = <&drm_logo>, <&drm_cubic_lut>;
+	memory-region-names = "drm-logo", "drm-cubic-lut";
+	/* devfreq = <&dmc>; */
+};
+
+/*
+ * mipidcphy0 needs to be enabled
+ * when dsi is enabled
+ */
+
+&mipidcphy0 {
+	status = "okay";
+};
+
+&dsi {
+	status = "okay";
+};
+
+&dsi_panel {
+       power-supply = <&vcc2v8_lcd_n>;
+	   powerio-supply = <&vcc1v8_lcd_n>;
+};
+
+&route_dsi {
+	status = "okay";
+	logo,uboot = "quectel_720p.bmp";
+	logo,kernel = "quectel_720p_kernel.bmp";
+    connect = <&vp0_out_dsi>;
+};
+
+&dsi_in_vp0 {
+	status = "okay";
+};
+
+&i2c0 {
+    pinctrl-0 = <&i2c0m1_xfer>;
+	status = "okay";
+
+	focaltech@38{
+		status = "okay";
+		compatible = "focaltech,fts_ts";
+		reg = <0x38>;
+		vdd-supply = <&vcc1v8_lcd_n>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&touch_gpio>;
+		focaltech,reset-gpio = <&gpio0 RK_PD0 GPIO_ACTIVE_HIGH>;
+		focaltech,irq-gpio = <&gpio0 RK_PC5 IRQ_TYPE_LEVEL_LOW>;
+		focaltech,max-touch-number = <5>;
+		focaltech,display-coords =  <0 0 720 1280>;
+		focaltech,have-key;
+		focaltech,key-number = <3>;
+		focaltech,keys = <139 172 158>;
+		focaltech,key-y-coords = <1340 1340 1340>;
+		focaltech,key-x-coords = <150 330 660>;
+	};
+	gt967@5d {
+		status = "okay"; 
+		compatible = "goodix_v282,gt967";
+		reg = <0x5d>;
+		touch-gpio = <&gpio0 RK_PC5 IRQ_TYPE_LEVEL_LOW>;   //int IO
+		reset-gpio = <&gpio0 RK_PD0 GPIO_ACTIVE_HIGH>;      //reset io
+		max-x = <720>;   //x size 
+		max-y = <1280>;  //y size 
+		max-w = <512>;
+		max-p = <512>;
+		max_touch_num = <11>;
+		touchscreen-key-map = <139 172 158>;
+		goodix,esd-protect = <1>;
+		goodix,int-sync = <1>;
+			
+	};
+};
+#endif
+
+#if ENABLE_HDMI
+&display_subsystem {
+	status = "okay";
+	clocks = <&hdptxphy_hdmi>;
+	clock-names = "hdmi0_phy_pll";
+	memory-region = <&drm_logo>, <&drm_cubic_lut>;
+	memory-region-names = "drm-logo", "drm-cubic-lut";
+	/* devfreq = <&dmc>; */
+};
+
+&route_hdmi {
+	status = "okay";
+	logo,uboot = "quectel_720p.bmp";
+    logo,kernel = "quectel_720p_kernel.bmp";
+	connect = <&vp0_out_hdmi>;
+};
+
+&hdmi_in_vp0 {
+	status = "okay";
+};
+
+&hdptxphy_hdmi {
+	status = "okay";
+};
+
+&hdmi {
+	status = "okay";
+	enable-gpios = <&gpio4 RK_PC6 GPIO_ACTIVE_HIGH>;
+	cec-enable = "true";
+	rockchip,sda-falling-delay-ns = <360>;
+};
+#endif
+
+
+#if ENABLE_DP
+&display_subsystem {
+	status = "okay";
+	memory-region = <&drm_logo>, <&drm_cubic_lut>;
+	memory-region-names = "drm-logo", "drm-cubic-lut";
+	/* devfreq = <&dmc>; */
+};
+
+&dp {
+	status = "okay";
+	svid = <0xff01>;
+};
+
+&dp0 {
+	status = "okay";
+};
+
+&route_dp0{
+	status = "okay";
+	logo,uboot = "quectel_720p.bmp";
+    logo,kernel = "quectel_720p_kernel.bmp";
+	connect = <&vp0_out_dp0>;
+};
+
+&dp0_in_vp0 {
+	status = "okay";
+};
+
+&dp0_sound {
+	status = "okay";
+};
+
+&usbdp_phy_dp {
+	status = "okay";
+};
+
+&usbdp_phy_u3 {
+	status = "okay";
+};
+#endif
+
+
+#if ENABLE_EDP
+&display_subsystem {
+	status = "okay";
+	memory-region = <&drm_logo>, <&drm_cubic_lut>;
+	memory-region-names = "drm-logo", "drm-cubic-lut";
+	/* devfreq = <&dmc>; */
+};
+
+&edp {
+	force-hpd;
+	status = "okay";
+	ports {
+		port@1 {
+			reg = <1>;
+			edp_out_panel: endpoint {
+				remote-endpoint = <&panel_in_edp>;
+			};
+		};
+	};
+};
+	
+&route_edp {
+	status = "okay";
+	logo,uboot  = "quectel_720p.bmp";
+	logo,kernel = "quectel_720p_kernel.bmp";
+	logo,mode = "fullscreen";
+	charge_logo,mode = "fullscreen";
+	connect = <&vp0_out_edp>;
+};
+
+&edp_in_vp0 { 
+    status = "okay"; 
+};
+
+&hdptxphy { 
+    status = "okay"; 
+};
+
+&hdptxphy_hdmi { 
+    status = "disabled"; 
+};
+
+&pwm1_6ch_1 {
+    status = "okay";
+    pinctrl-0 = <&pwm1m0_ch1>;   
+};
+
+&pinctrl {
+    panel-edp0 {
+        panel_edp0_en: panel-edp0-en {
+            rockchip,pins = <0 RK_PA0 RK_FUNC_GPIO &pcfg_pull_up>;
+        };
+    };
+	backlight2 {
+        bl2_en_gpio: bl2-en-gpio {
+            rockchip,pins = <4 RK_PC6 RK_FUNC_GPIO &pcfg_pull_up>; 
+        };
+    };
+};
+
+/{
+		backlight2: backlight2  {
+		compatible = "pwm-backlight";
+		status = "okay";
+   		pwms = <&pwm1_6ch_1 0 50000  0 0>;  
+		pinctrl-0 = <&bl2_en_gpio>;
+		brightness-levels = <
+			  0  20  20  21  21  22  22  23
+			 23  24  24  25  25  26  26  27
+			 27  28  28  29  29  30  30  31
+			 31  32  32  33  33  34  34  35
+			 35  36  36  37  37  38  38  39
+			 40  41  42  43  44  45  46  47
+			 48  49  50  51  52  53  54  55
+			 56  57  58  59  60  61  62  63
+			 64  65  66  67  68  69  70  71
+			 72  73  74  75  76  77  78  79
+			 80  81  82  83  84  85  86  87
+			 88  89  90  91  92  93  94  95
+			 96  97  98  99 100 101 102 103
+			104 105 106 107 108 109 110 111
+			112 113 114 115 116 117 118 119
+			120 121 122 123 124 125 126 127
+			128 129 130 131 132 133 134 135
+			136 137 138 139 140 141 142 143
+			144 145 146 147 148 149 150 151
+			152 153 154 155 156 157 158 159
+			160 161 162 163 164 165 166 167
+			168 169 170 171 172 173 174 175
+			176 177 178 179 180 181 182 183
+			184 185 186 187 188 189 190 191
+			192 193 194 195 196 197 198 199
+			200 201 202 203 204 205 206 207
+			208 209 210 211 212 213 214 215
+			216 217 218 219 220 221 222 223
+			224 225 226 227 228 229 230 231
+			232 233 234 235 236 237 238 239
+			240 241 242 243 244 245 246 247
+			248 249 250 251 252 253 254 255
+		>;
+		default-brightness-level = <200>;
+		enable-gpios = <&gpio4 RK_PC6 GPIO_ACTIVE_LOW>;
+	};
+
+	panel-edp0 {
+        compatible = "simple-panel";
+        backlight = <&backlight2>;
+        pinctrl-0 = <&panel_edp0_en>;
+        enable-gpios = <&gpio0 RK_PA0 GPIO_ACTIVE_HIGH>;
+        connector-type = "eDP";
+        bpc = <8>;
+
+        prepare-delay-ms = <20>;   
+        enable-delay-ms  = <200>;  
+        bl-delay-ms      = <50>;  
+
+        unprepare-delay-ms = <120>;
+        disable-delay-ms   = <120>;
+
+        status = "okay";
+
+        display-timings {
+            native-mode = <&edp_timing>;
+            edp_timing: edp_timing {
+                clock-frequency = <270000000>;	
+                hactive = <2560>;
+                vactive = <1600>;
+                
+                hfront-porch = <48>;
+                hsync-len = <32>;
+                hback-porch = <112>;
+                
+                vfront-porch = <3>;
+                vsync-len = <6>;
+                vback-porch = <33>;
+                
+                hsync-active = <0>;
+                vsync-active = <0>;
+                de-active = <0>;
+                pixelclk-active = <0>;
+            }; 
+        };
+
+            port {
+                panel_in_edp: endpoint {
+                    remote-endpoint = <&edp_out_panel>;
+            };
+        };
+    };
+};
+#endif

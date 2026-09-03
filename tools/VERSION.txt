@@ -1,0 +1,16 @@
+# Quectel PI M2 (RK3576) SDK
+SDK_NAME=ai_sdk
+BOARD=M2
+SOC=RK3576
+ROOTFS=Debian arm64
+KERNEL=Linux 6.1.118
+FIRMWARE_VERSION=QSM610ZAPWFRD1A01_BD01BP01K0M01_QDP_LP6.1.118.01.002
+KERNEL_DTS=rk3576-quectel-pi-m2-linux
+DEFCONFIG=rockchip_linux_defconfig
+FRAGMENTS="cma.config quectel-pwm-fan.config quectel-overlays.config"
+FIT_ITS=boot-debian.its
+BOOT_FORMAT=FIT (U-Boot, magic 0xd00dfeed)
+SECURE_BOOT=disabled
+TOOLCHAIN=aarch64-none-linux-gnu gcc-arm-10.3-2021.07
+SYSROOT_SOURCE=debian/binary
+GENERATED_DATE=2026-08-27

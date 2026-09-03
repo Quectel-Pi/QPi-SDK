@@ -1,0 +1,567 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Linux board include wrapper for Quectel PI M2.
+ * Common hardware shared with SMARC lives in rk3576-quectel-pi-common.dtsi.
+ * M2-specific hardware (YT8531 PHY reset, USB Hub, display, etc.) lives here.
+ */
+
+#include "rk3576-quectel-pi-common.dtsi"
+#include "rk3576-quectel-pi-m2-audio.dtsi"
+#include "display/dsi-panel-waveshare-8inch-c-m2.dtsi"
+#include "display/rk3576-hdmi-m2.dtsi"
+
+/* ========== M2-specific regulators ========== */
+
+/ {
+	vcc_usb1_hub: vcc-usb1-hub {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_usb1_hub";
+		enable-active-high;
+		gpio = <&gpio0 RK_PA0 GPIO_ACTIVE_HIGH>;
+		startup-delay-us = <5000>;
+		regulator-boot-on;
+		regulator-always-on;
+		vin-supply = <&vcc_3v3_s0>;
+	};
+
+	vcc_eth_phy: vcc-eth-phy {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_eth_phy";
+		enable-active-high;
+		gpio = <&gpio3 RK_PD0 GPIO_ACTIVE_HIGH>;
+		startup-delay-us = <10000>;
+		regulator-boot-on;
+		regulator-always-on;
+		vin-supply = <&vcc_3v3_s0>;
+	};
+
+	vcc3v3_pcie0_m2: vcc3v3-pcie0-m2 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc3v3_pcie0_m2";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		enable-active-high;
+		/* M2 netlist: U0201 pin300 PCIE1_WAKE_N -> PCIE0_PWR_EN_3V3 */
+		gpio = <&gpio4 RK_PB0 GPIO_ACTIVE_HIGH>;
+		startup-delay-us = <5000>;
+		regulator-boot-on;
+		regulator-always-on;
+		vin-supply = <&vcc_sys>;
+	};
+
+	/*
+	 * USB0 OTG VBUS supply (USB-A port power).
+	 * M2 netlist: U0201 pin25 LCD_RST -> R0528 -> U0505 ETA6280S2F EN
+	 * (pin4), high active. ETA6280S2F OUT (pin1) -> USB0_PORT_OTG -> USB-A
+	 * VBUS. Driving GPIO0_D1 high enables 5V output on the USB-A port.
+	 *
+	 * Managed by the dwc3/usb2-phy driver: host mode enables VBUS
+	 * (phy_set_mode -> PHY_MODE_USB_HOST -> rockchip_set_vbus_power true),
+	 * peripheral/device mode disables it (PHY_MODE_USB_DEVICE -> false).
+	 * This gives active VBUS cut-off in peripheral mode, preventing reverse
+	 * power feed when the board is attached to a host PC.
+	 */
+	vbus5v0_usb0_otg: vbus5v0-usb0-otg {
+		compatible = "regulator-fixed";
+		regulator-name = "vbus5v0_usb0_otg";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		enable-active-high;
+		gpio = <&gpio0 RK_PD1 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&usb0_vbus_en>;
+		vin-supply = <&vcc5v0_usb>;
+	};
+
+	system_fan: pwm-fan {
+		compatible = "pwm-fan";
+		#cooling-cells = <2>;
+		pwms = <&pwm1_6ch_1 0 200000 0>;
+		cooling-levels = <0 64 128 192 255>;
+		rockchip,temp-trips = <
+			30000 1
+			40000 2
+			50000 3
+			60000 4
+		>;
+	};
+};
+
+&vcc_3v3_s0 {
+	/*
+	 * M2 netlist: GPIO4_A7 / DCDC_EN_3V3 enables the board 3.3V rail
+	 * feeding U0509 IN -> WIFI_BT_3V3 -> FCS960K VBAT.
+	 */
+	enable-active-high;
+	gpio = <&gpio4 RK_PA7 GPIO_ACTIVE_HIGH>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&dcdc_3v3_en>;
+	vin-supply = <&vcc_sys>;
+
+	regulator-state-mem {
+		regulator-on-in-suspend;
+		regulator-suspend-microvolt = <3300000>;
+	};
+};
+
+&vcc3v3_pcie1 {
+	/* GPIO4_A7 is DCDC_EN_3V3 on M2, not a PCIe1 private enable. */
+	/delete-property/ gpios;
+	/delete-property/ enable-active-high;
+	status = "disabled";
+};
+
+/* ========== M2 FCS960K Wi-Fi/BT ========== */
+
+&sdio_pwrseq {
+	/* GPIO2_B3 is FCS960K PWRKEY/WLAN_EN, not an SDIO reset line. */
+	/delete-property/ reset-gpios;
+};
+
+&wireless_wlan {
+	wifi_chip_type = "aic8800";
+	pinctrl-0 = <&wifi_host_wake_irq &wifi_vbat_gpio>;
+	WIFI,vbat_gpio = <&gpio3 RK_PA3 GPIO_ACTIVE_HIGH>;
+	WIFI,poweren_gpio = <&gpio2 RK_PB3 GPIO_ACTIVE_HIGH>;
+	wakeup-source;
+};
+
+&wireless_bluetooth {
+	/delete-property/ clock-names;
+	/delete-property/ BT,reset_gpio;
+	wakeup-source;
+};
+
+&wifi_poweren_gpio {
+	rockchip,pins = <2 RK_PB3 RK_FUNC_GPIO &pcfg_output_high_pull_up>;
+};
+
+&pinctrl {
+	wireless-wlan {
+		wifi_vbat_gpio: wifi-vbat-gpio {
+			rockchip,pins = <3 RK_PA3 RK_FUNC_GPIO &pcfg_output_high_pull_up>;
+		};
+	};
+
+	usb {
+		/* GPIO0_D1, USB0_PWR_EN -> ETA6280S2F EN, high active */
+		usb0_vbus_en: usb0-vbus-en {
+			rockchip,pins = <0 RK_PD1 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	power {
+		dcdc_3v3_en: dcdc-3v3-en {
+			rockchip,pins = <4 RK_PA7 RK_FUNC_GPIO &pcfg_output_high_pull_up>;
+		};
+	};
+};
+
+&rockchip_suspend {
+	/*
+	 * Keep the upstream 3.3V rail and FCS960K control pins asserted in
+	 * BL31 deep sleep. Hardware probing showed GPIO3_A3/WIFI_BT_PWR_EN_3V3
+	 * and GPIO2_B3/WMOB_PWRKEY_WIFI_EN_3V3 stay high, but GPIO4_A7 /
+	 * DCDC_EN_3V3 drops low and removes VDD_3V3_SYS, cutting U0509 IN and
+	 * therefore FCS960K VBAT.
+	 */
+	rockchip,power-ctrl =
+		<&gpio4 RK_PA7 GPIO_ACTIVE_HIGH>, /* DCDC_EN_3V3 / VDD_3V3_SYS */
+		<&gpio3 RK_PA3 GPIO_ACTIVE_HIGH>, /* WIFI_BT_PWR_EN_3V3 */
+		<&gpio2 RK_PB3 GPIO_ACTIVE_HIGH>; /* WMOB_PWRKEY_WIFI_EN_3V3 */
+
+	rockchip,sleep-io-ret-config = <
+		(0
+		| RKPM_VCCIO2_RET_EN /* GPIO4_A7 / DCDC_EN_3V3 */
+		| RKPM_VCCIO4_RET_EN /* FCS960K local 3.3V control pads */
+		)
+	>;
+};
+
+/* ========== M2 GMAC (YT8531 PHY, reset-gpios style) ========== */
+
+&gmac0 {
+	phy-mode = "rgmii-rxid";
+	clock_in_out = "output";
+
+	reset-gpios = <&gpio0 RK_PC3 GPIO_ACTIVE_HIGH>;
+	reset-assert-us = <20000>;
+	reset-deassert-us = <100000>;
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&eth0m0_miim
+		     &eth0m0_tx_bus2
+		     &eth0m0_rx_bus2
+		     &eth0m0_rgmii_clk
+		     &eth0m0_rgmii_bus
+		     &ethm0_clk0_25m_out
+		     &eth_phy_rst>;
+
+	tx_delay = <0x20>;
+	/* rx_delay = <0x3f>; */
+
+	phy-handle = <&rgmii_phy0>;
+	phy-supply = <&vcc_eth_phy>;
+	status = "okay";
+};
+
+/* ========== M2 eth PHY reset pinctrl ========== */
+
+&pinctrl {
+	eth_phy {
+		eth_phy_rst: eth-phy-rst {
+			rockchip,pins = <0 RK_PC3 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};
+
+/* ========== M2 40Pin header ========== */
+
+&gpio0 {
+	header_3v3_enable_hog: header-3v3-enable-hog {
+		gpio-hog;
+		gpios = <RK_PC7 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "40pin-3v3-enable";
+	};
+};
+/* ========== M2 SD card power: SD_EN (GPIO0_B6) controls SD_3V3 load switch ========== */
+&{/} {
+	vcc_sd: vcc-sd {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_sd";
+		enable-active-high;
+		gpio = <&gpio0 RK_PB6 GPIO_ACTIVE_HIGH>;
+		startup-delay-us = <10000>;
+		regulator-boot-on;
+		vin-supply = <&vcca_3v3_s0>;
+	};
+};
+
+&sdmmc {
+	broken-cd;			/* Flip-type SD holder has no card-detect switch */
+	/delete-property/ sd-uhs-sdr104;	/* M2 SD slot IO is fixed 3.3V, no 1.8V UHS */
+	vmmc-supply = <&vcc_sd>;	/* SD_3V3 via load switch controlled by GPIO0_B6 */
+};
+
+/* ========== M2 SDIO1 / SPI1 pinmux ========== */
+
+&i2c2 {
+	/delete-node/ rtc@32;
+
+	rtc@51 {
+		compatible = "nxp,pcf8563";
+		reg = <0x51>;
+	};
+};
+
+&can0 {
+	status = "disabled";
+};
+
+&i2c3 {
+	status = "okay";
+};
+
+&pwm2_8ch_3 {
+	pinctrl-0 = <&pwm2m2_ch3>;
+	status = "okay";
+};
+
+&spi1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&spi1m1_csn0 &spi1m1_csn1 &spi1m1_pins>;
+	status = "okay";
+
+	spidev@1 {
+		compatible = "rockchip,spidev";
+		reg = <1>;
+		spi-max-frequency = <12000000>;
+		status = "okay";
+	};
+};
+
+&uart1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart1m1_xfer>;
+	status = "okay";
+};
+
+&pinctrl {
+	pcie-5g-hat {
+		pcie_5g_hat_pwkey: pcie-5g-hat-pwkey {
+			/* 40-pin Pin 29: RGMII1_MDIO_3V3, RPi GPIO5 equivalent */
+			rockchip,pins = <2 RK_PD5 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		pcie_5g_hat_reset: pcie-5g-hat-reset {
+			/* 40-pin Pin 31: RGMII1_MDC_3V3, RPi GPIO6 equivalent */
+			rockchip,pins = <2 RK_PD4 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};
+
+/* ========== M2 PCIe0 (no max-link-speed limit) ========== */
+
+&pcie0 {
+	phy-names = "pcie-phy";
+	reset-gpios = <&gpio0 RK_PB4 GPIO_ACTIVE_HIGH>;
+	pwkey-gpios = <&gpio2 RK_PD5 GPIO_ACTIVE_LOW>;
+	modem-reset-gpios = <&gpio2 RK_PD4 GPIO_ACTIVE_HIGH>;
+	delay-ms = <3000>;
+	modem-reset-pulse-ms = <500>;
+	rockchip,perst-inactive-ms = <3000>;
+	rockchip,skip-scan-in-resume;
+	supports-clkreq;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pcie0m0_pins &pcie_5g_hat_pwkey &pcie_5g_hat_reset>;
+	vpcie3v3-supply = <&vcc3v3_pcie0_m2>;
+	status = "okay";
+};
+
+/* ========== M2 USB ========== */
+
+&u2phy0 {
+	status = "okay";
+};
+
+&u2phy0_otg {
+	/* VBUS driven by ETA6280S2F load switch via GPIO0_D1.
+	 * Driver auto-manages: host mode -> regulator_enable (VBUS on),
+	 * peripheral mode -> regulator_disable (VBUS off, no reverse feed). */
+	vbus-supply = <&vbus5v0_usb0_otg>;
+};
+
+&u2phy1 {
+	status = "okay";
+};
+
+/* GPIO4_B2 is the M2 speaker PA control, not USB OTG1 VBUS enable.
+ * Disable vbus5v0_typec_evb to release GPIO4_B2 for speaker PA,
+ * and delete u2phy1_otg's vbus-supply reference to prevent deferred probe
+ * (which would block USB1 controller init and CH634M HUB power-on). */
+&vbus5v0_typec_evb {
+	status = "disabled";
+};
+
+&u2phy1_otg {
+	/delete-property/ vbus-supply;
+};
+
+&usb_drd0_dwc3 {
+	dr_mode = "peripheral";
+	extcon = <&u2phy0>;
+	status = "okay";
+};
+
+&usb_drd1_dwc3 {
+	dr_mode = "host";
+	status = "okay";
+};
+
+&usbc1 {
+	status = "disabled";
+};
+
+/* ========== M2 Display (DSI + HDMI, no DP) ========== */
+
+&route_dp0 {
+	status = "disabled";
+};
+
+&dp {
+	status = "disabled";
+};
+
+&dp0 {
+	status = "disabled";
+};
+
+&dp0_sound {
+	status = "okay";
+};
+
+/* ========== M2 BOOTKEY ==========
+ * BOOTKEY 复用 SARADC1（芯片 Pin18/ADC4），与 VOL_UP 共用引脚。
+ * SH603ZA（SMARC）将该通道 disabled，M2 需要重新 enable 并配为 KEY_POWER。
+ * 根据硬件文档：BOOTKEY 长按进下载模式；这里提供 Linux 输入事件。
+ * press-threshold-microvolt 为初始值，需上板实测调整。
+ */
+&adc_keys_ch1 {
+	status = "okay";
+
+	/delete-node/ v_up_key;
+
+	boot-key {
+		label = "bootkey";
+		linux,code = <KEY_POWER>;
+		press-threshold-microvolt = <45000>;
+	};
+};
+
+/* VOL_DOWN 未引出，保持 disabled */
+&adc_keys_ch5 {
+	status = "disabled";
+};
+
+/* ========== M2 SATA ==========
+ * M2 板未使用 SATA，但 common.dtsi 中为 okay。
+ * 休眠唤醒时 combphy2 初始化失败导致 external abort，
+ * Oops in ahci_port_resume. Disable SATA to avoid this.
+ */
+&sata0 {
+	status = "disabled";
+};
+
+/* ========== M2 Camera (IMX219 + IMX477 coexist candidates) ========== */
+
+/*
+ * M2 keeps IMX219 and IMX477 candidate nodes together.
+ * Each physical CSI input uses separate endpoints for each candidate sensor;
+ * only one sensor should be physically present per connector at a time.
+ */
+&i2c4 {
+	imx477_0: imx477@1a {
+		compatible = "sony,imx477";
+		reg = <0x1a>;
+		status = "okay";
+		power-domains = <&power RK3576_PD_VI>;
+		avdd-supply = <&vcc_camera>;
+		dvdd-supply = <&vcc_camera>;
+		dovdd-supply = <&vcc_camera>;
+		clocks = <&cru CLK_MIPI_CAMERAOUT_M0>;
+		assigned-clocks = <&cru CLK_MIPI_CAMERAOUT_M0>;
+		assigned-clock-rates = <24000000>;
+		clock-names = "xvclk";
+		pinctrl-names = "default", "rockchip,camera_default", "rockchip,camera_sleep";
+		pinctrl-0 = <&cam_clk0m0_clk0>;
+		pinctrl-1 = <&cam0_reset_active>;
+		pinctrl-2 = <&cam0_reset_sleep>;
+		reset-gpios = <&gpio3 RK_PD5 GPIO_ACTIVE_HIGH>;
+		pwdn-gpios = <&gpio3 RK_PC7 GPIO_ACTIVE_HIGH>;
+		rockchip,camera-module-index = <0>;
+		rockchip,camera-module-facing = "back";
+		rockchip,camera-module-name = "IMX477";
+		rockchip,camera-module-lens-name = "default";
+
+		port {
+			imx477_out0: endpoint {
+				remote-endpoint = <&mipi_in_ucam0>;
+				data-lanes = <2 1>;
+				link-frequencies = /bits/ 64 <1050000000>;
+			};
+		};
+	};
+};
+
+&i2c5 {
+	imx477_1: imx477@1a {
+		compatible = "sony,imx477";
+		reg = <0x1a>;
+		status = "okay";
+		power-domains = <&power RK3576_PD_VI>;
+		avdd-supply = <&vcc_camera>;
+		dvdd-supply = <&vcc_camera>;
+		dovdd-supply = <&vcc_camera>;
+		clocks = <&cru CLK_MIPI_CAMERAOUT_M2>;
+		assigned-clocks = <&cru CLK_MIPI_CAMERAOUT_M2>;
+		assigned-clock-rates = <24000000>;
+		clock-names = "xvclk";
+		pinctrl-names = "default", "rockchip,camera_default", "rockchip,camera_sleep";
+		pinctrl-0 = <&cam_clk2m0_clk2>;
+		pinctrl-1 = <&cam2_reset_active>;
+		pinctrl-2 = <&cam2_reset_sleep>;
+		reset-gpios = <&gpio3 RK_PD6 GPIO_ACTIVE_HIGH>;
+		pwdn-gpios = <&gpio3 RK_PD4 GPIO_ACTIVE_HIGH>;
+		rockchip,camera-module-index = <1>;
+		rockchip,camera-module-facing = "back";
+		rockchip,camera-module-name = "IMX477";
+		rockchip,camera-module-lens-name = "default";
+
+		port {
+			imx477_out1: endpoint {
+				remote-endpoint = <&mipi_in_ucam5>;
+				data-lanes = <2 1>;
+				link-frequencies = /bits/ 64 <1050000000>;
+			};
+		};
+	};
+};
+
+&imx219 {
+	status = "okay";
+};
+
+&imx219_1 {
+	status = "okay";
+	clocks = <&cru CLK_MIPI_CAMERAOUT_M2>;
+	assigned-clocks = <&cru CLK_MIPI_CAMERAOUT_M2>;
+	assigned-clock-rates = <24000000>;
+	pinctrl-0 = <&cam_clk2m0_clk2>;
+	pinctrl-1 = <&cam2_reset_active>;
+	pinctrl-2 = <&cam2_reset_sleep>;
+	reset-gpios = <&gpio3 RK_PD6 GPIO_ACTIVE_LOW>;
+	pwdn-gpios = <&gpio3 RK_PD4 GPIO_ACTIVE_LOW>;
+};
+
+&imx219_out0 {
+	remote-endpoint = <&mipi_in_ucam0_imx219>;
+};
+
+&csi2_dcphy0 {
+	ports {
+		port@0 {
+			mipi_in_ucam0_imx219: endpoint@2 {
+				reg = <2>;
+				remote-endpoint = <&imx219_out0>;
+				data-lanes = <2 1>;
+			};
+		};
+	};
+};
+
+&imx219_out1 {
+	remote-endpoint = <&mipi_in_ucam6>;
+};
+
+&dw9763 {
+	status = "okay";
+};
+
+&mipi_in_ucam0 {
+	status = "okay";
+	remote-endpoint = <&imx477_out0>;
+	data-lanes = <2 1>;
+};
+
+&mipi_in_ucam3 {
+	/delete-property/ remote-endpoint;
+};
+
+&mipi_in_ucam5 {
+	remote-endpoint = <&imx477_out1>;
+	data-lanes = <2 1>;
+};
+
+&mipi_in_ucam6 {
+	status = "okay";
+	remote-endpoint = <&imx219_out1>;
+	data-lanes = <2 1>;
+};
+
+&csi2_dphy3 {
+	status = "okay";
+};
+
+&mipi3_csi2 {
+	status = "okay";
+};
+
+&rkcif_mipi_lvds3 {
+	status = "okay";
+};
+
+/* GPIO0_C6 is the codec_vdd3v3 control, not CCLOGIC. */
+&usbc0 {
+	status = "disabled";
+};

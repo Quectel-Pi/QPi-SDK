@@ -1,0 +1,50 @@
+{
+  "id": "gpio",
+  "name": "GPIO 控制（点灯/读按键）",
+  "icon": "💡",
+  "tag": "外设",
+  "description": "通过 sysfs 控制 GPIO：支持输出（LED 常亮/闪烁）和输入（按键读取）。适合熟悉 40Pin 引脚。",
+  "expected": "LED 按所选模式亮起或闪烁；输入模式按下按键时打印状态变化。",
+  "difficulty": 2,
+  "peripherals": [
+    "GPIO",
+    "40Pin"
+  ],
+  "files": [
+    "main.c",
+    "CMakeLists.txt"
+  ],
+  "variables": {
+    "PROJECT_NAME": {
+      "label": "项目名称",
+      "type": "text",
+      "default": "gpio_demo",
+      "hint": "仅限字母、数字、下划线"
+    },
+    "GPIO_NUM": {
+      "label": "GPIO 编号 (sysfs)",
+      "type": "text",
+      "default": "508",
+      "hint": "编号 = bank*32 + 组(A=0,B=1,C=2,D=3)*8 + 引脚, 请按硬件原理图填写"
+    },
+    "MODE": {
+      "label": "工作模式",
+      "type": "choice",
+      "default": "blink",
+      "choices": [
+        {
+          "value": "blink",
+          "label": "闪烁 (500ms 翻转)"
+        },
+        {
+          "value": "steady",
+          "label": "常亮"
+        },
+        {
+          "value": "input",
+          "label": "输入模式 (读取电平)"
+        }
+      ]
+    }
+  }
+}

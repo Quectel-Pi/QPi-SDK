@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+export QPI_ROOTFS_TOOL_NAME="$(basename "$0")"
+exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/qemu-rootfs-tool" "$@"

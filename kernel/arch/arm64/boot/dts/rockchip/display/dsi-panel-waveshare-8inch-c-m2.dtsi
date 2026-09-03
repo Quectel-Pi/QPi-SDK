@@ -1,0 +1,175 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Quectel PI M2 RK3576 使用的微雪 8 寸 DSI LCD (C) 屏幕配置。
+ *
+ * 当前使用的 M2 LCM 连接器映射：
+ * - LCM_PEN_1V8：GPIO3_C5，输出高电平打开 LCM 连接器 3.3V 电源。
+ * - TP_RST_3V3/TP_INT_3V3/TP_I2C0_SCL/TP_I2C0_SDA 连接到触摸 IC；
+ *   TP_RST/TP_INT 通过 U1203 电平转换到 LCM 连接器 3.3V 侧。
+ * - waveshare-bl@45 仍使用连接器 I2C 通路控制背光。
+ * - DSI_TX_D0..D3 和 DSI_TX_CLK 由 DSI 控制器/PHY 处理。
+ */
+
+/ {
+	m2_lcm_3v3: m2-lcm-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "m2_lcm_3v3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-boot-on;
+		enable-active-high;
+		gpio = <&gpio3 RK_PC5 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&m2_lcm_pen_gpio>;
+	};
+};
+
+&display_subsystem {
+	status = "okay";
+	memory-region = <&drm_logo>, <&drm_cubic_lut>;
+	memory-region-names = "drm-logo", "drm-cubic-lut";
+};
+
+&dsi {
+	status = "okay";
+
+	m2_dsi_panel: panel@0 {
+		status = "okay";
+		compatible = "waveshare,dsi-lcd-c";
+		reg = <0>;
+		power-supply = <&m2_lcm_3v3>;
+		backlight = <&m2_ws_backlight>;
+
+		/* TP I2C 设备保留在 i2c0 下，RST/INT GPIO 映射待 M2 资料确认。 */
+		init-delay-ms = <120>;
+		prepare-delay-ms = <20>;
+		enable-delay-ms = <20>;
+		disable-delay-ms = <20>;
+		unprepare-delay-ms = <80>;
+
+		width-mm = <172>;
+		height-mm = <108>;
+		bpc = <8>;
+		dsi,flags = <(MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
+			      MIPI_DSI_MODE_LPM | MIPI_DSI_MODE_NO_EOT_PACKET)>;
+		dsi,format = <MIPI_DSI_FMT_RGB888>;
+		/*
+		 * 保持和已验证的 SMARC 微雪 8 寸 LCD-C 配置一致。
+		 * M2 连接器引出了 4 路 DSI 数据线，但当前屏幕配置使用 2 lane。
+		 */
+		dsi,lanes = <2>;
+
+		display-timings {
+			native-mode = <&m2_waveshare_8inch_c_timing>;
+
+			m2_waveshare_8inch_c_timing: timing0 {
+				clock-frequency = <83333000>;
+				hactive = <1280>;
+				vactive = <800>;
+				hfront-porch = <156>;
+				hsync-len = <20>;
+				hback-porch = <40>;
+				vfront-porch = <40>;
+				vsync-len = <48>;
+				vback-porch = <40>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <0>;
+			};
+		};
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@1 {
+				reg = <1>;
+
+				m2_panel_in_dsi: endpoint {
+					remote-endpoint = <&m2_dsi_out_panel>;
+				};
+			};
+		};
+	};
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@1 {
+			reg = <1>;
+
+			m2_dsi_out_panel: endpoint {
+				remote-endpoint = <&m2_panel_in_dsi>;
+			};
+		};
+	};
+};
+
+&mipidcphy0 {
+	status = "okay";
+};
+
+&route_dsi {
+	status = "okay";
+	logo,uboot = "quectel_720p.bmp";
+	logo,kernel = "quectel_720p_kernel.bmp";
+};
+
+&dsi_in_vp0 {
+	status = "disabled";
+};
+
+&dsi_in_vp1 {
+	status = "okay";
+};
+
+&dsi_in_vp2 {
+	status = "disabled";
+};
+
+&dsi_in_vopl {
+	status = "disabled";
+};
+
+&i2c0 {
+	/* M2 LCM 连接器触摸 I2C 通道，对应 TP_I2C0_SCL/TP_I2C0_SDA。 */
+	pinctrl-0 = <&i2c0m1_xfer>;
+	status = "okay";
+
+	m2_gt911: gt911@14 {
+		/*
+		 * 参考 H1 微雪 8 寸屏触摸配置，仅通过 0x14 I2C 设备绑定
+		 * Goodix GT911；不配置 interrupts/irq-gpios/reset-gpios。
+		 * 当前 Goodix 驱动在无 IRQ 时会走 I2C 定时轮询路径。
+		 */
+		status = "okay";
+		compatible = "goodix,gt911";
+		reg = <0x14>;
+		AVDD28-supply = <&m2_lcm_3v3>;
+		VDDIO-supply = <&m2_lcm_3v3>;
+		touchscreen-size-x = <800>;
+		touchscreen-size-y = <1280>;
+		touchscreen-inverted-x;
+		touchscreen-swapped-x-y;
+	};
+
+	m2_ws_backlight: waveshare-bl@45 {
+		status = "okay";
+		compatible = "waveshare-bl";
+		reg = <0x45>;
+		default-brightness-level = <200>;
+		max-brightness-level = <255>;
+		min-brightness-level = <15>;
+	};
+};
+
+&pinctrl {
+	lcd-m2 {
+		m2_lcm_pen_gpio: m2-lcm-pen-gpio {
+			/* LCM_PEN_1V8，对应连接器 235 脚，GPIO3_C5_d。 */
+			rockchip,pins = <3 RK_PC5 RK_FUNC_GPIO &pcfg_pull_down>;
+		};
+	};
+};

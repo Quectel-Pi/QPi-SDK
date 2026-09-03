@@ -1,0 +1,48 @@
+{
+  "id": "pwm",
+  "name": "PWM 输出（风扇/背光）",
+  "icon": "🌀",
+  "tag": "外设",
+  "description": "通过 sysfs 控制 PWM：设置频率与占空比，可用于 PWM 风扇调速、屏幕背光等。",
+  "expected": "PWM 波形输出，调节占空比后外设转速/亮度随之变化。",
+  "difficulty": 2,
+  "peripherals": [
+    "PWM"
+  ],
+  "files": [
+    "main.c",
+    "CMakeLists.txt"
+  ],
+  "variables": {
+    "PROJECT_NAME": {
+      "label": "项目名称",
+      "type": "text",
+      "default": "pwm_demo",
+      "hint": "仅限字母、数字、下划线"
+    },
+    "PWM_CHIP": {
+      "label": "PWM 控制器编号",
+      "type": "text",
+      "default": "0",
+      "hint": "板子上执行 ls /sys/class/pwm/ 查看可用控制器"
+    },
+    "PWM_CHANNEL": {
+      "label": "PWM 通道号",
+      "type": "text",
+      "default": "0",
+      "hint": "对应 /sys/class/pwm/pwmchipN/pwm{channel}"
+    },
+    "PERIOD_NS": {
+      "label": "周期 (纳秒)",
+      "type": "text",
+      "default": "1000000",
+      "hint": "1000000 ns = 1 kHz"
+    },
+    "DUTY_PERCENT": {
+      "label": "占空比 (%)",
+      "type": "text",
+      "default": "50",
+      "hint": "1-99 之间的整数"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0
+obj-$(CONFIG_TYPEC_TCPM)		+= tcpm.o
+obj-$(CONFIG_TYPEC_TCPCI)		+= tcpci.o
+obj-$(CONFIG_TYPEC_FUSB302)		+= fusb302.o
+obj-$(CONFIG_TYPEC_WCOVE)		+= wcove.o
+obj-$(CONFIG_TYPEC_ET7303)		+= tcpci_et7303.o
+obj-$(CONFIG_TYPEC_HUSB311)		+= tcpci_husb311.o
+obj-$(CONFIG_TYPEC_RT1711H)		+= tcpci_rt1711h.o
+obj-$(CONFIG_TYPEC_MT6360)		+= tcpci_mt6360.o
+obj-$(CONFIG_TYPEC_TCPCI_MT6370)	+= tcpci_mt6370.o
+obj-$(CONFIG_TYPEC_TCPCI_MAXIM)		+= tcpci_maxim.o
+obj-$(CONFIG_TYPEC_TCPCI_AW35615)	+= tcpci_aw35615.o
+obj-$(CONFIG_AW35616_CC_LOGIC)		+= typec_aw35616.o
+obj-$(CONFIG_TYPEC_PERICOM_30216C)	+= pericom_30216c.o
