@@ -19,3 +19,6 @@ toolchains/*
 
 # 内核源码树内的旧编译输出 (实际输出在 build/kernel/)
 kernel/build-kernel-out/
+
+# 设备调试日志 (panic log 等)
+log/

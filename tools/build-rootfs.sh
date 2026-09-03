@@ -100,7 +100,10 @@ base_source() {
 
 # ---------------------------------------------------------------------------
 # extract: 从镜像建立 base 目录 (镜像 → 目录)
-#   优先 sudo mount + rsync (保真属主); 无 sudo 时 btrfs restore (属主归一)
+#   ★ 必须 sudo mount + rsync 保真 (属主/权限/符号链接), 这是 rootfs 打包前提:
+#     btrfs restore 会把属主归一为当前用户 → 设备 init/systemd 权限错 → 起不来
+#   (提取 sysroot 用 tools/extract-sysroot.sh, 那个允许 btrfs restore 免 root,
+#    因为交叉编译不依赖属主)
 # ---------------------------------------------------------------------------
 cmd_extract() {
     local img="${1:-${SRC_IMG}}"
@@ -110,35 +113,27 @@ cmd_extract() {
         log_err "目标目录已存在且非空: ${dst} (先删除或指定其他目录)"
         return 1
     fi
-    mkdir -p "${dst}"
 
-    # 方式 1: sudo mount + rsync (保真, 推荐一次性)
-    if ${SUDO} -n true 2>/dev/null; then
-        local mnt
-        mnt="$(mktemp -d)"
-        log_info "sudo 可用: mount + rsync 提取 (保真属主/权限) ..."
-        ${SUDO} mount -o loop,ro "${img}" "${mnt}" || { log_err "挂载失败"; rmdir "${mnt}"; return 1; }
-        ${SUDO} rsync -aHAX --numeric-ids "${mnt}/" "${dst}/"
-        ${SUDO} umount "${mnt}"
-        rmdir "${mnt}"
-        log_ok "提取完成 (保真): ${dst}"
-    else
-        # 方式 2: btrfs restore 免 root (属主归一为当前用户, 权限需修复)
-        log_warn "无 sudo 凭证, 用 btrfs restore 免 root 提取 (属主归一, 稍后需 chown 修正)"
-        log_warn "提示: 先 sudo -v 可走保真提取"
-        btrfs restore -i -S -x "${img}" "${dst}" 2>&1 | grep -v "Operation not permitted\|setting extended" | head -3 || true
-        log_info "修复权限 ..."
-        find "${dst}" -type d -exec chmod 755 {} + 2>/dev/null || true
-        find "${dst}" -type f -exec chmod 644 {} + 2>/dev/null || true
-        for d in bin sbin usr/bin usr/sbin usr/libexec; do
-            [ -d "${dst}/${d}" ] && find "${dst}/${d}" -type f -exec chmod 755 {} + 2>/dev/null || true
-        done
-        rm -rf "${dst}/dev"; mkdir -p "${dst}/dev"
-        log_ok "提取完成 (免 root): ${dst}"
+    # sudo 检查 (保真提取必须 root)
+    if ! ${SUDO} -n true 2>/dev/null; then
+        log_err "extract base 需要 root (mount+rsync 保真属主)"
+        log_err "请先执行: ${SUDO} -v   (base 属主错误会导致设备无法启动)"
+        return 1
     fi
-    echo ""
-    log_ok "base 目录就绪: ${dst}"
-    log_info "定制文件 → 放 overlay/ ; 然后 ./tools/build-rootfs.sh build 打包"
+
+    mkdir -p "${dst}"
+    local mnt
+    mnt="$(mktemp -d)"
+    log_info "mount + rsync 保真提取: ${img} → ${dst} ..."
+    ${SUDO} mount -o loop,ro "${img}" "${mnt}" || { log_err "挂载失败"; rmdir "${mnt}"; return 1; }
+    ${SUDO} rsync -aHAX --numeric-ids "${mnt}/" "${dst}/"
+    ${SUDO} umount "${mnt}"
+    rmdir "${mnt}"
+
+    local nonroot
+    nonroot="$(${SUDO} find "${dst}" -not -user 0 2>/dev/null | wc -l)"
+    log_ok "提取完成: ${dst}"
+    log_info "非 root 属主: ${nonroot} 个 (原厂≈2, /home/pi 等)"
     return 0
 }
 
@@ -151,23 +146,41 @@ apply_overlay() {
     [ -d "${OVERLAY_DIR}" ] || { log_err "overlay 目录不存在: ${OVERLAY_DIR}"; return 1; }
 
     log_info "合成 staging: ${src} → ${STAGING}"
-    rm -rf "${STAGING}"
-    mkdir -p "${STAGING}"
+    ${SUDO} rm -rf "${STAGING}"
+    ${SUDO} mkdir -p "${STAGING}"
 
-    # 1. base → staging (reflink 优先, 快且省空间)
-    cp -a --reflink=auto "${src}/." "${STAGING}/" 2>/dev/null \
-        || rsync -aHAX --numeric-ids "${src}/" "${STAGING}/"
+    # sudo 检查 (保真复制需要 root 保留属主; 普通 cp -a 会把 root 属主变自己)
+    if ! ${SUDO} -n true 2>/dev/null; then
+        log_err "apply 需要 root (保真复制 base 属主)"
+        log_err "请先执行: ${SUDO} -v   (base 属主错误会导致设备无法启动)"
+        return 1
+    fi
 
-    # 2. overlay → staging (追加/覆盖)
+    # 1. base → staging (reflink 优先, 快且省空间; sudo 保留属主)
+    ${SUDO} cp -a --reflink=auto "${src}/." "${STAGING}/" 2>/dev/null \
+        || ${SUDO} rsync -aHAX --numeric-ids "${src}/" "${STAGING}/"
+
+    # 2. overlay → staging: 用 cp --parents 逐文件复制
+    #    ★ 不用 rsync: rsync 会更新已存在父目录的属性 (如 /lib 777→755),
+    #      污染 base 目录权限 → 设备启动失败
+    #    cp --parents 只复制文件本身, 不碰已存在的父目录; 新目录自动创建
     log_info "应用 overlay: ${OVERLAY_DIR}"
-    rsync -aHAX --numeric-ids \
-        --exclude='overlay-remove.list' \
-        "${OVERLAY_DIR}/" "${STAGING}/"
+    (cd "${OVERLAY_DIR}" && find . -type f ! -name 'overlay-remove.list' | \
+        while IFS= read -r f; do
+            rel="${f#./}"
+            ${SUDO} cp -a --parents "${rel}" "${STAGING}/" 2>/dev/null \
+                || ${SUDO} install -D -m 755 "${rel}" "${STAGING}/${rel}"
+        done)
 
-    # 3. 额外 overlay
+    # 3. 额外 overlay (同上)
     if [ -n "${EXTRA_OVERLAY:-}" ] && [ -d "${EXTRA_OVERLAY}" ]; then
         log_info "应用额外 overlay: ${EXTRA_OVERLAY}"
-        rsync -aHAX --numeric-ids "${EXTRA_OVERLAY}/" "${STAGING}/"
+        (cd "${EXTRA_OVERLAY}" && find . -type f | \
+            while IFS= read -r f; do
+                rel="${f#./}"
+                ${SUDO} cp -a --parents "${rel}" "${STAGING}/" 2>/dev/null \
+                    || ${SUDO} install -D -m 755 "${rel}" "${STAGING}/${rel}"
+            done)
     fi
 
     # 4. 删除清单
@@ -215,33 +228,81 @@ apply_overlay() {
 }
 
 # ---------------------------------------------------------------------------
-# repack: staging 目录 → BTRFS 镜像 (fakeroot 保属主, mkfs.btrfs --rootdir)
-#   注意: mkfs.btrfs 生成新文件系统; 大小默认与原镜像一致, UUID 可复现固定
+# repack: staging 目录 → BTRFS 镜像 (确定性固定大小, 可复现)
+#   流程: mkfs -b <原镜像大小> 空 BTRFS → tune UUID → 挂载 → rsync 填充 staging
+#   注意: 不用 --rootdir (btrfs-progs 5.16 对大目录忽略 -b 自动扩展,
+#         产出 17.9GB 超 GPT system 分区 → 烧录后内核挂 rootfs 失败重启)
+#   依赖: sudo (挂载), rsync
 # ---------------------------------------------------------------------------
 repack_img() {
     local src="${1:-${STAGING}}"
     local img="${2:-${OUT_IMG}}"
     [ -d "${src}" ] || { log_err "目录不存在: ${src} (先 apply)"; return 1; }
-    command -v fakeroot >/dev/null 2>&1 || { log_warn "未找到 fakeroot, 属主将不保真 (uid 变当前用户)"; }
     command -v btrfs >/dev/null 2>&1 || { log_err "缺少 btrfs-progs (mkfs.btrfs)"; return 1; }
+    command -v rsync >/dev/null 2>&1 || { log_err "缺少 rsync"; return 1; }
+
+    # sudo 检查 (挂载填充需要)
+    if ! ${SUDO} -n true 2>/dev/null; then
+        log_err "repack 需要 root (mount loop 填充 staging)"
+        log_err "请先执行: ${SUDO} -v   (或 ${SUDO} -n 配置免密)"
+        return 1
+    fi
 
     local size_mb=$(( IMG_SIZE / 1024 / 1024 ))
     log_info "打包: ${src} → ${img}"
-    log_info "  大小: ${size_mb} MiB   UUID: ${IMG_UUID}"
+    log_info "  大小: ${size_mb} MiB (固定, 与原镜像一致)   UUID: ${IMG_UUID}"
 
     mkdir -p "$(dirname "${img}")"
     rm -f "${img}"
 
-    # 1. 稀疏文件预留大小 (与原镜像一致, 保证不超 GPT 分区)
+    # 1. 先 truncate 创建固定大小文件 (mkfs 要求目标存在, 否则 mount-check 误报)
+    log_info "[1/3] 创建 ${IMG_SIZE} bytes 镜像文件 ..."
+    rm -f "${img}"
     truncate -s "${IMG_SIZE}" "${img}"
 
-    # 2. fakeroot 保属主 + mkfs.btrfs --rootdir (固定大小 -b, 防自动扩展超分区)
-    #    (chown 在 fakeroot 内是伪操作, 让 mkfs 读到 root 属主)
-    #    注意: fakeroot sh -c 内不能用单引号嵌套 (会被转义破坏 -b 参数)
-    if ! fakeroot sh -c "chown -R 0:0 ${src} 2>/dev/null || true; mkfs.btrfs -f -b ${IMG_SIZE} -U ${IMG_UUID} --rootdir ${src} ${img} >/dev/null 2>&1"; then
-        log_err "mkfs.btrfs 打包失败"
-        log_err "  (若提示需要权限: 请在你的终端执行下面命令, 或 sudo -v 后重试)"
-        echo "    fakeroot sh -c \"chown -R 0:0 ${src} && mkfs.btrfs -f -b ${IMG_SIZE} -U ${IMG_UUID} --rootdir ${src} ${img}\""
+    # 2. mkfs 固定大小 BTRFS, 参数与原厂镜像一致
+    #    -n 4096: 原厂 nodesize=4096 (默认 16384 会开 BIG_METADATA, 与原厂 0x341 不符)
+    log_info "[2/3] mkfs.btrfs -b ${IMG_SIZE} -n 4096 ..."
+    if ! ${SUDO} mkfs.btrfs -f -b "${IMG_SIZE}" -n 4096 "${img}"; then
+        log_err "mkfs.btrfs 失败"
+        return 1
+    fi
+
+    # 3. tune UUID 为原镜像 UUID (可复现: 每次产物 UUID 一致)
+    #    btrfstune 需交互确认, 用 yes 管道自动应答; 若系统已占用该 UUID 会失败
+    log_info "[3/3] btrfstune UUID → ${IMG_UUID} ..."
+    if ! echo "y" | ${SUDO} btrfstune -U "${IMG_UUID}" "${img}" 2>/dev/null; then
+        log_warn "btrfstune 失败 (UUID 被占用或系统已有同 UUID 挂载)"
+        log_warn "  提示: 检查 lsblk/findmnt 是否有同 UUID 的已挂载 BTRFS, 卸载后重试"
+        log_warn "  或设置 SYSTEM_IMG_UUID=random 跳过固定 (用随机 UUID)"
+        return 1
+    fi
+
+    # 4. 挂载 + rsync 填充 staging (属主已由保真 base 决定, 不做 chown)
+    #    注意: base 必须用 sudo mount+rsync 保真提取 (见 extract 命令);
+    #          btrfs restore 提取会把属主归一为当前用户 → 设备起不来
+    log_info "[4/4] 挂载填充 staging ..."
+    local mnt
+    mnt="$(mktemp -d)"
+    if ! ${SUDO} mount -o loop "${img}" "${mnt}"; then
+        log_err "挂载失败"
+        rmdir "${mnt}"
+        return 1
+    fi
+    ${SUDO} rsync -aHAX --numeric-ids "${src}/" "${mnt}/"
+    ${SUDO} sync
+    ${SUDO} umount "${mnt}"
+    rmdir "${mnt}"
+
+    # 校验: 非 root 属主文件数应远小于总数 (原厂仅 /home/pi 等少量)
+    local nonroot
+    nonroot="$(${SUDO} find "${src}" -not -user 0 2>/dev/null | wc -l)"
+    local total
+    total="$(${SUDO} find "${src}" 2>/dev/null | wc -l)"
+    log_info "属主校验: 非 root ${nonroot}/${total} 个 (base≈2, overlay 定制文件会少量增加)"
+    if [ "${nonroot}" -gt 1000 ]; then
+        log_err "非 root 属主文件过多 (${nonroot}), base 可能用 btrfs restore 提取过"
+        log_err "请用 sudo 重新 extract (mount+rsync 保真): sudo ./tools/build-rootfs.sh extract"
         return 1
     fi
 
