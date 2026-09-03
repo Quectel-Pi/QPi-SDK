@@ -1,0 +1,6 @@
+ID=qcom-wayland
+NAME="Qualcomm Linux"
+VERSION="1.7-ver.1.1"
+VERSION_ID=1.7-ver.1.1
+PRETTY_NAME="Qualcomm Linux 1.7-ver.1.1"
+CPE_NAME="cpe:/o:openembedded:qcom-wayland:1.7-ver.1.1"

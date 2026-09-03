@@ -1,0 +1,17 @@
+# simple-h1 构建产物 (不入库)
+build/
+overlay/usr/local/bin/hello-h1
+overlay/usr/local/share/
+*.o
+*.ko~
+*.ko
+apps/hello-h1/hello-h1
+
+# 原始固件镜像 (超大二进制, 不入库; 由厂商发布/单独分发)
+prebuilds/
+
+# 交叉编译工具链 (体积大, 独立分发; 需要时从原始位置获取)
+toolchains/
+
+# 内核源码树内的旧编译输出 (实际输出在 build/kernel/)
+kernel/build-kernel-out/
