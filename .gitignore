@@ -11,7 +11,10 @@ apps/hello-h1/hello-h1
 prebuilds/
 
 # 交叉编译工具链 (体积大, 独立分发; 需要时从原始位置获取)
-toolchains/
+# 例外: qcom-rootfs-toolchain 是 qemu wrapper 工具链 (symlink + 小脚本, buildapp 必需, 入库)
+toolchains/*
+!toolchains/qcom-rootfs-toolchain/
+!toolchains/qcom-rootfs-toolchain/**
 
 # 内核源码树内的旧编译输出 (实际输出在 build/kernel/)
 kernel/build-kernel-out/

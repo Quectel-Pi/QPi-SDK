@@ -23,8 +23,17 @@ simple-h1 脱离 Yocto，仅两个功能：
 ### 环境
 ```bash
 cd /home/igni/Downloads/debian/simple-h1
-source scripts/env.sh
+source scripts/env.sh     # 原生入口
+# 或推荐: source build.sh   (与 QPi-SDK/M2 命令兼容层, 自动 source env.sh)
 ```
+
+> M2 兼容命令 (同一套命令在 simple-h1 与 QPi-SDK/M2 通用):
+> source build.sh 后 → buildcheck/buildkernel/buildboot/buildoverlays/buildrootfs/
+> buildall/buildmenuconfig/builddefconfig/buildclean/newapp/buildapp; 或
+> make check|kernel|boot|rootfs|all|clean|...; 或 ./tools/build-kernel.sh <子命令>
+> / ./tools/build-rootfs.sh <子命令>。映射: buildkernel→scripts/build-kernel.sh,
+> buildboot→pack-efi.sh+pack-dtb.sh, buildrootfs→pack-system.sh,
+> buildall→build-all.sh (SKIP_KERNEL=1 语义保留)。
 
 ### 内核编译
 ```bash

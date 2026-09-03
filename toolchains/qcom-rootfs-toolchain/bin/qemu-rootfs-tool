@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# ============================================================================
+# qemu-rootfs-tool - H1 应用交叉编译 qemu wrapper (与 M2 的 qemu-rootfs-tool 同构)
+# ============================================================================
+# 原理: H1 的 system.img 内含 Debian gcc-14 + binutils + libc6-dev (aarch64),
+#       通过 qemu-aarch64 binfmt 在 x86 宿主上原生执行, 完成真交叉编译。
+#       被 toolchains/qcom-rootfs-toolchain/bin/ 下的同名工具链 symlink 调用:
+#         aarch64-linux-gnu-gcc -> 本脚本 -> 执行 sysroot/usr/bin/aarch64-linux-gnu-gcc-14
+#
+# 环境变量:
+#   QPI_SYSROOT    sysroot 路径 (默认 SDK 根/prebuilds/sysroot)
+# ============================================================================
+set -euo pipefail
+
+WRAPPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${WRAPPER_DIR}/../../.." && pwd)"
+SYSROOT="${QPI_SYSROOT:-${ROOT_DIR}/prebuilds/sysroot}"
+TOOL_NAME="${QPI_ROOTFS_TOOL_NAME:-$(basename "$0")}"
+
+if [ ! -d "${SYSROOT}" ]; then
+    echo "[${TOOL_NAME}] sysroot not found: ${SYSROOT} (先运行 tools/extract-sysroot.sh)" >&2
+    exit 127
+fi
+
+# 工具实际路径: sysroot 内是 aarch64-linux-gnu-* 前缀 (gcc-14 版本化)
+case "${TOOL_NAME}" in
+    *gcc|*-gcc)
+        REAL="${SYSROOT}/usr/bin/aarch64-linux-gnu-gcc-14" ;;
+    *g++|*-g++)
+        REAL="${SYSROOT}/usr/bin/aarch64-linux-gnu-g++-14" ;;
+    *)
+        REAL="${SYSROOT}/usr/bin/${TOOL_NAME}" ;;
+esac
+
+if [ ! -x "${REAL}" ]; then
+    echo "[${TOOL_NAME}] tool not found in sysroot: ${REAL}" >&2
+    exit 127
+fi
+
+if [ ! -r /proc/sys/fs/binfmt_misc/qemu-aarch64 ] || ! grep -q '^enabled$' /proc/sys/fs/binfmt_misc/qemu-aarch64; then
+    echo "[${TOOL_NAME}] qemu-aarch64 binfmt not registered (install qemu-user-static, 或: sudo systemctl restart systemd-binfmt)" >&2
+    exit 127
+fi
+
+# gcc 调用 as/ld/cc1 等子程序时能找到 aarch64 版 (PATH 前置 sysroot 内工具)
+export QEMU_LD_PREFIX="${SYSROOT}"
+export PATH="${SYSROOT}/usr/libexec/gcc/aarch64-linux-gnu/14:${SYSROOT}/usr/bin:${PATH}"
+
+exec "${REAL}" "$@"

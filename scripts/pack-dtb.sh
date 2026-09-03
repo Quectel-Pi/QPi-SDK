@@ -13,12 +13,8 @@ SRC_DTB_BIN="${PREBUILDS_DIR}/dtb.bin"
 OUT_DTB_BIN="${OUT_DIR}/dtb.bin"
 MNT="${BUILD_DIR}/dtb-mnt"
 
-# sudo 支持 (与 pack-system.sh 一致)
+# sudo 支持 (仅 mtools 缺失回退挂载时需要; 默认 mtools 免 root)
 SUDO="${SUDO:-sudo}"
-if ! ${SUDO} -n true 2>/dev/null; then
-    echo "[simple-h1] 需要 root 权限, 请先执行: sudo -v"
-    ${SUDO} -v
-fi
 
 [ -f "${SRC_DTB_BIN}" ] || { echo "[ERROR] 原始 dtb.bin 不存在: ${SRC_DTB_BIN}"; exit 1; }
 [ -f "${DTB}" ] || { echo "[ERROR] DTB 不存在: ${DTB}"; exit 1; }
@@ -48,21 +44,33 @@ fi
 rm -f "${OUT_DTB_BIN}"
 cp "${SRC_DTB_BIN}" "${OUT_DTB_BIN}"
 
-mkdir -p "${MNT}"
-${SUDO} mount -o loop,rw "${OUT_DTB_BIN}" "${MNT}"
-
-# 查找 combined-dtb.dtb 位置
-if [ -f "${MNT}/combined-dtb.dtb" ]; then
-    echo "[simple-h1] 替换 ${MNT}/combined-dtb.dtb"
-    ${SUDO} cp "${MERGED_DTB}" "${MNT}/combined-dtb.dtb"
+# 替换 combined-dtb.dtb (优先 mtools 免 root; 无 mtools 时回退 loop 挂载)
+if command -v mcopy >/dev/null 2>&1; then
+    echo "[simple-h1] 用 mtools 更新 ${OUT_DTB_BIN} (免 root)..."
+    if mdir -i "${OUT_DTB_BIN}" ::/combined-dtb.dtb >/dev/null 2>&1; then
+        echo "[simple-h1] 替换 ::/combined-dtb.dtb"
+        mcopy -o -i "${OUT_DTB_BIN}" "${MERGED_DTB}" ::/combined-dtb.dtb
+    else
+        echo "[WARN] 未找到 ::/combined-dtb.dtb, 列出内容:"
+        mdir -i "${OUT_DTB_BIN}" ::/ 2>/dev/null | head -20
+    fi
 else
-    echo "[WARN] 未找到 combined-dtb.dtb, 列出内容:"
-    ${SUDO} ls -la "${MNT}/"
-fi
+    echo "[simple-h1] 未找到 mtools, 回退 loop 挂载 (需要 root)"
+    mkdir -p "${MNT}"
+    ${SUDO} mount -o loop,rw "${OUT_DTB_BIN}" "${MNT}"
 
-${SUDO} sync
-${SUDO} umount "${MNT}"
-rmdir "${MNT}"
+    if [ -f "${MNT}/combined-dtb.dtb" ]; then
+        echo "[simple-h1] 替换 ${MNT}/combined-dtb.dtb"
+        ${SUDO} cp "${MERGED_DTB}" "${MNT}/combined-dtb.dtb"
+    else
+        echo "[WARN] 未找到 combined-dtb.dtb, 列出内容:"
+        ${SUDO} ls -la "${MNT}/"
+    fi
+
+    ${SUDO} sync
+    ${SUDO} umount "${MNT}"
+    rmdir "${MNT}"
+fi
 
 echo ""
 echo "[simple-h1] dtb.bin 打包完成 ✓"

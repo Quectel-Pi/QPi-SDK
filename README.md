@@ -22,6 +22,84 @@ simple-h1/
 └── build/             # 编译产物与最终输出 (build/output/)
 ```
 
+## 与 QPi-SDK (M2) 命令兼容（推荐入口）
+
+本 SDK 提供与 QPi-SDK (M2, RK3576) **同一套命令**的兼容层，两套 SDK 命令/脚本通用，
+无需记忆两套用法（以 M2 为准，不改 M2，simple-h1 向上兼容）：
+
+```bash
+source build.sh          # 与 M2 的 build.sh 同款: 注册命令 + 打印帮助
+
+newapp myapp             # 从模板创建应用 (docs/templates/, 创建到 apps/)
+buildapp apps/myapp      # 编译应用 (自动识别 Makefile/CMake)
+buildcheck               # 环境检查
+buildkernel              # 编译内核 (Image + dtb + modules)
+buildboot                # 打包启动镜像 (efi.bin + dtb.bin)
+buildoverlays            # 设备树 overlays 说明 (simple-h1 为预置 dtbo)
+buildrootfs              # 应用 overlay/ → build/output/system.img
+buildall                 # 完整打包 (内核 + efi.bin + dtb.bin + system.img)
+buildmenuconfig          # 内核 menuconfig
+builddefconfig           # 恢复基准配置
+buildclean               # 清理构建产物
+```
+
+或使用顶层 Makefile（目标集与 M2 一致）：
+
+```bash
+make check               # 环境检查
+make kernel              # 编译内核
+make all                 # 完整打包 (应用层改动: SKIP_KERNEL=1 make all)
+make rootfs              # 打包 system.img
+make clean               # 清理
+```
+
+脚本路径也兼容 M2 形态：
+
+```bash
+./tools/build-kernel.sh check|kernel|boot|overlays|all|clean|menuconfig|defconfig|savedefconfig
+./tools/build-rootfs.sh check|apply|remove|extract|repack|clean
+source tools/environment-setup.sh     # 等价于 source scripts/env.sh
+```
+
+> 命令内部映射到 `scripts/` 原生实现；`./scripts/*.sh` 直接调用仍然可用。
+> 差异说明: M2 产物为 FIT boot.img + ext4 rootfs.img；simple-h1 产物为
+> efi.bin (UKI) + dtb.bin + BTRFS system.img。两边的 buildrootfs apply 都
+> 是"overlay → 新镜像"，remove 在 M2 直接删镜像文件、在 simple-h1 登记到
+> overlay-remove.list（下次打包生效）。
+
+## system.img 可复现打包模型 (目录级, 免挂载修改)
+
+simple-h1 的 system.img 采用**目录级可复现**模型 (与 M2 的
+extract/apply/repack 对齐), 不直接挂载修改镜像:
+
+```
+prebuilds/base_rootfs/   ← 基准目录 (从原始 system.img 提取一次, 只读)
+     │  cp --reflink (每次构建)
+     ▼
+build/rootfs-staging/    ← base + overlay + 删除清单 + hooks (目录操作, 免 root)
+     │  fakeroot + mkfs.btrfs --rootdir
+     ▼
+build/output/system.img  ← 全新生成 (内容由 base+overlay 决定, 可复现)
+```
+
+命令:
+
+```bash
+./tools/build-rootfs.sh extract   # 一次性: system.img → prebuilds/base_rootfs
+./tools/build-rootfs.sh apply     # base + overlay → build/rootfs-staging (免 root)
+./tools/build-rootfs.sh repack    # staging → system.img (fakeroot 保属主)
+./tools/build-rootfs.sh build     # = apply + repack  (buildrootfs 同)
+```
+
+要点:
+- base_rootfs 提取: 有 sudo 走 mount+rsync (保真属主); 无 sudo 走 btrfs restore (免 root)
+- overlay/ 与 hooks/ 在目录级应用, 全程免 root (hooks 的 IMG_MNT=staging)
+- 打包用 fakeroot 伪装属主 + mkfs.btrfs --rootdir, UUID 固定为原镜像 UUID
+- 镜像大小: 默认按原镜像 (SYSTEM_IMG_SIZE 可调); 注意 btrfs-progs 5.16 的
+  --rootdir 会按内容自动扩展 (9.2GB 内容 → ~16.7GB 镜像), 若需严格控大小
+  请用新版 btrfs-progs (≥6.x, -b 参数对 rootdir 生效)
+- 旧挂载模型保留在 scripts/pack-system.sh (legacy, 需要 root)
+
 ## 快速开始
 
 ### 0. 环境

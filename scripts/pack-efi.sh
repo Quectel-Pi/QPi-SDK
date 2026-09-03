@@ -15,12 +15,8 @@ DTB="${2:-${KERNEL_OUT}/arch/arm64/boot/dts/qcom/${DTB_NAME}}"
 EFI_IMG="${OUT_DIR}/efi.bin"
 UKI_NAME="linux-${MACHINE}.efi"   # linux-qcm6490-idp.efi
 
-# sudo 支持 (与 pack-system.sh 一致)
+# sudo 支持 (仅 mtools 缺失回退挂载时需要; 默认 mtools 免 root)
 SUDO="${SUDO:-sudo}"
-if ! ${SUDO} -n true 2>/dev/null; then
-    echo "[simple-h1] 需要 root 权限, 请先执行: sudo -v"
-    ${SUDO} -v
-fi
 
 # 合并 dtbo (与官方 linux-qcom-mergedtb 一致)
 DTBO_DIR="${TOOLS_DIR}/uki/dtbo"
@@ -68,30 +64,51 @@ echo "[simple-h1] UKI: ${UKI} ($(stat -c%s "${UKI}") bytes)"
 rm -f "${EFI_IMG}"
 cp "${PREBUILDS_DIR}/efi.bin" "${EFI_IMG}"
 
-# 3. 挂载并替换 UKI
-MNT="${BUILD_DIR}/efi-mnt"
-mkdir -p "${MNT}"
-echo "[simple-h1] 挂载 efi.bin..."
-${SUDO} mount -o loop,rw "${EFI_IMG}" "${MNT}"
+# 3. 替换 UKI (优先 mtools 免 root; 无 mtools 时回退 loop 挂载)
+#    查找 UKI 目标路径: 优先 /EFI/Linux/, 其次 /ostree/poky-*/vmlinuz-*
+if command -v mcopy >/dev/null 2>&1; then
+    echo "[simple-h1] 用 mtools 更新 ${EFI_IMG} (免 root)..."
+    TARGET=""
+    if mdir -i "${EFI_IMG}" ::/EFI/Linux/ 2>/dev/null | grep -qi "${UKI_NAME}"; then
+        TARGET="::/EFI/Linux/${UKI_NAME}"
+    else
+        # 尝试 ostree 路径 (vmlinuz-*)
+        OSTREE_ENTRY=$(mdir -i "${EFI_IMG}" ::/ostree/ 2>/dev/null | awk '/<DIR>/{print $1}' | head -1)
+        if [ -n "${OSTREE_ENTRY}" ] && \
+           mdir -i "${EFI_IMG}" "::/ostree/${OSTREE_ENTRY}/" 2>/dev/null | grep -q "vmlinuz"; then
+            TARGET="::/ostree/${OSTREE_ENTRY}/$(mdir -i "${EFI_IMG}" "::/ostree/${OSTREE_ENTRY}/" 2>/dev/null | grep -oE 'vmlinuz-[^ ]+' | head -1)"
+        fi
+    fi
+    if [ -z "${TARGET}" ]; then
+        echo "[ERROR] efi.bin 中未找到 UKI 目标路径"
+        exit 1
+    fi
+    echo "[simple-h1] 替换: ${TARGET}"
+    mcopy -o -i "${EFI_IMG}" "${UKI}" "${TARGET}"
+else
+    echo "[simple-h1] 未找到 mtools, 回退 loop 挂载 (需要 root)"
+    MNT="${BUILD_DIR}/efi-mnt"
+    mkdir -p "${MNT}"
+    ${SUDO} mount -o loop,rw "${EFI_IMG}" "${MNT}"
 
-# 查找 UKI 目标路径: 优先 /EFI/Linux/, 其次 /ostree/poky-*/vmlinuz-*
-TARGET=""
-if [ -f "${MNT}/EFI/Linux/${UKI_NAME}" ]; then
-    TARGET="${MNT}/EFI/Linux/${UKI_NAME}"
-elif compgen -G "${MNT}/ostree/poky-*/vmlinuz-*" >/dev/null; then
-    TARGET=$(ls ${MNT}/ostree/poky-*/vmlinuz-* | head -1)
-fi
-if [ -z "${TARGET}" ]; then
-    echo "[ERROR] efi.bin 中未找到 UKI 目标路径"
+    TARGET=""
+    if [ -f "${MNT}/EFI/Linux/${UKI_NAME}" ]; then
+        TARGET="${MNT}/EFI/Linux/${UKI_NAME}"
+    elif compgen -G "${MNT}/ostree/poky-*/vmlinuz-*" >/dev/null; then
+        TARGET=$(ls ${MNT}/ostree/poky-*/vmlinuz-* | head -1)
+    fi
+    if [ -z "${TARGET}" ]; then
+        echo "[ERROR] efi.bin 中未找到 UKI 目标路径"
+        ${SUDO} umount "${MNT}"
+        exit 1
+    fi
+
+    echo "[simple-h1] 替换: ${TARGET}"
+    ${SUDO} cp "${UKI}" "${TARGET}"
+    ${SUDO} sync
     ${SUDO} umount "${MNT}"
-    exit 1
+    rmdir "${MNT}"
 fi
-
-echo "[simple-h1] 替换: ${TARGET}"
-${SUDO} cp "${UKI}" "${TARGET}"
-${SUDO} sync
-${SUDO} umount "${MNT}"
-rmdir "${MNT}"
 
 echo ""
 echo "[simple-h1] efi.bin 打包完成 ✓"
