@@ -32,7 +32,7 @@ adb shell reboot edl
 lsusb | grep 05c6:9008
 
 # 3. 执行 qdl
-cd build/output
+cd build/result
 sudo ../tools/qdl -s ufs -i . \
   prog_firehose_Qcm6490_ddr.elf \
   partition_ufs/rawprogram[0-5].xml partition_ufs/patch[0-5].xml

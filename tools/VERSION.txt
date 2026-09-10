@@ -16,7 +16,12 @@ MACHINE=qcm6490-idp
 DEFCONFIG=scripts/kernel-config
 
 # 工具链
+#   ★ 已固化, 请勿更新 ★
+#   本 SDK 的可复现性依赖 toolchains/gcc 的精确版本 (含 binutils)。
+#   升级工具链会改变内核产物字节, 使 DTB/Image 无法与原厂固件比对。
+#   如需更换, 请先与固件发布侧确认, 并同步更新本文件与 README。
 TOOLCHAIN=aarch64-qcom-linux 13.4.0
+TOOLCHAIN_PINNED=yes
 APP_TOOLCHAIN=qcom-rootfs-toolchain (qemu wrapper, sysroot 内 gcc-14)
 SYSROOT_SOURCE=prebuilds/sysroot
 

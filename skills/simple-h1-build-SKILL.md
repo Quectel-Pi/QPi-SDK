@@ -54,7 +54,7 @@ source scripts/env.sh     # 原生入口
 
 从源码安装应用:
 ```bash
-./scripts/install-app.sh apps/<app目录> [PREFIX=/opt/xxx]
+./scripts/install-app.sh projects/<app目录> [PREFIX=/opt/xxx]
 ```
 
 ### 全量打包
@@ -62,7 +62,7 @@ source scripts/env.sh     # 原生入口
 SKIP_KERNEL=1 ./scripts/build-all.sh   # 仅打包镜像 (快)
 ./scripts/build-all.sh                 # 完整 (含内核编译)
 ```
-输出: `build/output/{efi.bin, dtb.bin, system.img}` + 烧录所需全部文件
+输出: `build/result/{efi.bin, dtb.bin, system.img}` + 烧录所需全部文件
 
 ### 烧录
 ```bash

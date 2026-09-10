@@ -7,7 +7,7 @@
 
 pack-system.sh 流程:
 
-  1. cp 原始镜像 -> build/output/system.img
+  1. cp 原始镜像 -> build/result/system.img
   2. mount -o loop,rw 挂载到 build/system-mnt/
   3. rsync 应用 overlay/ 增量
   4. rsync 合并新编译内核模块

@@ -29,7 +29,7 @@ scripts\flash.bat emmc
    - 正常运行的系统：`adb shell reboot edl`（注意不是 `adb reboot edl`）
    - panic 状态：断电重新上电并按住 EDL 组合键
 2. 已安装 Qualcomm USB 驱动（QPST 或 LIBUSB 驱动包）
-3. 固件已打包完成：`build/output/` 下存在
+3. 固件已打包完成：`build/result/` 下存在
    `prog_firehose_Qcm6490_ddr.elf`、`efi.bin`、`system.img`、`dtb.bin` 及 `partition_ufs/`
 
 ## 等效手工命令

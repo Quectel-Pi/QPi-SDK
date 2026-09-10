@@ -5,6 +5,12 @@
 #   在 SDK 根目录:  source build.sh && buildapp <本目录>
 #   或直接:         make
 #
+# 产物名 = 工程目录名
+#   扩展「部署到设备」与工程列表要求产物为 <工程目录>/<工程名>/<工程名>
+#   (sdk_ops.py:999)。而工程名的提问发生在模板变量之后, 两者互相独立,
+#   用户很可能保留 APP_NAME 默认值而未改成工程名。
+#   因此这里由目录名推导 TARGET, 不依赖变量, 保证产物名始终与工程名一致。
+#
 # SYSROOT 说明 (重要, 勿改动本行的位置与形式):
 #   扩展创建工程时用正则 ^SYSROOT\s*\?=.*$ 改写本行为实际相对路径。
 #   因此本行必须:
@@ -17,7 +23,7 @@ CC      ?= aarch64-linux-gnu-gcc
 CFLAGS  ?=
 LDFLAGS ?=
 
-TARGET  := hello
+TARGET  := $(notdir $(CURDIR))
 PREFIX  ?= /usr/local
 DESTDIR ?=
 
