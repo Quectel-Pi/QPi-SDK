@@ -1,4 +1,4 @@
-# {{APP_NAME}} - Quectel PI H1 (QCS6490) 应用模板
+# hello - Quectel PI H1 (QCS6490) 应用模板
 #
 # 由扩展「新建工程」或 SDK `newapp` 创建。
 # 编译:
@@ -17,7 +17,7 @@ CC      ?= aarch64-linux-gnu-gcc
 CFLAGS  ?=
 LDFLAGS ?=
 
-TARGET  := {{APP_NAME}}
+TARGET  := hello
 PREFIX  ?= /usr/local
 DESTDIR ?=
 

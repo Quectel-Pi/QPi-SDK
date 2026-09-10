@@ -99,23 +99,29 @@ if [ -n "${TOOLCHAIN}" ] && [ -d "${TOOLCHAIN}/bin" ]; then
 fi
 
 QPI_TEMPLATES_DIR="${QPI_SDK_TOPDIR}/docs/templates"
-QPI_APPS_DIR="${QPI_SDK_TOPDIR}/apps"
+QPI_APPS_DIR="${QPI_APPS_DIR:-${QPI_SDK_TOPDIR}/projects}"
 
 _qpi_available_templates() {
     find "${QPI_TEMPLATES_DIR}" -mindepth 1 -maxdepth 1 -type d -printf '%f ' 2>/dev/null
 }
 
 # ---------------------------------------------------------------------------
-# 应用开发 (与 M2 语义一致; 应用创建到 apps/ 目录)
+# 应用开发 (与扩展「新建工程」及 M2 语义一致; 应用创建到 projects/ 目录)
 # ---------------------------------------------------------------------------
 
-# 从模板创建新应用: newapp <名称> [模板名]
+# 从模板创建新应用: newapp <名称> [模板名] [KEY=VALUE ...]
+#   模板变量取自 docs/templates/<模板>/template.json, 与扩展「新建工程」语义一致:
+#     - {{KEY}}        替换为变量值 (缺省用 template.json 的 default)
+#     - {{KEY_SELECT}} choice 类型额外注入, 值为选项下标 (0 起)
+#     - SYSROOT ?= 行 改写为从工程目录到 prebuilds/sysroot 的相对路径
+#   可用 KEY=VALUE 覆盖模板默认值, 例: newapp myapp hello LOG_LEVEL=debug
 newapp() {
     local name="${1:-}"
     local template="${2:-hello}"
+    shift 2 2>/dev/null || shift $#
 
     if [ -z "$name" ]; then
-        echo "用法: newapp <应用名> [模板名]"
+        echo "用法: newapp <应用名> [模板名] [KEY=VALUE ...]"
         echo "可用模板: $(_qpi_available_templates)"
         return 1
     fi
@@ -130,22 +136,94 @@ newapp() {
         echo "可用模板: $(_qpi_available_templates)"
         return 1
     fi
-    if [ -d "${dst_dir}" ]; then
+    if [ -e "${dst_dir}" ]; then
         echo "ERROR: 已存在: ${dst_dir}"
         return 1
     fi
 
     mkdir -p "${dst_dir}"
-    cp "${tpl_dir}/main.c" "${tpl_dir}/Makefile" "${dst_dir}/" 2>/dev/null
 
-    # 替换模板占位符 (与 M2 模板约定一致)
-    sed -i "s/{{PROJECT_NAME}}/${name}/g" "${dst_dir}/main.c" "${dst_dir}/Makefile"
-    sed -i "s/{{MESSAGE}}/Hello from ${name}/g" "${dst_dir}/main.c"
+    # 复制模板文件 (template.json 为元数据, 不复制)
+    local f
+    for f in "${tpl_dir}"/*; do
+        [ -f "$f" ] || continue
+        [ "$(basename "$f")" = "template.json" ] && continue
+        cp "$f" "${dst_dir}/"
+    done
+
+    # 变量替换 + SYSROOT 改写 (与扩展 create_project 同语义)
+    python3 - "${tpl_dir}" "${dst_dir}" "${QPI_SDK_TOPDIR}" "$name" "$@" <<'PYEOF'
+import json, os, re, sys
+
+tpl_dir, dst_dir, sdk_root, app_name = sys.argv[1:5]
+overrides = {}
+for a in sys.argv[5:]:
+    if "=" in a:
+        k, v = a.split("=", 1)
+        overrides[k] = v
+
+meta = {}
+tj = os.path.join(tpl_dir, "template.json")
+if os.path.isfile(tj):
+    try:
+        meta = json.load(open(tj, encoding="utf-8"))
+    except Exception as e:
+        print(f"  [WARN] template.json 解析失败: {e}")
+
+repl = {}
+for key, spec in (meta.get("variables") or {}).items():
+    val = overrides.get(key, spec.get("default", ""))
+    repl[key] = str(val)
+    if spec.get("type") == "choice" and spec.get("choices"):
+        idx = next((i for i, c in enumerate(spec["choices"])
+                    if c.get("value") == str(val)), 0)
+        repl[key + "_SELECT"] = str(idx)
+
+# 未在 template.json 中声明但常见的内建变量
+repl.setdefault("PROJECT_NAME", app_name)   # 兼容旧模板
+repl.setdefault("APP_NAME", app_name)
+
+# SYSROOT 相对路径: 从工程目录到 <SDK>/prebuilds/sysroot
+sysroot_rel = os.path.relpath(os.path.join(sdk_root, "prebuilds", "sysroot"),
+                              dst_dir).replace("\\", "/")
+
+RX = r"^SYSROOT\s*\?=.*$"
+changed = 0
+for fn in sorted(os.listdir(dst_dir)):
+    fp = os.path.join(dst_dir, fn)
+    if not os.path.isfile(fp):
+        continue
+    try:
+        content = open(fp, encoding="utf-8").read()
+    except Exception:
+        continue
+    for k, v in repl.items():
+        content = content.replace("{{" + k + "}}", v)
+    if fn == "Makefile":
+        content, n = re.subn(RX, f"SYSROOT ?= {sysroot_rel}", content, flags=re.M)
+        changed += n
+    open(fp, "w", encoding="utf-8").write(content)
+
+left = []
+for fn in sorted(os.listdir(dst_dir)):
+    fp = os.path.join(dst_dir, fn)
+    if os.path.isfile(fp):
+        try:
+            left += re.findall(r"\{\{[A-Z_]+\}\}", open(fp, encoding="utf-8").read())
+        except Exception:
+            pass
+
+print(f"  模板变量: {', '.join(f'{k}={v}' for k, v in repl.items())}")
+print(f"  SYSROOT : {sysroot_rel}  (改写 {changed} 行)")
+if left:
+    print(f"  [WARN] 未替换占位符: {', '.join(sorted(set(left)))}")
+PYEOF
 
     echo "已创建应用: ${dst_dir}"
     echo "编译: buildapp ${dst_dir}"
-    echo "安装到 overlay: ./scripts/install-app.sh apps/${name}  (然后 buildrootfs 打包)"
+    echo "安装到 overlay: ./scripts/install-app.sh projects/${name}  (然后 buildrootfs 打包)"
 }
+
 
 # 编译应用: buildapp <目录> (自动识别 Makefile/CMake, 与 M2 一致)
 buildapp() {
@@ -201,7 +279,7 @@ buildall() {
     "${QPI_SDK_TOPDIR}/scripts/pack-efi.sh" || return 1
     "${QPI_SDK_TOPDIR}/scripts/pack-dtb.sh" || return 1
     "${QPI_SDK_TOPDIR}/tools/build-rootfs.sh" build || return 1
-    echo "[build.sh] buildall 完成: build/output/{efi.bin, dtb.bin, system.img}"
+    echo "[build.sh] buildall 完成: ${OUT_DIR:-build/result}/{efi.bin, dtb.bin, system.img}"
 }
 
 # ---------------------------------------------------------------------------
@@ -277,8 +355,22 @@ buildhelp() {
 # 入口: source 时打印帮助; 直接执行时按参数分发
 # ---------------------------------------------------------------------------
 if _qpi_build_is_sourced; then
+    # source 时仅注册命令并打印帮助。
+    # 注意: 迁移等有副作用的操作一律放在下面的 else 分支,
+    #       因为扩展会 `source ./build.sh` 复用编译环境 (见 sdk_ops.py:613 build_chain)。
     buildhelp
 else
+    # 一次性迁移: apps/ -> projects/ (T5, 与扩展默认值及 M2 对齐)
+    #   仅在直接执行时触发, source 不触发 (避免用户看到"凭空改名")
+    if [ -d "${QPI_SDK_TOPDIR}/apps" ] && [ ! -e "${QPI_SDK_TOPDIR}/projects" ]; then
+        echo "[build.sh] 检测到旧目录 apps/, 迁移为 projects/ (与扩展默认值对齐)"
+        if mv "${QPI_SDK_TOPDIR}/apps" "${QPI_SDK_TOPDIR}/projects" 2>/dev/null; then
+            echo "[build.sh] 迁移完成: apps/ -> projects/"
+        else
+            echo "[build.sh] [WARN] 迁移失败, 请手动执行: mv apps projects"
+        fi
+    fi
+
     cmd="${1:-help}"
     shift || true
     case "$cmd" in

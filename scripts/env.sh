@@ -25,7 +25,7 @@ export PREBUILDS_DIR="${PREBUILDS_DIR:-${SDK_ROOT}/prebuilds}"     # 原始镜�
 export TOOLS_DIR="${TOOLS_DIR:-${SDK_ROOT}/tools}"                 # 工具
 export TOOLCHAIN_DIR="${TOOLCHAIN_DIR:-${SDK_ROOT}/toolchains}"    # 交叉编译链
 export BUILD_DIR="${BUILD_DIR:-${SDK_ROOT}/build}"                 # 编译中间产物
-export OUT_DIR="${OUT_DIR:-${SDK_ROOT}/build/output}"              # 最终固件输出
+export OUT_DIR="${OUT_DIR:-${SDK_ROOT}/build/result}"              # 最终固件输出
 
 # 交叉编译链 PATH
 export PATH="${TOOLCHAIN_DIR}/gcc/bin/aarch64-qcom-linux:${PATH}"

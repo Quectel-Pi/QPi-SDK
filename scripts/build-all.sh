@@ -2,7 +2,7 @@
 # ============================================================
 # simple-h1 全量打包脚本
 # 功能: 编译内核 -> 打包 efi.bin -> 打包 system.img (overlay) -> 打包 dtb.bin
-#       输出到 build/output/
+#       输出到 build/result/
 # 用法: ./scripts/build-all.sh [clean]
 #   仅应用层改动时, 可以跳过内核编译:
 #     SKIP_KERNEL=1 ./scripts/build-all.sh

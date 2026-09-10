@@ -1,0 +1,42 @@
+# Quectel PI H1 (QCS6490) SDK — 平台标识
+# 供工具/脚本做平台判定 (扩展侧自检脚本优先读本文件的 SOC/BOARD)
+# 格式对齐 M2 分支的 tools/VERSION.txt
+
+SDK_NAME=simple-h1
+BOARD=H1
+SOC=QCS6490
+VENDOR=Quectel
+
+# 系统
+ROOTFS=Debian arm64 (BTRFS)
+KERNEL=Linux 6.6.116
+KERNEL_RELEASE=6.6.116-qli-1.7-ver.1.1
+KERNEL_DTS=qcs6490-idp-pi
+MACHINE=qcm6490-idp
+DEFCONFIG=scripts/kernel-config
+
+# 工具链
+TOOLCHAIN=aarch64-qcom-linux 13.4.0
+APP_TOOLCHAIN=qcom-rootfs-toolchain (qemu wrapper, sysroot 内 gcc-14)
+SYSROOT_SOURCE=prebuilds/sysroot
+
+# 镜像形态 (与 RK 平台不同)
+BOOT_FORMAT=UKI (systemd-boot, FAT16)
+IMAGE_FORMAT=分区镜像: efi.bin (FAT16) + dtb.bin (FAT12) + system.img (BTRFS)
+UPDATE_IMG_SUPPORTED=no
+# 注: update.img 为 RK 平台概念, H1 不适用; 全量产物为上述分区镜像三件套
+
+# 烧录 (Qualcomm EDL / Sahara / Firehose)
+FLASH_PROTOCOL=Qualcomm EDL 9008
+FLASH_TOOLS_LINUX=tools/qdl
+FLASH_TOOLS_WINDOWS=tools/qfil (QSaharaServer + fh_loader)
+FLASH_ENTRY=scripts/flash.sh (自动判平台) / scripts/flash.bat (Windows)
+ENTER_EDL=adb shell reboot edl
+
+# 应用工程目录 (扩展默认 projects; 本 SDK 使用 projects)
+PROJECT_DIR=projects
+
+# 固件版本 (由固件发布侧提供, 待补)
+FIRMWARE_VERSION=
+
+GENERATED_DATE=2026-09-10
