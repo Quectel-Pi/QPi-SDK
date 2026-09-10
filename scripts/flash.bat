@@ -65,13 +65,17 @@ if "%PORT%"=="" (
     echo          - Qualcomm USB driver installed ^(QPST / LIBUSB driver package^)
     exit /b 1
 )
-echo       detected: %PORT%
+
+rem Windows requires the \\.\COMn form for COM10 and above; a bare "COM10"
+rem fails to open (QSaharaServer: port_connect Failed to open com port handle).
+set "PORTARG=\\.\%PORT%"
+echo       detected: %PORT%  ^(using %PORTARG%^)
 echo.
 
 pushd "%FW_DIR%" || exit /b 1
 
 echo [2/3] Sahara: push firehose programmer ^(%FIREHOSE%^) ...
-"%SAHARA%" -p %PORT% -s 13:%FIREHOSE% -v 1
+"%SAHARA%" -p "%PORTARG%" -s 13:%FIREHOSE% -v 1
 if errorlevel 1 (
     echo [ERROR] Sahara failed
     popd
@@ -100,7 +104,7 @@ if "%XMLLIST%"=="" (
     exit /b 1
 )
 
-"%FHLOADER%" --port=%PORT% --sendxml="%XMLLIST%" --search_path="%FW_DIR%" --noprompt --memoryname=%FS_TYPE% --loglevel=1
+"%FHLOADER%" --port="%PORTARG%" --sendxml="%XMLLIST%" --search_path="%FW_DIR%" --noprompt --memoryname=%FS_TYPE% --loglevel=1
 set "RC=%ERRORLEVEL%"
 popd
 
