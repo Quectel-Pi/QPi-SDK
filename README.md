@@ -228,6 +228,10 @@ BUILD_DIR=/data/qpi/build ./tools/build-rootfs.sh build
 
 ## 交叉工具链
 
+> ⚠️ **工具链已固化，请勿更新。** 本 SDK 的可复现性依赖 `toolchains/gcc` 的精确版本
+> （含 binutils）。升级会改变内核产物字节，导致 DTB/Image 无法与原厂固件比对。
+> 如需更换，请先与固件发布侧确认。判定值见 `tools/VERSION.txt` 的 `TOOLCHAIN_PINNED`。
+
 内核工具链 `toolchains/gcc/` (aarch64-qcom-linux 13.4.0, GCC + binutils 2.42) 随仓库分发，
 配套的 `toolchains/uninative-lib/` 提供其运行所需的便携 loader 与 libc。开箱即可交叉编译：
 
