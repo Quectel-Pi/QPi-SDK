@@ -17,15 +17,15 @@ export KERNEL_RELEASE="${KERNEL_VERSION}${LOCALVERSION}"
 export MACHINE="qcm6490-idp"
 export DTB_NAME="qcs6490-idp-pi.dtb"
 
-# 目录
-export KERNEL_SRC="${SDK_ROOT}/kernel"              # 内核源码
-export KERNEL_OUT="${SDK_ROOT}/build/kernel"        # 内核编译输出 (O=)
-export OVERLAY_DIR="${SDK_ROOT}/overlay"            # 文件系统增量目录
-export PREBUILDS_DIR="${SDK_ROOT}/prebuilds"        # 原始镜像
-export TOOLS_DIR="${SDK_ROOT}/tools"                # 工具
-export TOOLCHAIN_DIR="${SDK_ROOT}/toolchains"       # 交叉编译链
-export BUILD_DIR="${SDK_ROOT}/build"                # 编译产物
-export OUT_DIR="${SDK_ROOT}/build/output"           # 最终固件输出
+# 目录 (均可用环境变量覆盖, 便于把镜像/产物放到其他位置; 默认在 SDK 内)
+export KERNEL_SRC="${KERNEL_SRC:-${SDK_ROOT}/kernel}"              # 内核源码
+export KERNEL_OUT="${KERNEL_OUT:-${SDK_ROOT}/build/kernel}"        # 内核编译输出 (O=)
+export OVERLAY_DIR="${OVERLAY_DIR:-${SDK_ROOT}/overlay}"           # 文件系统增量目录
+export PREBUILDS_DIR="${PREBUILDS_DIR:-${SDK_ROOT}/prebuilds}"     # 原始镜像 (输入)
+export TOOLS_DIR="${TOOLS_DIR:-${SDK_ROOT}/tools}"                 # 工具
+export TOOLCHAIN_DIR="${TOOLCHAIN_DIR:-${SDK_ROOT}/toolchains}"    # 交叉编译链
+export BUILD_DIR="${BUILD_DIR:-${SDK_ROOT}/build}"                 # 编译中间产物
+export OUT_DIR="${OUT_DIR:-${SDK_ROOT}/build/output}"              # 最终固件输出
 
 # 交叉编译链 PATH
 export PATH="${TOOLCHAIN_DIR}/gcc/bin/aarch64-qcom-linux:${PATH}"

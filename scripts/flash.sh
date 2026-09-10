@@ -12,6 +12,35 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/env.sh
 
+# ---------------------------------------------------------------------------
+# 平台检测:
+#   Linux / WSL  -> qdl (本脚本后续逻辑, 依赖 libusb + udev)
+#   Windows      -> QFIL 后端 (fh_loader + QSaharaServer), 走 scripts/flash.bat
+#   macOS        -> 不支持 (无 udev / 无 Linux ELF 执行能力)
+# ---------------------------------------------------------------------------
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*)
+        echo "[simple-h1] 检测到 Windows 环境, 切换为 QFIL 后端烧录"
+        BAT="$(pwd)/scripts/flash.bat"
+        [ -f "${BAT}" ] || { echo "[ERROR] 找不到 Windows 烧录脚本: ${BAT}"; exit 1; }
+        [ -d "$(pwd)/tools/qfil" ] || { echo "[ERROR] 缺少 QFIL 后端目录: $(pwd)/tools/qfil"; exit 1; }
+        if command -v cmd.exe >/dev/null 2>&1; then
+            if command -v cygpath >/dev/null 2>&1; then
+                exec env MSYS_NO_PATHCONV=1 cmd.exe /c "$(cygpath -w "${BAT}")" "$@"
+            fi
+            exec env MSYS_NO_PATHCONV=1 cmd.exe /c "scripts\\flash.bat" "$@"
+        fi
+        echo "[ERROR] 无法调用 cmd.exe, 请手动运行:"
+        echo "        ${BAT} ${*:-ufs}"
+        exit 1
+        ;;
+    Darwin)
+        echo "[ERROR] macOS 不支持本 SDK 烧录 (需 udev/libusb, 且 tools/qdl 为 Linux ELF)"
+        echo "        请在 Linux 或 WSL2 内运行, 或使用 Windows 下的 scripts/flash.bat"
+        exit 1
+        ;;
+esac
+
 FS_TYPE="${1:-ufs}"
 FW_DIR="${OUT_DIR}"
 QDL="${TOOLS_DIR}/qdl"

@@ -40,10 +40,13 @@ TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SDK_ROOT="$(cd "${TOOLS_DIR}/.." && pwd)"
 OVERLAY_DIR="${OVERLAY_DIR:-${SDK_ROOT}/overlay}"
 REMOVE_LIST="${OVERLAY_DIR}/overlay-remove.list"
-SRC_IMG="${SDK_ROOT}/prebuilds/system.img"
-BASE_ROOTFS="${BASE_ROOTFS:-${SDK_ROOT}/prebuilds/base_rootfs}"
-STAGING="${SDK_ROOT}/build/rootfs-staging"
-OUT_IMG="${SDK_ROOT}/build/output/system.img"
+PREBUILDS_DIR="${PREBUILDS_DIR:-${SDK_ROOT}/prebuilds}"
+BUILD_DIR="${BUILD_DIR:-${SDK_ROOT}/build}"
+OUT_DIR="${OUT_DIR:-${SDK_ROOT}/build/output}"
+SRC_IMG="${SRC_IMG:-${PREBUILDS_DIR}/system.img}"
+BASE_ROOTFS="${BASE_ROOTFS:-${PREBUILDS_DIR}/base_rootfs}"
+STAGING="${STAGING:-${BUILD_DIR}/rootfs-staging}"
+OUT_IMG="${OUT_IMG:-${OUT_DIR}/system.img}"
 SUDO="${SUDO:-sudo}"
 
 # 原始镜像属性 (默认值, 保证与分区/烧录兼容)
@@ -215,7 +218,7 @@ apply_overlay() {
             OUT_IMG="${OUT_IMG}" \
             SRC_IMG="${SRC_IMG}" \
             OVERLAY_DIR="${OVERLAY_DIR}" \
-            BUILD_DIR="${SDK_ROOT}/build" \
+            BUILD_DIR="${BUILD_DIR}" \
             SDK_ROOT="${SDK_ROOT}" \
             KERNEL_RELEASE="${KERNEL_RELEASE:-}" \
             bash "${hook}"

@@ -19,12 +19,16 @@ qpi-h1/
 │   └── sysroot/          #   system.img 解出的应用编译 sysroot
 ├── tools/                # ★ 工具与脚本
 │   ├── setup-env.sh      #   ★ 宿主环境部署 (WSL/Ubuntu/macOS 检测 + 装依赖)
+│   ├── repair-toolchain.sh #  ★ 修复内核工具链 (去绝对路径, 可重定位)
 │   ├── build-kernel.sh   #   内核编译打包 (kernel/boot/all/check/clean)
 │   ├── build-rootfs.sh   #   应用层 overlay 打包 (extract/apply/repack/build/remove)
 │   ├── extract-sysroot.sh#   提取 sysroot (免 root, btrfs restore)
 │   ├── environment-setup.sh  # 交叉编译环境
+│   ├── qfil/             #   ★ Windows 烧录后端 (fh_loader + QSaharaServer)
 │   └── cmake/            #   CMake toolchain
 ├── scripts/              # 底层实现脚本 (build-kernel/pack-efi/pack-dtb/install-app)
+│   ├── flash.sh          #   烧录入口 (自动区分 Linux/WSL 与 Windows)
+│   └── flash.bat         #   Windows 烧录 (调用 tools/qfil 后端)
 ├── toolchains/           # 工具链
 │   └── qcom-rootfs-toolchain/  # 应用交叉编译 qemu wrapper (sysroot 内 gcc-14)
 ├── hooks/                # pre-pack hooks (打包前镜像内容调整)
@@ -154,10 +158,65 @@ Makefile 示例默认按当前目录结构查找 `prebuilds/sysroot` 和 `toolch
 ## 烧录
 
 ```bash
-./scripts/flash.sh        # 自动: adb shell reboot edl → 9008 → qdl (UFS)
+./scripts/flash.sh            # 默认 UFS
+./scripts/flash.sh emmc
 ```
 
-WSL2 下 USB 默认不直通，需用 `usbipd-win` 把 Qualcomm 9008 设备转发进 WSL，或在 Windows 侧用原生 `qdl` 烧录（编译/打包仍在 WSL 内完成）。
+`scripts/flash.sh` 会按平台自动选择后端：
+
+| 运行环境 | 烧录方式 |
+|---------|---------|
+| Linux / WSL2 | `tools/qdl`（libusb，需 udev 规则） |
+| Windows | `tools/qfil/` 的 QFIL 后端，经 `scripts/flash.bat` 调用 |
+| macOS | 不支持，直接报错退出 |
+
+设备须先进入 **EDL (9008)**：正常运行的系统执行 `adb shell reboot edl`；panic 状态断电重上电并按住 EDL 组合键。
+
+Windows 下可跳过 shell 直接运行批处理：
+
+```bat
+scripts\flash.bat            :: 默认 UFS
+scripts\flash.bat emmc
+```
+
+Windows 侧后端（`QSaharaServer.exe` + `fh_loader.exe`）随仓库分发，静态链接、无额外 DLL 依赖，
+详见 `tools/qfil/README.md`。
+
+WSL2 下 USB 默认不直通，若要直接在 WSL 内烧录需用 `usbipd-win` 转发 Qualcomm 9008 设备；
+否则建议在 Windows 侧跑 `scripts\flash.bat`（编译/打包仍在 WSL 内完成）。
+
+## 路径覆盖
+
+`scripts/env.sh` 的目录均可用环境变量覆盖，便于把镜像或产物放到其他位置（例如大容量磁盘、共享目录）：
+
+```bash
+OUT_DIR=/data/qpi/out ./scripts/build-all.sh          # 产物输出到别处
+PREBUILDS_DIR=/data/qpi/prebuilds ./scripts/flash.sh  # 原始镜像放在别处
+BUILD_DIR=/data/qpi/build ./tools/build-rootfs.sh build
+```
+
+可覆盖项：`KERNEL_SRC`、`KERNEL_OUT`、`OVERLAY_DIR`、`PREBUILDS_DIR`、`TOOLS_DIR`、
+`TOOLCHAIN_DIR`、`BUILD_DIR`、`OUT_DIR`；`tools/build-rootfs.sh` 额外支持
+`SRC_IMG`、`BASE_ROOTFS`、`STAGING`、`OUT_IMG`、`SYSTEM_IMG_SIZE`、`SYSTEM_IMG_UUID`。
+
+## 交叉工具链（厂商分发）
+
+内核工具链 `toolchains/gcc/` 由厂商单独分发，其二进制在打包时被打上了**原机器的绝对路径**
+作为 ELF 解释器（Yocto uninative 机制），直接拷贝到其他机器会报：
+
+```
+error while loading shared libraries: libc.so.6: cannot open shared object file
+```
+
+`tools/repair-toolchain.sh` 就地修复为可重定位：
+
+```bash
+./tools/repair-toolchain.sh           # 修复 <SDK>/toolchains/gcc
+./tools/repair-toolchain.sh /path/to/sdk
+```
+
+做法：把解释器指向本机探测到的系统加载器，并把 RPATH 设成 `$ORIGIN` 相对路径，
+从而不依赖任何硬编码路径。修复后工具链可整目录复制到任意位置照常使用。
 
 ## AI Skills
 
