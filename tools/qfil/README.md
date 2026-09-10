@@ -63,6 +63,49 @@ fh_loader 的标签排序为 `<configure>,<erase>,others,<patch>,<power>`，
 > Linux / WSL 侧无需此文件：`qdl` 默认就在烧录后复位，
 > 其 `-R` / `--skip-reset` 才是跳过开关。
 
+## WSL 下的烧录
+
+**板子的 USB 接在 Windows 主机上，而 WSL2 默认不做 USB 直通**，因此 WSL 内的
+`qdl` 看不到 9008 设备。`scripts/flash.sh` 会自动识别这种情况并转发到
+Windows 侧的 `flash.bat`：
+
+```
+WSL 内:  ./scripts/flash.sh
+         → 检测到 WSL2 环境
+         → 转发到 Windows QFIL 后端
+```
+
+两种例外：
+
+| 场景 | 行为 |
+|------|------|
+| 已在 WSL 内用 `usbipd-win` 直通 9008 | 直接用 `qdl`（脚本会检测到设备） |
+| 设 `QPI_FLASH_LOCAL=1` | 强制用 `qdl` |
+
+**固件无需预先复制。** SDK 位于 WSL ext4 时，Windows 侧经 `\\wsl.localhost\`
+读取，实测 500 MB 镜像读取 290 MB/s，远高于 USB 烧录的约 41 MB/s，9P 不构成瓶颈。
+SDK 位于 `/mnt/<盘符>` 时是普通 Windows 路径，更直接。
+
+> 环境变量桥接：WSL 里 `export` 的变量不会自动进入 Windows 进程，
+> 脚本会把 `QPI_FW_DIR` / `QPI_NO_RESET` 加入 `WSLENV` 后透传。
+
+### 若要用 usbipd 直通（推荐给频繁烧录的场景）
+
+在 Windows 侧（管理员 PowerShell）执行一次：
+
+```powershell
+usbipd list
+usbipd bind --busid <设备ID>
+```
+
+之后每次设备进 9008 后：
+
+```powershell
+usbipd attach --wsl --busid <设备ID>
+```
+
+然后在 WSL 内 `./scripts/flash.sh` 会走 `qdl`。
+
 ## Windows COM 端口命名
 
 **COM10 及以上必须写成 `\\.\COM10`**，裸 `COM10` 打不开端口：
