@@ -32,6 +32,50 @@ scripts\flash.bat emmc
 3. 固件已打包完成：`build/result/` 下存在
    `prog_firehose_Qcm6490_ddr.elf`、`efi.bin`、`system.img`、`dtb.bin` 及 `partition_ufs/`
 
+## 烧录后复位
+
+厂商的 `rawprogram*.xml` / `patch*.xml` **不含 `<power>` 标签**，而 fh_loader 在
+`--noprompt` 下**不会自动复位**。若不加处理，烧录完成后设备会**停留在 Firehose 模式**，
+需手动断电重上电才能启动新固件。
+
+`reset.xml` 就是为此提供的 —— 它被**追加到 `--sendxml` 列表的最后**：
+
+```xml
+<data>
+<power DelayInSeconds="2" value="reset" />
+</data>
+```
+
+fh_loader 的标签排序为 `<configure>,<erase>,others,<patch>,<power>`，
+所以 `<power>` 一定在所有写入完成之后才执行。
+
+用 `set QPI_NO_RESET=1` 可跳过（例如需要连续执行多个操作时）。
+
+> Linux / WSL 侧无需此文件：`qdl` 默认就在烧录后复位，
+> 其 `-R` / `--skip-reset` 才是跳过开关。
+
+## 烧录后复位
+
+厂商的 `rawprogram*.xml` / `patch*.xml` **不含 `<power>` 标签**，而 fh_loader 在
+`--noprompt` 下**不会自动复位**。若不加处理，烧录完成后设备会**停留在 Firehose 模式**，
+需手动断电重上电才能启动新固件。
+
+`reset.xml` 就是为此提供的 —— 它被**追加到 `--sendxml` 列表的最后**：
+
+```xml
+<data>
+<power DelayInSeconds="2" value="reset" />
+</data>
+```
+
+fh_loader 的标签排序为 `<configure>,<erase>,others,<patch>,<power>`，
+所以 `<power>` 一定在所有写入完成之后才执行。
+
+用 `set QPI_NO_RESET=1` 可跳过（例如需要连续执行多个操作时）。
+
+> Linux / WSL 侧无需此文件：`qdl` 默认就在烧录后复位，
+> 其 `-R` / `--skip-reset` 才是跳过开关。
+
 ## 等效手工命令
 
 ```bat

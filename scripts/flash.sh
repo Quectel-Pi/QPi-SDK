@@ -85,4 +85,5 @@ ${SUDO} "${QDL}" -s "${FS_TYPE}" -i . \
 
 echo ""
 echo "[simple-h1] 全盘烧录完成 ✓"
-echo "  请断电重新上电启动设备"
+echo "  qdl 已发送复位命令, 设备将启动新固件"
+echo "  (如需跳过复位, 加 -R: qdl 的 --skip-reset)"

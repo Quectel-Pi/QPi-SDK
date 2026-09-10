@@ -5,8 +5,7 @@ set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..") do set "SDK_ROOT=%%~fI"
 
 rem Firmware dir: defaults to the SDK output dir build\result.
-rem Override with QPI_FW_DIR to flash an external firmware package
-rem (e.g. a vendor test build) without copying it into the SDK.
+rem Override with QPI_FW_DIR to flash an external firmware package.
 set "FW_DIR=%SDK_ROOT%\build\result"
 if defined QPI_FW_DIR set "FW_DIR=%QPI_FW_DIR%"
 
@@ -14,6 +13,14 @@ set "QFIL_DIR=%SDK_ROOT%\tools\qfil"
 
 set "FS_TYPE=%~1"
 if "%FS_TYPE%"=="" set "FS_TYPE=ufs"
+
+rem Reboot the device after flashing. The vendor XMLs carry no <power> tag,
+rem and fh_loader does not reset on its own under --noprompt, so without this
+rem the target stays in Firehose and needs a manual power cycle.
+rem QPI_NO_RESET=1 skips it (e.g. to chain further operations).
+set "DO_RESET=1"
+if defined QPI_NO_RESET set "DO_RESET=0"
+set "RESET_XML=%QFIL_DIR%\reset.xml"
 
 set "FIREHOSE=prog_firehose_Qcm6490_ddr.elf"
 set "SAHARA=%QFIL_DIR%\QSaharaServer.exe"
@@ -24,6 +31,7 @@ echo [simple-h1] Windows QFIL Backend Flash
 echo   FW_DIR : %FW_DIR%
 echo   QFIL   : %QFIL_DIR%
 echo   STORAGE: %FS_TYPE%
+echo   RESET  : %DO_RESET%  (QPI_NO_RESET=1 to skip)
 echo ==========================================
 echo.
 
@@ -66,8 +74,8 @@ if "%PORT%"=="" (
     exit /b 1
 )
 
-rem Windows requires the \\.\COMn form for COM10 and above; a bare "COM10"
-rem fails to open (QSaharaServer: port_connect Failed to open com port handle).
+rem Windows needs the \\.\COMn form at COM10 and above; a bare "COM10" fails
+rem to open ^(QSaharaServer: port_connect Failed to open com port handle^).
 set "PORTARG=\\.\%PORT%"
 echo       detected: %PORT%  ^(using %PORTARG%^)
 echo.
@@ -104,6 +112,17 @@ if "%XMLLIST%"=="" (
     exit /b 1
 )
 
+rem Append the reset directive last. fh_loader sorts <power> after <patch>,
+rem so it runs once every write has landed.
+if "%DO_RESET%"=="1" (
+    if exist "%RESET_XML%" (
+        set "XMLLIST=!XMLLIST!,%RESET_XML%"
+        echo       reset directive: %RESET_XML%
+    ) else (
+        echo       [WARN] %RESET_XML% not found, skipping reset
+    )
+)
+
 "%FHLOADER%" --port="%PORTARG%" --sendxml="%XMLLIST%" --search_path="%FW_DIR%" --noprompt --memoryname=%FS_TYPE% --loglevel=1
 set "RC=%ERRORLEVEL%"
 popd
@@ -116,7 +135,11 @@ if not "%RC%"=="0" (
 
 echo ==========================================
 echo [simple-h1] flash done
-echo   power cycle the device to boot
+if "%DO_RESET%"=="1" (
+    echo   the device was reset and should boot the new firmware
+) else (
+    echo   reset skipped ^(QPI_NO_RESET=1^) -- power cycle to boot
+)
 echo ==========================================
 endlocal
 exit /b 0
