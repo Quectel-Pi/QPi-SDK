@@ -95,8 +95,10 @@ base_source() {
     elif [ -d "${SDK_ROOT}/prebuilds/sysroot" ]; then
         echo "${SDK_ROOT}/prebuilds/sysroot"
     else
-        log_err "无可用基准目录: ${BASE_ROOTFS} 或 prebuilds/sysroot"
-        log_err "先运行: ./tools/build-rootfs.sh extract"
+        # 注意: 本函数的结果经 $( ) 捕获为目录路径, 所以诊断信息必须走 stderr,
+        # 否则会被调用方当成路径使用 (base_source 的返回值语义是"目录")。
+        log_err "无可用基准目录: ${BASE_ROOTFS} 或 prebuilds/sysroot" >&2
+        log_err "先运行: ./tools/build-rootfs.sh extract" >&2
         return 1
     fi
 }
