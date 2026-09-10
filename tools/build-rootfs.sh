@@ -255,6 +255,20 @@ repack_img() {
     log_info "打包: ${src} → ${img}"
     log_info "  大小: ${size_mb} MiB (固定, 与原镜像一致)   UUID: ${IMG_UUID}"
 
+    # 属主预检: 放在耗时步骤(mkfs/rsync)之前, 避免白等一次完整打包
+    #   base 必须用 sudo mount+rsync 保真提取; btrfs restore 会把属主归一为
+    #   当前用户 → 设备 init/systemd 权限错 → 起不来
+    local nonroot total
+    nonroot="$(${SUDO} find "${src}" -not -user 0 2>/dev/null | wc -l)"
+    total="$(${SUDO} find "${src}" 2>/dev/null | wc -l)"
+    log_info "属主预检: 非 root ${nonroot}/${total} 个 (原厂≈2, overlay 定制文件会少量增加)"
+    if [ "${nonroot}" -gt 1000 ]; then
+        log_err "非 root 属主文件过多 (${nonroot}), base 可能用 btrfs restore 提取过"
+        log_err "请在打包前用 sudo 重新提取: sudo ./tools/build-rootfs.sh extract"
+        log_err "否则产出的 system.img 烧录后 init/systemd 会因权限错而起不来"
+        return 1
+    fi
+
     mkdir -p "$(dirname "${img}")"
     rm -f "${img}"
 
@@ -297,19 +311,8 @@ repack_img() {
     ${SUDO} umount "${mnt}"
     rmdir "${mnt}"
 
-    # 校验: 非 root 属主文件数应远小于总数 (原厂仅 /home/pi 等少量)
-    local nonroot
-    nonroot="$(${SUDO} find "${src}" -not -user 0 2>/dev/null | wc -l)"
-    local total
-    total="$(${SUDO} find "${src}" 2>/dev/null | wc -l)"
-    log_info "属主校验: 非 root ${nonroot}/${total} 个 (base≈2, overlay 定制文件会少量增加)"
-    if [ "${nonroot}" -gt 1000 ]; then
-        log_err "非 root 属主文件过多 (${nonroot}), base 可能用 btrfs restore 提取过"
-        log_err "请用 sudo 重新 extract (mount+rsync 保真): sudo ./tools/build-rootfs.sh extract"
-        return 1
-    fi
-
     log_ok "打包完成: ${img} ($(stat -c%s "${img}") bytes)"
+    log_ok "属主已由预检确认 (非 root ${nonroot}/${total})"
     log_ok "实际占用: $(du -h "${img}" | cut -f1)"
     return 0
 }

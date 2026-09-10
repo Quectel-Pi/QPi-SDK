@@ -71,17 +71,17 @@ detect_platform() {
 }
 
 pkgs_apt_base="build-essential make bc bison flex libssl-dev libelf-dev libncurses-dev cpio kmod xz-utils zstd lz4 file python3 python3-pefile git rsync ca-certificates curl wget unzip"
-pkgs_apt_pack="btrfs-progs fakeroot mtools dosfstools device-tree-compiler"
+pkgs_apt_pack="btrfs-progs fakeroot mtools dosfstools device-tree-compiler patchelf"
 pkgs_apt_app="qemu-user-static binfmt-support"
 pkgs_apt_flash="usbutils libusb-1.0-0 libxml2-dev libzip-dev"
 
 pkgs_dnf_base="gcc gcc-c++ make bc bison flex openssl-devel elfutils-libelf-devel ncurses-devel cpio kmod xz zstd lz4 file python3 python3-pefile git rsync ca-certificates curl wget unzip"
-pkgs_dnf_pack="btrfs-progs fakeroot mtools dosfstools dtc"
+pkgs_dnf_pack="btrfs-progs fakeroot mtools dosfstools dtc patchelf"
 pkgs_dnf_app="qemu-user-static"
 pkgs_dnf_flash="usbutils libusb1 libxml2 libzip"
 
 pkgs_pac_base="base-devel bc bison flex openssl libelf ncurses cpio kmod xz zstd lz4 file python python-pefile git rsync ca-certificates curl wget unzip"
-pkgs_pac_pack="btrfs-progs fakeroot mtools dosfstools dtc"
+pkgs_pac_pack="btrfs-progs fakeroot mtools dosfstools dtc patchelf"
 pkgs_pac_app="qemu-user-static-binfmt"
 pkgs_pac_flash="usbutils libusb libxml2 libzip"
 
@@ -293,6 +293,7 @@ check_deps() {
     need_any_cmd "免 root 更新 FAT 分区 (efi.bin/dtb.bin)" mcopy mtools
     need_any_cmd "设备树 dtbo 合并 (qcm6490-*.dtbo)" fdtoverlay dtc
     need_cmd fakeroot "repack 保属主 (缺则属主不保真)"
+    need_cmd patchelf "修复工具链的 ELF 解释器 (tools/repair-toolchain.sh)"
     echo "${C_DIM}-- 应用交叉编译 --${C_NC}"
     need_cmd depmod "内核模块 depmod"
     if [ -x "${SDK_ROOT:-.}/toolchains/qcom-rootfs-toolchain/bin/aarch64-linux-gnu-gcc" ]; then
