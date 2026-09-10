@@ -14,25 +14,90 @@ source scripts/env.sh
 
 # ---------------------------------------------------------------------------
 # 平台检测:
-#   Linux / WSL  -> qdl (本脚本后续逻辑, 依赖 libusb + udev)
-#   Windows      -> QFIL 后端 (fh_loader + QSaharaServer), 走 scripts/flash.bat
-#   macOS        -> 不支持 (无 udev / 无 Linux ELF 执行能力)
+#   Linux (非 WSL) -> qdl (依赖 libusb + udev)
+#   WSL2           -> 板子 USB 接在 Windows 主机, WSL2 默认不做 USB 直通,
+#                     所以默认转发到 Windows 侧 QFIL 后端 (scripts/flash.bat)。
+#                     若已用 usbipd-win 直通 (WSL 内可见 9008) 则直接用 qdl;
+#                     设 QPI_FLASH_LOCAL=1 可强制用 qdl。
+#   Windows (MSYS) -> QFIL 后端 (fh_loader + QSaharaServer), 走 scripts/flash.bat
+#   macOS          -> 不支持 (无 udev, 且 tools/qdl 为 Linux ELF)
 # ---------------------------------------------------------------------------
+
+# 是否运行在 WSL 内
+_qpi_is_wsl() {
+    [ -n "${WSL_DISTRO_NAME:-}" ] && return 0
+    grep -qi "microsoft" /proc/version 2>/dev/null && return 0
+    grep -qi "microsoft" /proc/sys/kernel/osrelease 2>/dev/null && return 0
+    return 1
+}
+
+# 转发到 Windows 侧的 scripts/flash.bat (MSYS 与 WSL 共用)
+#   SDK 位于 /mnt/<盘符> 时 bat 与固件是普通 Windows 路径;
+#   位于 WSL ext4 时经 UNC (\\wsl.localhost\...) 访问, 实测读取约 290 MB/s,
+#   远高于 USB 烧录速度, 不构成瓶颈, 因此无需预先复制固件。
+_qpi_flash_via_bat() {
+    local bat
+    bat="$(pwd)/scripts/flash.bat"
+    [ -f "${bat}" ] || { echo "[ERROR] 找不到 Windows 烧录脚本: ${bat}"; exit 1; }
+    [ -d "$(pwd)/tools/qfil" ] || { echo "[ERROR] 缺少 QFIL 后端目录: $(pwd)/tools/qfil"; exit 1; }
+
+    local cmd_exe=""
+    local c
+    for c in /mnt/c/Windows/System32/cmd.exe cmd.exe; do
+        if command -v "${c}" >/dev/null 2>&1; then
+            cmd_exe="${c}"
+            break
+        fi
+    done
+    if [ -z "${cmd_exe}" ]; then
+        echo "[ERROR] 无法调用 cmd.exe (WSL interop 未启用?)"
+        echo "        请在 Windows 侧手动执行: scripts\\flash.bat ${1:-ufs}"
+        exit 1
+    fi
+
+    local win_bat="${bat}"
+    if command -v wslpath >/dev/null 2>&1; then
+        win_bat="$(wslpath -w "${bat}" 2>/dev/null || echo "${bat}")"
+    elif command -v cygpath >/dev/null 2>&1; then
+        win_bat="$(cygpath -w "${bat}")"
+    fi
+
+    # WSL 里 export 的变量不会自动进入 Windows 进程。
+    # WSLENV 是 WSL 官方的变量桥接机制: 把名字加进去即可透传。
+    # (实测: 不列入 WSLENV 时 bat 读到的是空值)
+    local bridged="${WSLENV:-}"
+    local v
+    for v in QPI_FW_DIR QPI_NO_RESET QPI_QFIL_DIR; do
+        eval "local val=\${$v:-}"
+        [ -n "${val}" ] || continue
+        case ":${bridged}:" in
+            *":${v}:"*) ;;
+            *) bridged="${bridged:+${bridged}:}${v}" ;;
+        esac
+    done
+
+    exec env MSYS_NO_PATHCONV=1 WSLENV="${bridged}" \
+        "${cmd_exe}" /c "${win_bat}" "$@"
+}
+
 case "$(uname -s 2>/dev/null)" in
     MINGW*|MSYS*|CYGWIN*)
         echo "[simple-h1] 检测到 Windows 环境, 切换为 QFIL 后端烧录"
-        BAT="$(pwd)/scripts/flash.bat"
-        [ -f "${BAT}" ] || { echo "[ERROR] 找不到 Windows 烧录脚本: ${BAT}"; exit 1; }
-        [ -d "$(pwd)/tools/qfil" ] || { echo "[ERROR] 缺少 QFIL 后端目录: $(pwd)/tools/qfil"; exit 1; }
-        if command -v cmd.exe >/dev/null 2>&1; then
-            if command -v cygpath >/dev/null 2>&1; then
-                exec env MSYS_NO_PATHCONV=1 cmd.exe /c "$(cygpath -w "${BAT}")" "$@"
+        _qpi_flash_via_bat "$@"
+        ;;
+    Linux)
+        if _qpi_is_wsl && [ "${QPI_FLASH_LOCAL:-0}" != "1" ]; then
+            if command -v lsusb >/dev/null 2>&1 && lsusb 2>/dev/null | grep -q "05c6:9008"; then
+                echo "[simple-h1] WSL 内已直通 9008 设备, 使用 qdl 烧录"
+            else
+                echo "[simple-h1] 检测到 WSL2 环境"
+                echo "          板子 USB 接在 Windows 主机上, WSL2 默认不做 USB 直通"
+                echo "          -> 转发到 Windows 侧 QFIL 后端 (scripts/flash.bat)"
+                echo "          (若已在 WSL 内用 usbipd-win 直通设备, 设 QPI_FLASH_LOCAL=1 改用 qdl)"
+                echo
+                _qpi_flash_via_bat "$@"
             fi
-            exec env MSYS_NO_PATHCONV=1 cmd.exe /c "scripts\\flash.bat" "$@"
         fi
-        echo "[ERROR] 无法调用 cmd.exe, 请手动运行:"
-        echo "        ${BAT} ${*:-ufs}"
-        exit 1
         ;;
     Darwin)
         echo "[ERROR] macOS 不支持本 SDK 烧录 (需 udev/libusb, 且 tools/qdl 为 Linux ELF)"
@@ -85,5 +150,4 @@ ${SUDO} "${QDL}" -s "${FS_TYPE}" -i . \
 
 echo ""
 echo "[simple-h1] 全盘烧录完成 ✓"
-echo "  qdl 已发送复位命令, 设备将启动新固件"
-echo "  (如需跳过复位, 加 -R: qdl 的 --skip-reset)"
+echo "  请断电重新上电启动设备"
