@@ -11,6 +11,7 @@ Quectel PI H1 (QCS6490) 开发 SDK，支持两个核心功能，**脱离原生 S
 qpi-h1/
 ├── kernel/               # 内核源码 (QCOM 6.6.116) + 编译产物
 ├── overlay/              # ★ 增量预置目录 (应用层文件覆盖; 目录结构 == 镜像内路径)
+├── projects/             # ★ 应用工程目录 (newapp 创建; == 扩展「工程创建目录」默认值)
 ├── prebuilds/            # 预构建镜像
 │   ├── system.img        #   原始根文件系统镜像 (BTRFS, 只读基准)
 │   ├── efi.bin           #   启动分区底包 (FAT, UKI 所在)
@@ -18,6 +19,7 @@ qpi-h1/
 │   ├── base_rootfs/      #   system.img 解出的基准目录 (可复现打包)
 │   └── sysroot/          #   system.img 解出的应用编译 sysroot
 ├── tools/                # ★ 工具与脚本
+│   ├── VERSION.txt       #   ★ 平台标识 (SOC/BOARD/KERNEL/烧录协议等, 供工具判定)
 │   ├── setup-env.sh      #   ★ 宿主环境部署 (WSL/Ubuntu/macOS 检测 + 装依赖)
 │   ├── repair-toolchain.sh #  ★ 修复内核工具链 (去绝对路径, 可重定位)
 │   ├── build-kernel.sh   #   内核编译打包 (kernel/boot/all/check/clean)
@@ -33,7 +35,9 @@ qpi-h1/
 │   └── qcom-rootfs-toolchain/  # 应用交叉编译 qemu wrapper (sysroot 内 gcc-14)
 ├── hooks/                # pre-pack hooks (打包前镜像内容调整)
 ├── skills/               # AI skills (simple-h1-build / simple-h1-flash)
-├── docs/                 # 文档 (templates 参考)
+├── docs/                 # 文档
+│   ├── templates/        #   工程模板 (含 template.json, 供扩展「新建工程」)
+│   └── examples/         #   示例源码
 ├── build.sh              # source 后注册 build* 命令，并导出交叉编译变量
 └── Makefile              # 顶层便捷入口
 ```
@@ -90,7 +94,7 @@ cd <SDK_ROOT>
 source build.sh
 
 newapp myapp           # 从模板创建应用
-buildapp apps/myapp    # 编译应用
+buildapp projects/myapp  # 编译应用
 buildcheck             # 环境检查
 buildkernel            # 编译内核
 buildboot              # 打包启动镜像 (efi.bin + dtb.bin)
@@ -122,9 +126,9 @@ make all
 make clean
 
 # 产物
-build/output/efi.bin                # 启动镜像 (UKI: Image + dtb + initramfs)
-build/output/dtb.bin                # 设备树 (combined-dtb.dtb)
-build/output/system.img             # 根文件系统 (base + overlay 重新打包)
+build/result/efi.bin                # 启动镜像 (UKI: Image + dtb + initramfs)
+build/result/dtb.bin                # 设备树 (combined-dtb.dtb)
+build/result/system.img             # 根文件系统 (base + overlay 重新打包)
 ```
 
 **ko 驱动**：编译的内核模块（`.ko`）放到 `overlay/` 对应路径（如 `overlay/lib/modules/6.6.116-qli-1.7-ver.1.1/updates/`），打包时随 system.img 安装。
@@ -136,7 +140,7 @@ build/output/system.img             # 根文件系统 (base + overlay 重新打�
 # 例: overlay/etc/xxx.conf → /etc/xxx.conf; overlay/usr/local/bin/app → /usr/local/bin/app
 
 # 打包 system.img (目录级可复现: base + overlay → staging → 全新生成, 免 root)
-./tools/build-rootfs.sh build               # = apply + repack → build/output/system.img
+./tools/build-rootfs.sh build               # = apply + repack → build/result/system.img
 ./tools/build-rootfs.sh apply               # 合成 staging (base + overlay + hooks)
 ./tools/build-rootfs.sh repack              # staging → system.img (fakeroot + btrfs)
 ./tools/build-rootfs.sh extract             # 一次性: system.img → prebuilds/base_rootfs
@@ -154,6 +158,29 @@ source build.sh
 Makefile 示例默认按当前目录结构查找 `prebuilds/sysroot` 和 `toolchains/`。
 
 应用工具链选择顺序：`QPI_CROSS_COMPILE` 显式指定 > SDK 内置 qcom-rootfs-toolchain (qemu wrapper) > 宿主 `aarch64-linux-gnu-`。普通应用建议保持默认。sysroot 缺失时先执行 `./tools/extract-sysroot.sh`（从 system.img 提取，免 root，符号链接原生保留）。
+
+## VSCode 扩展对接
+
+本 SDK 可作为 `Quectel-Pi/QPi-VSCode-Extension` 的 H1 SDK 使用。已适配的契约：
+
+| 项 | 说明 |
+|----|------|
+| 入口脚本 | 根目录 `build.sh`，支持 8 个 mode，可 `source`（导出工具链，无副作用） |
+| 平台标识 | `tools/VERSION.txt`（`SOC=QCS6490` / `BOARD=H1`），供工具做平台判定 |
+| 工程目录 | `projects/`，与扩展默认值一致（历史 `apps/` 会在首次执行时自动迁移） |
+| 工程模板 | `docs/templates/<id>/template.json`，支持 `{{VAR}}` / `{{VAR_SELECT}}` |
+| 示例 | `docs/examples/` |
+| 全量产物 | `build/result/`（`efi.bin` + `dtb.bin` + `system.img`） |
+
+### H1 上不可用的扩展功能（SoC 差异，非缺陷）
+
+| 功能 | 替代方式 |
+|------|---------|
+| 设备树节点编辑 | 直接编辑 `kernel/arch/arm64/boot/dts/qcom/qcs6490-idp-pi.dts` |
+| 烧录按钮 / 烧录 boot 分区 | 「工具」页签 →「任意命令」执行 `./scripts/flash.sh` |
+| 部署到设备 | 「任意命令」+ `./tools/adb push <产物> /data/local/tmp/` |
+
+> 注：`update.img` 为 RK 平台概念，H1 不适用；H1 全量产物为分区镜像三件套。
 
 ## 烧录
 
@@ -273,10 +300,10 @@ source build.sh
 newapp myapp
 
 # 2. 编译应用（自动识别 Makefile/CMake，产出 aarch64 可执行文件）
-buildapp apps/myapp
+buildapp projects/myapp
 
 # 3. 安装到 overlay (随 system.img 打包)
-./scripts/install-app.sh apps/myapp
+./scripts/install-app.sh projects/myapp
 
 # 4. 重新打包
 buildrootfs     # 或 SKIP_KERNEL=1 buildall
@@ -284,11 +311,20 @@ buildrootfs     # 或 SKIP_KERNEL=1 buildall
 
 指定模板：`newapp myapp hello`。模板位于 `docs/templates/`。
 
+模板变量可用 `KEY=VALUE` 覆盖（与扩展「新建工程」表单等价）：
+
+```bash
+newapp myapp hello LOG_LEVEL=debug APP_NAME=myapp
+```
+
+> 模板 Makefile 中的 `SYSROOT ?=` 行**必须顶格且全文件唯一** ——
+> 扩展用正则 `^SYSROOT\s*\?=.*$` 改写该行，带缩进或不唯一会导致静默失效。
+
 ### 方式 B：Makefile
 
 ```bash
 make newapp NAME=myapp          # 创建
-make app DIR=apps/myapp         # 编译
+make app DIR=projects/myapp       # 编译
 ```
 
 ### 方式 C：手动创建

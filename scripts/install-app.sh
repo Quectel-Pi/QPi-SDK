@@ -1,17 +1,17 @@
 #!/bin/bash
 # ============================================================
 # simple-h1 应用安装脚本
-# 功能: 将 apps/ 下的开源项目源码, 通过 make install 机制
+# 功能: 将 projects/ 下的开源项目源码, 通过 make install 机制
 #       安装到 overlay 目录 (最终打包进 system.img)
 #
 # 用法: ./scripts/install-app.sh <app目录> [make参数...]
-#   例: ./scripts/install-app.sh apps/hello
-#        ./scripts/install-app.sh apps/mymod DESTDIR=/opt/myapp
+#   例: ./scripts/install-app.sh projects/hello
+#        ./scripts/install-app.sh projects/mymod DESTDIR=/opt/myapp
 #
 # 约定:
-#   - apps/<app>/ 必须包含 Makefile (支持 install 目标)
+#   - projects/<app>/ 必须包含 Makefile (支持 install 目标)
 #   - 默认安装到 overlay 的 /usr/local (DESTDIR=overlay)
-#   - 交叉编译应用: 在 apps/<app>/ 提供 build.sh 或使用
+#   - 交叉编译应用: 在 projects/<app>/ 提供 build.sh 或使用
 #     CROSS_COMPILE=aarch64-qcom-linux- 环境变量
 # ============================================================
 set -e

@@ -10,7 +10,7 @@ BUILD_SH := ./build.sh
 newapp:
 	source $(BUILD_SH) >/dev/null && newapp $(NAME) $(TEMPLATE)
 
-# 编译应用: make app DIR=apps/hello-h1
+# 编译应用: make app DIR=projects/hello-h1
 app:
 	source $(BUILD_SH) >/dev/null && buildapp $(DIR)
 
