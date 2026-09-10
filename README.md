@@ -63,7 +63,7 @@ qpi-h1/
 ### 安装内容
 
 - **内核编译**：`gcc` `make` `bc` `bison` `flex` `libssl-dev` `libelf-dev` `libncurses-dev` `cpio` `kmod`
-- **固件打包**：`btrfs-progs` `fakeroot` `mtools` `dosfstools` `device-tree-compiler`（fdtoverlay）
+- **固件打包**：`btrfs-progs` `fakeroot` `mtools` `dosfstools` `device-tree-compiler`（fdtoverlay）`python3-pefile`（ukify 打包 UKI 必需）
 - **应用交叉编译**：`qemu-user-static` + `binfmt-support`（binfmt 跑 sysroot 内 gcc-14）
 - **烧录**：`usbutils` `libusb-1.0-0` `libxml2` `libzip`（qdl 运行时）
 - **WSL2 额外**：加载 `btrfs` 内核模块并写入 `/etc/modules-load.d/`（开机自动加载）

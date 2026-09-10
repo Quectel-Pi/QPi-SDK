@@ -70,17 +70,17 @@ detect_platform() {
     [ -z "$DISTRO_PRETTY" ] && DISTRO_PRETTY="${DISTRO:-unknown} ${DISTRO_VER}"
 }
 
-pkgs_apt_base="build-essential make bc bison flex libssl-dev libelf-dev libncurses-dev cpio kmod xz-utils zstd lz4 file python3 git rsync ca-certificates curl wget unzip"
+pkgs_apt_base="build-essential make bc bison flex libssl-dev libelf-dev libncurses-dev cpio kmod xz-utils zstd lz4 file python3 python3-pefile git rsync ca-certificates curl wget unzip"
 pkgs_apt_pack="btrfs-progs fakeroot mtools dosfstools device-tree-compiler"
 pkgs_apt_app="qemu-user-static binfmt-support"
 pkgs_apt_flash="usbutils libusb-1.0-0 libxml2-dev libzip-dev"
 
-pkgs_dnf_base="gcc gcc-c++ make bc bison flex openssl-devel elfutils-libelf-devel ncurses-devel cpio kmod xz zstd lz4 file python3 git rsync ca-certificates curl wget unzip"
+pkgs_dnf_base="gcc gcc-c++ make bc bison flex openssl-devel elfutils-libelf-devel ncurses-devel cpio kmod xz zstd lz4 file python3 python3-pefile git rsync ca-certificates curl wget unzip"
 pkgs_dnf_pack="btrfs-progs fakeroot mtools dosfstools dtc"
 pkgs_dnf_app="qemu-user-static"
 pkgs_dnf_flash="usbutils libusb1 libxml2 libzip"
 
-pkgs_pac_base="base-devel bc bison flex openssl libelf ncurses cpio kmod xz zstd lz4 file python git rsync ca-certificates curl wget unzip"
+pkgs_pac_base="base-devel bc bison flex openssl libelf ncurses cpio kmod xz zstd lz4 file python python-pefile git rsync ca-certificates curl wget unzip"
 pkgs_pac_pack="btrfs-progs fakeroot mtools dosfstools dtc"
 pkgs_pac_app="qemu-user-static-binfmt"
 pkgs_pac_flash="usbutils libusb libxml2 libzip"
@@ -279,6 +279,14 @@ check_deps() {
     need_cmd bison "内核 kconfig 解析"
     need_cmd flex  "内核 kconfig 词法"
     need_cmd python3 "tools/uki/ukify 打包 UKI"
+    if python3 -c "import pefile" >/dev/null 2>&1; then
+        ok "python3 pefile 模块  ${C_DIM}(tools/uki/ukify 打包 UKI 必需)${C_NC}"
+    else
+        err "python3 pefile 模块缺失  ${C_DIM}— python3-pefile${C_NC}"
+        dim "  tools/uki/ukify 第 52 行 import pefile, 缺失时 pack-efi.sh 立即失败:"
+        dim "  ModuleNotFoundError: No module named 'pefile'"
+        CHECK_FAIL=1
+    fi
     echo "${C_DIM}-- 固件打包 --${C_NC}"
     need_cmd btrfs   "system.img (mkfs.btrfs/btrfstune/btrfs restore)"
     need_cmd rsync   "overlay 合成 (build-rootfs.sh)"
@@ -333,6 +341,7 @@ check_versions() {
     if command -v btrfs >/dev/null 2>&1; then
         local bv bmaj
         bv="$(btrfs --version 2>/dev/null | awk '{print $NF}')"
+        bv="${bv#v}"
         bmaj="${bv%%.*}"
         case "$bmaj" in
             ''|*[!0-9]*) warn "无法解析 btrfs-progs 版本: '${bv}'" ;;
