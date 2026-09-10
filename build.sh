@@ -157,9 +157,39 @@ buildapp() {
 # 内核 / 固件
 # ---------------------------------------------------------------------------
 
-buildcheck() {
+# 一键配置构建环境:
+#   1. 系统构建依赖缺失时自动安装 (sudo 密码从 stdin 读: echo '<密码>' | buildenv)
+#   2. prebuilds/base_image 缺失时自动执行 fetch-base-image.sh 下载编译资源包 (~5GB) 并生成 sysroot
+#   3. 最后执行 build-kernel / build-rootfs 环境校验
+buildenv() {
+    local base_img="$QPI_SDK_TOPDIR/prebuilds/base_image"
+    local sysroot_dir="$QPI_SDK_TOPDIR/prebuilds/sysroot"
+
+    echo "== [1/4] 检查 / 安装系统构建依赖 (sudo 密码从 stdin 读取) =="
+    "$QPI_SDK_TOPDIR/tools/setup-deps.sh" install
+
+    echo "== [2/4] 检查固件底包 base_image =="
+    if [ -f "$base_img/package-file" ] && [ -f "$base_img/rootfs.img" ]; then
+        echo "[OK] base_image 已存在, 跳过下载"
+    else
+        echo "[INFO] 缺少 base_image, 需下载 Quectel 编译资源包 (~5GB), 开始下载..."
+        "$QPI_SDK_TOPDIR/tools/fetch-base-image.sh"
+    fi
+
+    echo "== [3/4] 检查应用编译 sysroot =="
+    if [ -d "$sysroot_dir" ] && [ -n "$(ls -A "$sysroot_dir" 2>/dev/null)" ]; then
+        echo "[OK] sysroot 已存在, 跳过提取"
+    elif [ -f "$base_img/rootfs.img" ]; then
+        echo "[INFO] 从 base_image/rootfs.img 提取 sysroot ..."
+        "$QPI_SDK_TOPDIR/tools/extract-sysroot.sh" "$base_img/rootfs.img" "$sysroot_dir"
+    else
+        echo "[WARN] 缺少 rootfs.img, 无法生成 sysroot (请先完成 base_image 下载)"
+    fi
+
+    echo "== [4/4] 环境校验 =="
     "$QPI_SDK_TOPDIR/tools/build-kernel.sh" check && \
-    "$QPI_SDK_TOPDIR/tools/build-rootfs.sh" check
+    "$QPI_SDK_TOPDIR/tools/build-rootfs.sh" check && \
+    echo "[OK] 构建环境配置完成"
 }
 
 buildkernel() {
@@ -219,7 +249,7 @@ buildhelp() {
     echo "    buildapp <目录>        交叉编译应用 (自动识别 Makefile/CMake)"
     echo ""
     echo "  ── 内核 / 固件 ──"
-    echo "    buildcheck             环境检查"
+    echo "    buildenv / setenv      一键配置构建环境 (依赖补齐/底包下载/校验)"
     echo "    buildkernel            编译内核"
     echo "    buildboot              生成 FIT boot.img"
     echo "    buildoverlays          编译设备树 overlays"
@@ -248,7 +278,12 @@ else
     case "$cmd" in
         newapp|new) newapp "$@" ;;
         app|buildapp) buildapp "$@" ;;
-        check|buildcheck) buildcheck "$@" ;;
+        setenv|buildenv) buildenv "$@" ;;
+        # 兼容旧用法: 仅检查环境 (无副作用; 完整配置请用 buildenv/setenv)
+        check|buildcheck)
+            "$QPI_SDK_TOPDIR/tools/build-kernel.sh" check && \
+            "$QPI_SDK_TOPDIR/tools/build-rootfs.sh" check
+            ;;
         kernel|buildkernel) buildkernel "$@" ;;
         boot|buildboot) buildboot "$@" ;;
         overlays|buildoverlays) buildoverlays "$@" ;;

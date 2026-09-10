@@ -98,34 +98,40 @@ avail_mb=$(df -Pm "$PREBUILTS_DIR" | awk 'NR==2{print $4}')
 log_info "下载地址: $URL"
 log_info "目标分区可用 ${avail_mb}MB (zip 约 5GB, 解压后约 10GB, 建议 >30GB)"
 
+# 校验 zip 完整性: 文件末尾必须存在 EOCD 签名 (PK\x05\x06)。
+# 中断下载留下的残缺 zip 没有该签名, 据此区分"已完整"与"需续传"。
+zip_ok() {
+    [ -s "$1" ] || return 1
+    tail -c 65557 "$1" | grep -q $'\x50\x4b\x05\x06'
+}
+
 # --- 1/3: 下载 zip -----------------------------------------------------------
 download() {
     local url="$1" out="$2"
     if [ "$DL" = "curl" ]; then
         if [ -f "$out" ] && [ -s "$out" ]; then
             log_info "已存在 $out ($(du -h "$out" | cut -f1)), 尝试断点续传"
-            curl -fSL -C - --retry 3 --retry-delay 2 -o "$out" "$url" \
-                && return 0
-            # -C - 在文件已完整时返回 HTTP 416, curl 会报错; 大小 >0 即视为已完成
-            [ -s "$out" ] && return 0
+            curl -fSL -C - --retry 3 --retry-delay 2 -o "$out" "$url"
+            # curl 报错可能是 416(已完整) 或网络中断, 以 zip 完整性为准
+            zip_ok "$out" && return 0
             return 1
         fi
-        curl -fSL --retry 3 --retry-delay 2 -o "$out" "$url"
+        curl -fSL --retry 3 --retry-delay 2 -o "$out" "$url" && zip_ok "$out"
     else
-        wget -c -O "$out" "$url"
+        wget -c -O "$out" "$url" && zip_ok "$out"
     fi
 }
 
 log_info "[1/3] 下载 $ZIP_NAME ..."
-if [ -f "$ZIP_FILE" ] && [ -s "$ZIP_FILE" ]; then
-    log_ok "zip 已存在, 跳过下载: $ZIP_FILE ($(du -h "$ZIP_FILE" | cut -f1))"
+if [ -f "$ZIP_FILE" ] && [ -s "$ZIP_FILE" ] && zip_ok "$ZIP_FILE"; then
+    log_ok "zip 已存在且完整, 跳过下载: $ZIP_FILE ($(du -h "$ZIP_FILE" | cut -f1))"
 elif [ -n "$LOCAL_SRC" ]; then
     cp -f "$LOCAL_SRC" "$ZIP_FILE"
     log_ok "已复制本地 zip: $ZIP_FILE ($(du -h "$ZIP_FILE" | cut -f1))"
 else
     if ! download "$URL" "$ZIP_FILE"; then
         log_err "下载失败: $URL"
-        rm -f "$ZIP_FILE"
+        log_err "残缺 zip 已保留: $ZIP_FILE (下次运行会自动断点续传)"
         exit 1
     fi
     log_ok "下载完成: $ZIP_FILE ($(du -h "$ZIP_FILE" | cut -f1))"
