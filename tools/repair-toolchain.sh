@@ -26,15 +26,20 @@ command -v patchelf >/dev/null 2>&1 || {
 }
 
 SYS_LOADER=""
-for d in /lib /lib64 /usr/lib /usr/lib64 /lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu; do
-    if [ -e "$d/ld-linux-x86-64.so.2" ]; then
-        SYS_LOADER="$(readlink -f "$d/ld-linux-x86-64.so.2" 2>/dev/null || echo "$d/ld-linux-x86-64.so.2")"
+for p in /lib64/ld-linux-x86-64.so.2 \
+         /lib/ld-linux-x86-64.so.2 \
+         /usr/lib64/ld-linux-x86-64.so.2 \
+         /usr/lib/ld-linux-x86-64.so.2; do
+    if [ -e "$p" ]; then
+        SYS_LOADER="$p"
         break
     fi
 done
-[ -n "$SYS_LOADER" ] || SYS_LOADER="$(find /lib /lib64 /usr/lib /usr/lib64 -maxdepth 3 -name 'ld-linux-x86-64.so.2' -type f 2>/dev/null | head -1)"
-[ -n "$SYS_LOADER" ] && [ -e "$SYS_LOADER" ] || { err "找不到系统动态加载器 ld-linux-x86-64.so.2"; exit 1; }
-info "系统加载器: $SYS_LOADER"
+if [ -z "$SYS_LOADER" ]; then
+    SYS_LOADER="$(find /lib64 /lib /usr/lib64 /usr/lib -maxdepth 3 -name 'ld-linux-x86-64.so.2' 2>/dev/null | head -1)"
+fi
+[ -n "$SYS_LOADER" ] && [ -e "$SYS_LOADER" ] || { err "找不到 ld-linux-x86-64.so.2"; exit 1; }
+info "目标解释器: $SYS_LOADER (FHS 标准路径, 跨发行版可移植)"
 
 mapfile -t FILES < <(find "$TC" -type f 2>/dev/null | sort -u)
 info "候选文件: ${#FILES[@]}"
@@ -101,6 +106,14 @@ if [ -x "$GCC" ]; then
 fi
 
 echo
+info "解释器分布"
+find "$TC" -type f -exec sh -c '
+  h=$(head -c4 "$1" 2>/dev/null | od -An -tx1 | tr -d " \n")
+  [ "$h" = "7f454c46" ] || exit 0
+  i=$(readelf -l "$1" 2>/dev/null | grep -oP "(?<=program interpreter: ).*" | tr -d "]")
+  [ -n "$i" ] && echo "$i"
+' _ {} \; 2>/dev/null | sort | uniq -c
+
 LEFTOVER="$(find "$TC" -type f -exec sh -c '
   h=$(head -c4 "$1" 2>/dev/null | od -An -tx1 | tr -d " \n")
   [ "$h" = "7f454c46" ] || exit 0
@@ -108,7 +121,7 @@ LEFTOVER="$(find "$TC" -type f -exec sh -c '
   case "$i" in *'/home/'*) echo "$1" ;; esac
 ' _ {} \; 2>/dev/null | wc -l)"
 if [ "$LEFTOVER" = "0" ]; then
-    ok "无残留硬编码解释器路径, 工具链自包含且可重定位"
+    ok "无硬编码解释器路径, 工具链自包含且可重定位"
 else
     warn "仍有 $LEFTOVER 个文件指向硬编码路径"
 fi
