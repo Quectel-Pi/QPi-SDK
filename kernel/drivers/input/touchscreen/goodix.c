@@ -1473,6 +1473,18 @@ static void goodix_ts_remove(struct i2c_client *client)
 		wait_for_completion(&ts->firmware_loading_complete);
 }
 
+static void goodix_ts_shutdown(struct i2c_client *client)
+{
+	struct goodix_ts_data *ts = i2c_get_clientdata(client);
+
+	/* polling mode: stop timer/work before I2C bus goes away at
+	 * poweroff/reboot, otherwise goodix_i2c_* on dead adapter crashes */
+	if (ts && !client->irq) {
+		del_timer_sync(&ts->timer);
+		cancel_work_sync(&ts->work_i2c_poll);
+	}
+}
+
 static int goodix_suspend(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
@@ -1611,6 +1623,7 @@ MODULE_DEVICE_TABLE(of, goodix_of_match);
 static struct i2c_driver goodix_ts_driver = {
 	.probe = goodix_ts_probe,
 	.remove = goodix_ts_remove,
+	.shutdown = goodix_ts_shutdown,
 	.id_table = goodix_ts_id,
 	.driver = {
 		.name = "Goodix-TS",

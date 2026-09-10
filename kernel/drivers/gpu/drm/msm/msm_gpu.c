@@ -481,6 +481,11 @@ resume_smmu:
 	memset(&gpu->fault_info, 0, sizeof(gpu->fault_info));
 	gpu->aspace->mmu->funcs->resume_translation(gpu->aspace->mmu);
 
+	/* The devcoredump is done, wake up any GMU transaction that was
+	 * waiting for the MMU to resume (see a6xx_gmu_set_oob()).
+	 */
+	complete_all(&gpu->fault_coredump_done);
+
 	mutex_unlock(&gpu->lock);
 }
 
@@ -870,6 +875,9 @@ int msm_gpu_init(struct drm_device *drm, struct platform_device *pdev,
 	kthread_init_work(&gpu->retire_work, retire_worker);
 	kthread_init_work(&gpu->recover_work, recover_worker);
 	kthread_init_work(&gpu->fault_work, fault_worker);
+
+	init_completion(&gpu->fault_coredump_done);
+	complete_all(&gpu->fault_coredump_done);
 
 	priv->hangcheck_period = DRM_MSM_HANGCHECK_DEFAULT_PERIOD;
 

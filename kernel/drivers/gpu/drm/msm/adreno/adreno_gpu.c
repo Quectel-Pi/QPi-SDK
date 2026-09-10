@@ -300,6 +300,15 @@ int adreno_fault_handler(struct msm_gpu *gpu, unsigned long iova, int flags,
 		gpu->fault_info.type  = type;
 		gpu->fault_info.block = block;
 
+		/*
+		 * Let any concurrent GMU transaction know that the MMU may
+		 * be blocked for a while (fault storm + devcoredump capture)
+		 * and that it should wait on us instead of timing out.
+		 * fault_worker() signals completion once the SMMU translation
+		 * is resumed.  (backport of upstream 50a0b122)
+		 */
+		reinit_completion(&gpu->fault_coredump_done);
+
 		kthread_queue_work(gpu->worker, &gpu->fault_work);
 	}
 

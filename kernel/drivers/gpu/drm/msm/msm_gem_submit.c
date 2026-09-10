@@ -903,6 +903,21 @@ int msm_ioctl_gem_submit(struct drm_device *dev, void *data,
 
 		submit->cmd[i].iova = iova + (submit->cmd[i].offset * 4);
 
+		/*
+		 * The GPU aspace starts at max(SZ_16M, aperture_start)
+		 * (adreno_iommu_create_address_space), so iova 0 is never a
+		 * valid command buffer address.  A zero IB here would make
+		 * the CP read commands from address 0 -> SMMU TRANSLATION
+		 * fault storm -> GMU wedge -> possible SError/system crash
+		 * (observed on QuecPi: gnome-shell submit with ib1/ib2=0).
+		 * Reject instead of letting it reach the ring.
+		 */
+		if (!submit->cmd[i].iova) {
+			SUBMIT_ERROR(submit, "invalid cmdstream iova: 0\n");
+			ret = -EINVAL;
+			goto out;
+		}
+
 		if (submit->valid)
 			continue;
 

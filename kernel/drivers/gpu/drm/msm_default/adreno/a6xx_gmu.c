@@ -297,6 +297,8 @@ static const struct a6xx_gmu_oob_bits a6xx_gmu_oob_bits[] = {
 /* Trigger a OOB (out of band) request to the GMU */
 int a6xx_gmu_set_oob(struct a6xx_gmu *gmu, enum a6xx_gmu_oob_state state)
 {
+	struct a6xx_gpu *a6xx_gpu = container_of(gmu, struct a6xx_gpu, gmu);
+	struct msm_gpu *gpu = &a6xx_gpu->base.base;
 	int ret;
 	u32 val;
 	int request, ack;
@@ -323,9 +325,38 @@ int a6xx_gmu_set_oob(struct a6xx_gmu *gmu, enum a6xx_gmu_oob_state state)
 	/* Trigger the equested OOB operation */
 	gmu_write(gmu, REG_A6XX_GMU_HOST2GMU_INTR_SET, 1 << request);
 
-	/* Wait for the acknowledge interrupt */
-	ret = gmu_poll_timeout(gmu, REG_A6XX_GMU_GMU2HOST_INTR_INFO, val,
-		val & (1 << ack), 100, 10000);
+	/*
+	 * A fault storm can saturate the MMU while the kernel processes
+	 * the first fault and captures a devcoredump, blocking the GMU in
+	 * the process.  If we time out waiting for the GMU, check whether
+	 * this is the cause and retry once the devcoredump is done.
+	 * (backport of upstream 50a0b122 "drm/msm: Wait for MMU
+	 * devcoredump when waiting for GMU")
+	 *
+	 * NB: if we are running on the gpu worker thread itself, the
+	 * fault_work that completes the coredump is queued behind us and
+	 * can never run -> bail out instead of waiting forever.
+	 */
+	do {
+		/* Wait for the acknowledge interrupt */
+		ret = gmu_poll_timeout(gmu, REG_A6XX_GMU_GMU2HOST_INTR_INFO, val,
+			val & (1 << ack), 100, 10000);
+
+		if (!ret)
+			break;
+
+		if (completion_done(&gpu->fault_coredump_done))
+			break;
+
+		if (gpu->worker && current == gpu->worker->task)
+			break;
+
+		/* We may timeout because the GMU is temporarily wedged from
+		 * pending faults from the GPU and we are taking a devcoredump.
+		 * Wait until the MMU is resumed and try again.
+		 */
+		wait_for_completion(&gpu->fault_coredump_done);
+	} while (true);
 
 	if (ret)
 		DRM_DEV_ERROR(gmu->dev,

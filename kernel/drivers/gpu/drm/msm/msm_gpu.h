@@ -265,6 +265,16 @@ struct msm_gpu {
 	/* work for handling GPU recovery: */
 	struct kthread_work recover_work;
 
+	/*
+	 * Signaled when the MMU fault devcoredump has been captured and
+	 * SMMU translation resumed.  GMU transactions (a6xx_gmu_set_oob)
+	 * wait on this when the GMU looks wedged during a fault storm +
+	 * devcoredump window, instead of timing out and failing.
+	 * (backport of upstream 50a0b122 "drm/msm: Wait for MMU
+	 * devcoredump when waiting for GMU")
+	 */
+	struct completion fault_coredump_done;
+
 	/** retire_event: notified when submits are retired: */
 	wait_queue_head_t retire_event;
 
