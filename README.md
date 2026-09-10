@@ -78,10 +78,10 @@ qpi-h1/
 
 | 路径 | 内容 | 缺失影响 |
 |------|------|---------|
-| `toolchains/gcc/` | 内核交叉工具链 `aarch64-qcom-linux` 13.4 | `buildkernel` 自检直接失败 |
 | `prebuilds/` | `system.img` / `efi.bin` / `dtb.bin` / `base_rootfs` / `sysroot` | 无法打包镜像；`buildapp` 退回宿主工具链 |
 
-请向 Quectel 获取后按原路径放置。
+请向 Quectel 获取后按原路径放置。内核交叉工具链 `toolchains/gcc/` 与
+`toolchains/uninative-lib/` **已随仓库分发**，无需另行获取。
 
 ## 推荐入口：source build.sh
 
@@ -103,7 +103,7 @@ buildclean             # 清理构建产物
 
 `source build.sh` 会导出 `SYSROOT`、`TOOLCHAIN`、`CMAKE_TOOLCHAIN_FILE`、`CROSS_COMPILE`、`CC/CXX` 等变量，后续进入 app 工程可直接 `make` 或运行 CMake。
 
-H1 应用开发默认使用 `toolchains/qcom-rootfs-toolchain/`：它通过 qemu/binfmt 运行 `prebuilds/sysroot` 内的 Debian GCC 14.2 + binutils，与 system.img 内的 glibc 完全匹配。内核编译使用 `aarch64-qcom-linux` 13.4 工具链（位于 `toolchains/gcc/`，独立分发，需自行放置）。
+H1 应用开发默认使用 `toolchains/qcom-rootfs-toolchain/`：它通过 qemu/binfmt 运行 `prebuilds/sysroot` 内的 Debian GCC 14.2 + binutils，与 system.img 内的 glibc 完全匹配。内核编译使用 `aarch64-qcom-linux` 13.4 工具链（位于 `toolchains/gcc/`，已随仓库分发）。
 
 ## 功能 1：内核编译打包
 
@@ -199,16 +199,29 @@ BUILD_DIR=/data/qpi/build ./tools/build-rootfs.sh build
 `TOOLCHAIN_DIR`、`BUILD_DIR`、`OUT_DIR`；`tools/build-rootfs.sh` 额外支持
 `SRC_IMG`、`BASE_ROOTFS`、`STAGING`、`OUT_IMG`、`SYSTEM_IMG_SIZE`、`SYSTEM_IMG_UUID`。
 
-## 交叉工具链（厂商分发）
+## 交叉工具链
 
-内核工具链 `toolchains/gcc/` 由厂商单独分发，其二进制在打包时被打上了**原机器的绝对路径**
-作为 ELF 解释器（Yocto uninative 机制），直接拷贝到其他机器会报：
+内核工具链 `toolchains/gcc/` (aarch64-qcom-linux 13.4.0, GCC + binutils 2.42) 随仓库分发，
+配套的 `toolchains/uninative-lib/` 提供其运行所需的便携 loader 与 libc。开箱即可交叉编译：
+
+```bash
+source build.sh
+buildkernel
+```
+
+树上这份的解释器已指向 FHS 标准路径 `/lib64/ld-linux-x86-64.so.2`，在任意 x86-64 Linux
+（Ubuntu / Debian / Fedora / Arch / WSL2）上可直接执行，无需额外处理。
+
+### 若从厂商渠道拿到未处理的工具链
+
+厂商原始分发包里的二进制被打上了**原机器的绝对路径**作为 ELF 解释器（Yocto uninative 机制），
+拷到别的机器会报：
 
 ```
 error while loading shared libraries: libc.so.6: cannot open shared object file
 ```
 
-`tools/repair-toolchain.sh` 就地修复为可重定位：
+用 `tools/repair-toolchain.sh` 就地修复为可重定位：
 
 ```bash
 ./tools/repair-toolchain.sh           # 修复 <SDK>/toolchains/gcc
@@ -216,7 +229,31 @@ error while loading shared libraries: libc.so.6: cannot open shared object file
 ```
 
 做法：把解释器指向本机探测到的系统加载器，并把 RPATH 设成 `$ORIGIN` 相对路径，
-从而不依赖任何硬编码路径。修复后工具链可整目录复制到任意位置照常使用。
+不依赖任何硬编码路径。修复后工具链可整目录复制到任意位置照常使用，脚本可重复执行。
+
+## 常见陷阱
+
+**手工编译内核时必须带 `DTC_FLAGS="-@"`**
+
+设备树需要 `__symbols__` 节点，`fdtoverlay` 才能合并 `tools/uki/dtbo/` 下的 dtbo。
+漏掉这个参数会产出一个缺 `__symbols__` 的 dtb（体积明显变小，如 253199 → 186446 bytes），
+`pack-dtb.sh` / `pack-efi.sh` 合并不出正确结果。`buildkernel` 已内置该参数，手工执行 `make` 时需自行带上：
+
+```bash
+make ARCH=arm64 CROSS_COMPILE=aarch64-qcom-linux- O=build/kernel DTC_FLAGS="-@" Image dtbs
+```
+
+**`prebuilds/base_rootfs` 必须用 `sudo` 保真提取**
+
+`btrfs restore` 会把文件属主归一为当前用户（uid 1000），这样打出的 `system.img`
+烧录后 `/etc/shadow`、`init` 等权限错，systemd 起不来。务必用：
+
+```bash
+sudo ./tools/build-rootfs.sh extract
+```
+
+`build-rootfs.sh repack` 会在耗时步骤（mkfs / rsync）之前做属主预检，
+发现问题立即报错，不会白等一次完整打包。
 
 ## AI Skills
 
