@@ -18,6 +18,7 @@ qpi-h1/
 │   ├── base_rootfs/      #   system.img 解出的基准目录 (可复现打包)
 │   └── sysroot/          #   system.img 解出的应用编译 sysroot
 ├── tools/                # ★ 工具与脚本
+│   ├── setup-env.sh      #   ★ 宿主环境部署 (WSL/Ubuntu/macOS 检测 + 装依赖)
 │   ├── build-kernel.sh   #   内核编译打包 (kernel/boot/all/check/clean)
 │   ├── build-rootfs.sh   #   应用层 overlay 打包 (extract/apply/repack/build/remove)
 │   ├── extract-sysroot.sh#   提取 sysroot (免 root, btrfs restore)
@@ -32,6 +33,51 @@ qpi-h1/
 ├── build.sh              # source 后注册 build* 命令，并导出交叉编译变量
 └── Makefile              # 顶层便捷入口
 ```
+
+## 环境部署（首次使用）
+
+编译固件前先装齐宿主依赖。`tools/setup-env.sh` 会自动识别平台并安装所需软件包：
+
+```bash
+./tools/setup-env.sh            # 检测平台 + 安装依赖（幂等，可重复执行）
+./tools/setup-env.sh check      # 只检测不安装（CI / 只读环境）
+./tools/setup-env.sh --dry-run  # 只打印将要执行的命令
+```
+
+### 平台支持
+
+| 平台 | 内核编译 | 固件打包 | 烧录 | 说明 |
+|------|:-------:|:-------:|:----:|------|
+| Ubuntu 22.04（物理机 / 虚拟机） | 支持 | 支持 | 支持 | **设计基准环境** |
+| WSL2 + Ubuntu 22.04 | 支持 | 支持 | 受限 | Windows 下推荐；烧录需 usbipd-win 转发 USB |
+| 其他 Debian 系 / Fedora / Arch | 支持 | 支持 | 支持 | 脚本自动适配包管理器 |
+| macOS | 不支持 | 不支持 | 不支持 | 脚本直接终止并说明原因 |
+
+> **为什么锁定 Ubuntu 22.04**：`tools/build-rootfs.sh` 按 `btrfs-progs 5.16` 的行为编写
+> （22.04 自带 5.16.2）。更高版本行为不同，可能产出超大 `system.img` 导致烧录后设备起不来。
+> 脚本会检测版本并在偏离时告警。
+
+> **为什么 macOS 不行**：仓库自带的 `tools/qdl`、`tools/adb` 是 Linux x86-64 ELF 可执行文件，
+> macOS 无法运行；打包链路还依赖 `mount -o loop` / `btrfs` / `fakeroot` / udev，macOS 均不具备。
+
+### 安装内容
+
+- **内核编译**：`gcc` `make` `bc` `bison` `flex` `libssl-dev` `libelf-dev` `libncurses-dev` `cpio` `kmod`
+- **固件打包**：`btrfs-progs` `fakeroot` `mtools` `dosfstools` `device-tree-compiler`（fdtoverlay）
+- **应用交叉编译**：`qemu-user-static` + `binfmt-support`（binfmt 跑 sysroot 内 gcc-14）
+- **烧录**：`usbutils` `libusb-1.0-0` `libxml2` `libzip`（qdl 运行时）
+- **WSL2 额外**：加载 `btrfs` 内核模块并写入 `/etc/modules-load.d/`（开机自动加载）
+
+### 需要厂商单独分发的资源
+
+以下内容**不在仓库内**（被 `.gitignore` 排除），缺失时无法产出可烧录固件：
+
+| 路径 | 内容 | 缺失影响 |
+|------|------|---------|
+| `toolchains/gcc/` | 内核交叉工具链 `aarch64-qcom-linux` 13.4 | `buildkernel` 自检直接失败 |
+| `prebuilds/` | `system.img` / `efi.bin` / `dtb.bin` / `base_rootfs` / `sysroot` | 无法打包镜像；`buildapp` 退回宿主工具链 |
+
+请向 Quectel 获取后按原路径放置。
 
 ## 推荐入口：source build.sh
 
@@ -111,6 +157,8 @@ Makefile 示例默认按当前目录结构查找 `prebuilds/sysroot` 和 `toolch
 ./scripts/flash.sh        # 自动: adb shell reboot edl → 9008 → qdl (UFS)
 ```
 
+WSL2 下 USB 默认不直通，需用 `usbipd-win` 把 Qualcomm 9008 设备转发进 WSL，或在 Windows 侧用原生 `qdl` 烧录（编译/打包仍在 WSL 内完成）。
+
 ## AI Skills
 
 `skills/` 提供 SKILL.md 技能包（AI 助手按关键词自动加载）：
@@ -178,6 +226,7 @@ clean:
 
 ## 详细文档
 
+- `tools/setup-env.sh` — 宿主环境部署（平台检测 + 依赖安装，见头部注释）
 - `tools/build-kernel.sh` — 内核打包脚本 (查看头部注释)
 - `tools/build-rootfs.sh` — 应用层打包脚本 (查看头部注释)
 - `hooks/README.md` — pre-pack hooks 机制说明
