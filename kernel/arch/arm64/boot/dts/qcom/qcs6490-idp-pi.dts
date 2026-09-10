@@ -1405,6 +1405,7 @@
 		compatible = "sdw20217010a00";
 		reg = <0 4>;
 		qcom,rx-port-mapping = <1 2 3 4 5>;
+		phandle = <0x21b>;
 	};
 };
 
