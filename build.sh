@@ -7,7 +7,7 @@
 #   source build.sh
 #   newapp <应用名> [模板]     # 从模板创建应用 (默认模板 hello)
 #   buildapp <应用目录>        # 编译应用 (自动识别 Makefile/CMake)
-#   buildcheck                # 环境检查
+#   buildenv / setenv        一键配置构建环境 (依赖安装/底包检查/sysroot/校验)
 #   buildkernel               # 编译内核 (Image + dtb + modules)
 #   buildboot                 # 打包启动镜像 (efi.bin + dtb.bin)
 #   buildoverlays             # 设备树 overlays (simple-h1: 预置 dtbo, 见说明)
@@ -245,8 +245,36 @@ buildapp() {
 # 内核 / 固件 (映射到 scripts/ 原生实现)
 # ---------------------------------------------------------------------------
 
-buildcheck() {
-    "${QPI_SDK_TOPDIR}/tools/build-kernel.sh" check
+# 一键配置构建环境 (与 M2 buildenv/setenv 语义一致):
+#   [1/4] 系统构建依赖检查/安装 (setup-deps.sh, 缺失自动 apt 安装, sudo 密码从 stdin 读)
+#   [2/4] 固件底包检查 (prebuilds/efi.bin dtb.bin system.img, H1 由用户自行放置, 不下载)
+#   [3/4] sysroot 检查 (缺失时从 system.img btrfs restore 提取, 免 root)
+#   [4/4] 环境校验 (build-kernel check + build-rootfs check)
+buildenv() {
+    echo " == [1/4] 检查 / 安装系统构建依赖 (sudo 密码从 stdin 读取) =="
+    "${QPI_SDK_TOPDIR}/tools/setup-deps.sh" install || { echo "[buildenv] [1/4] 失败"; return 1; }
+
+    echo " == [2/4] 检查固件底包 prebuilds =="
+    local ok=1
+    for f in efi.bin dtb.bin system.img; do
+        [ -f "${QPI_SDK_TOPDIR}/prebuilds/${f}" ] \
+            || { echo "[ERROR] 缺少 prebuilds/${f} (请放置官方 H1 固件底包)"; ok=0; }
+    done
+    [ "${ok}" = "1" ] || { echo "[buildenv] [2/4] 失败: 固件底包不完整"; return 1; }
+    echo "[OK] 固件底包齐全 (efi.bin / dtb.bin / system.img)"
+
+    echo " == [3/4] 检查应用编译 sysroot =="
+    if [ ! -d "${QPI_SDK_TOPDIR}/prebuilds/sysroot" ] || [ -z "$(ls -A "${QPI_SDK_TOPDIR}/prebuilds/sysroot" 2>/dev/null)" ]; then
+        echo "[INFO] sysroot 缺失, 从 system.img 提取 (btrfs restore, 免 root)..."
+        "${QPI_SDK_TOPDIR}/tools/extract-sysroot.sh" || { echo "[buildenv] [3/4] 失败"; return 1; }
+    else
+        echo "[OK] sysroot 已存在, 跳过提取"
+    fi
+
+    echo " == [4/4] 环境校验 =="
+    "${QPI_SDK_TOPDIR}/tools/build-kernel.sh" check || { echo "[buildenv] [4/4] 失败"; return 1; }
+    "${QPI_SDK_TOPDIR}/tools/build-rootfs.sh" check || { echo "[buildenv] [4/4] 失败"; return 1; }
+    echo "[buildenv] 构建环境配置完成"
 }
 
 buildkernel() {
@@ -332,7 +360,7 @@ buildhelp() {
     echo "    buildapp <目录>        编译应用 (自动识别 Makefile/CMake)"
     echo ""
     echo "  ── 内核 / 固件 ──"
-    echo "    buildcheck             环境检查"
+    echo "    buildenv / setenv     配置构建环境 (依赖安装/底包检查/sysroot/校验)"
     echo "    buildkernel            编译内核 (Image + dtb + modules)"
     echo "    buildboot              打包启动镜像 (efi.bin + dtb.bin)"
     echo "    buildoverlays          设备树 overlays (预置 dtbo 说明)"
@@ -376,7 +404,7 @@ else
     case "$cmd" in
         newapp|new) newapp "$@" ;;
         app|buildapp) buildapp "$@" ;;
-        check|buildcheck) buildcheck "$@" ;;
+        check|buildcheck|setenv|buildenv|env) buildenv "$@" ;;
         kernel|buildkernel) buildkernel "$@" ;;
         boot|buildboot) buildboot "$@" ;;
         overlays|buildoverlays) buildoverlays "$@" ;;

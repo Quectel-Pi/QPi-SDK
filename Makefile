@@ -19,7 +19,7 @@ all:
 	source $(BUILD_SH) >/dev/null && buildall
 
 check:
-	source $(BUILD_SH) >/dev/null && buildcheck
+	source $(BUILD_SH) >/dev/null && buildenv
 
 # 编译内核
 kernel:
