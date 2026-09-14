@@ -166,14 +166,20 @@ buildenv() {
     local sysroot_dir="$QPI_SDK_TOPDIR/prebuilds/sysroot"
 
     echo "== [1/4] 检查 / 安装系统构建依赖 (sudo 密码从 stdin 读取) =="
-    "$QPI_SDK_TOPDIR/tools/setup-deps.sh" install
+    "$QPI_SDK_TOPDIR/tools/setup-deps.sh" install || {
+        echo "[ERROR] 系统构建依赖安装失败 (请确认 sudo 密码/网络, 重新运行 buildenv)" >&2
+        return 1
+    }
 
     echo "== [2/4] 检查固件底包 base_image =="
     if [ -f "$base_img/package-file" ] && [ -f "$base_img/rootfs.img" ]; then
         echo "[OK] base_image 已存在, 跳过下载"
     else
         echo "[INFO] 缺少 base_image, 需下载 Quectel 编译资源包 (~5GB), 开始下载..."
-        "$QPI_SDK_TOPDIR/tools/fetch-base-image.sh"
+        "$QPI_SDK_TOPDIR/tools/fetch-base-image.sh" || {
+            echo "[ERROR] base_image 下载/解压失败 (支持断点续传, 可直接重新运行)" >&2
+            return 1
+        }
     fi
 
     echo "== [3/4] 检查应用编译 sysroot =="
@@ -181,14 +187,18 @@ buildenv() {
         echo "[OK] sysroot 已存在, 跳过提取"
     elif [ -f "$base_img/rootfs.img" ]; then
         echo "[INFO] 从 base_image/rootfs.img 提取 sysroot ..."
-        "$QPI_SDK_TOPDIR/tools/extract-sysroot.sh" "$base_img/rootfs.img" "$sysroot_dir"
+        "$QPI_SDK_TOPDIR/tools/extract-sysroot.sh" "$base_img/rootfs.img" "$sysroot_dir" || {
+            echo "[ERROR] sysroot 提取失败" >&2
+            return 1
+        }
     else
-        echo "[WARN] 缺少 rootfs.img, 无法生成 sysroot (请先完成 base_image 下载)"
+        echo "[ERROR] 缺少 rootfs.img, 无法生成 sysroot (请先解决 [2/4] base_image)" >&2
+        return 1
     fi
 
     echo "== [4/4] 环境校验 =="
-    "$QPI_SDK_TOPDIR/tools/build-kernel.sh" check && \
-    "$QPI_SDK_TOPDIR/tools/build-rootfs.sh" check && \
+    "$QPI_SDK_TOPDIR/tools/build-kernel.sh" check || return 1
+    "$QPI_SDK_TOPDIR/tools/build-rootfs.sh" check || return 1
     echo "[OK] 构建环境配置完成"
 }
 

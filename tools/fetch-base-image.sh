@@ -98,28 +98,70 @@ avail_mb=$(df -Pm "$PREBUILTS_DIR" | awk 'NR==2{print $4}')
 log_info "下载地址: $URL"
 log_info "目标分区可用 ${avail_mb}MB (zip 约 5GB, 解压后约 10GB, 建议 >30GB)"
 
-# 校验 zip 完整性: 文件末尾必须存在 EOCD 签名 (PK\x05\x06)。
-# 中断下载留下的残缺 zip 没有该签名, 据此区分"已完整"与"需续传"。
+# 校验 zip 完整性: 用解压工具做完整校验 (unzip -t / 7z t)。
+# 之前只查文件末尾的 EOCD 签名 (PK\x05\x06), 但内容已错乱/被重复断点续传
+# 撑坏的 zip 末尾仍可能残留该签名, 导致误判"完整"而跳过重下、解不出 rootfs.img。
 zip_ok() {
     [ -s "$1" ] || return 1
-    tail -c 65557 "$1" | grep -q $'\x50\x4b\x05\x06'
+    case "$UNZ" in
+        unzip) unzip -tq "$1" >/dev/null 2>&1 ;;
+        7z)    7z t "$1" >/dev/null 2>&1 ;;
+        *)     tail -c 65557 "$1" | grep -q $'\x50\x4b\x05\x06' ;;
+    esac
 }
 
 # --- 1/3: 下载 zip -----------------------------------------------------------
-download() {
-    local url="$1" out="$2"
-    if [ "$DL" = "curl" ]; then
-        if [ -f "$out" ] && [ -s "$out" ]; then
-            log_info "已存在 $out ($(du -h "$out" | cut -f1)), 尝试断点续传"
-            curl -fSL -C - --retry 3 --retry-delay 2 -o "$out" "$url"
-            # curl 报错可能是 416(已完整) 或网络中断, 以 zip 完整性为准
-            zip_ok "$out" && return 0
-            return 1
-        fi
-        curl -fSL --retry 3 --retry-delay 2 -o "$out" "$url" && zip_ok "$out"
-    else
-        wget -c -O "$out" "$url" && zip_ok "$out"
+# 输出机器可读进度标记, 插件后端解析后在状态栏/通知里渲染下载进度条。
+# 格式: [QPI-PROGRESS] total=<总字节> done=<已下字节> pct=<百分比>
+emit_progress() {
+    local done="$1" total="$2" pct=0
+    if [ -n "$total" ] && [ "$total" -gt 0 ] 2>/dev/null; then
+        pct=$((done * 100 / total))
+        [ "$pct" -gt 100 ] && pct=100
     fi
+    printf '[QPI-PROGRESS] total=%s done=%s pct=%s\n' "${total:-0}" "$done" "$pct"
+}
+
+_dl_size() { # 文件当前字节数 (Linux/WSL GNU stat; 回退 macOS BSD stat / wc)
+    [ -f "$1" ] || { echo 0; return; }
+    stat -c%s "$1" 2>/dev/null || stat -f%z "$1" 2>/dev/null || wc -c < "$1" | tr -d ' '
+}
+
+download() {
+    local url="$1" out="$2" total=0 resume=""
+    # 从响应头取文件总大小 (用于百分比; 拿不到则 total=0, 只显示已下载字节数)
+    if command -v curl >/dev/null 2>&1; then
+        total="$(curl -sIL --retry 1 "$url" 2>/dev/null | tr -d '\r' \
+                 | awk -F': ' 'tolower($1)=="content-length"{n=$2} END{print n}')"
+        [ -n "$total" ] || total=0
+    fi
+
+    if [ -f "$out" ] && [ -s "$out" ]; then
+        resume=" -C -"
+        log_info "已存在 $out ($(du -h "$out" | cut -f1)), 尝试断点续传"
+    fi
+
+    # -s 静默 curl 原生进度条 (改由 [QPI-PROGRESS] 标记上报), -f 让 HTTP 错误返回非 0;
+    # 后台执行 + 每秒轮询已下载字节数, 保证下载全程持续产出进度、SSE 连接不断。
+    if [ "$DL" = "curl" ]; then
+        curl -fSL --retry 3 --retry-delay 2 -s $resume -o "$out" "$url" &
+    else
+        wget -c -q -O "$out" "$url" &
+    fi
+    local pid=$!
+
+    while kill -0 "$pid" 2>/dev/null; do
+        emit_progress "$(_dl_size "$out")" "$total"
+        sleep 1
+    done
+    # 不因下载进程退出码触发 set -e: curl 断点续传遇 416(已完整) 也返回非 0,
+    # 统一交给下面的 zip_ok 完整校验裁决。
+    wait "$pid" || true
+    emit_progress "$(_dl_size "$out")" "$total"
+
+    # curl 报错可能是 416(已完整) 或网络中断, 以 zip 完整性为准
+    zip_ok "$out" && return 0
+    return 1
 }
 
 log_info "[1/3] 下载 $ZIP_NAME ..."
