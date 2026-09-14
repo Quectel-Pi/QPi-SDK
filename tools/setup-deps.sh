@@ -6,8 +6,8 @@
 #   - 不同 SDK (M1/M2/H1/L1...) 环境需求不同, 各自维护自己的 setup-deps.sh
 #   - 插件 / CI / 用户只需要调用本脚本, 不需要知道装了哪些包
 #
-# H1 与 M2 差异: H1 固件底包 (prebuilds/efi.bin/dtb.bin/system.img) 由用户自行
-#   放置, 无需下载; rootfs 为 BTRFS, 打包依赖 btrfs-progs/rsync/fakeroot;
+# H1 与 M2 差异: H1 固件底包 (prebuilds/efi.bin/dtb.bin/system.img) 体积达数 GB 不进仓库,
+#   由 tools/fetch-prebuilds.sh 从官方固定地址下载 (curl + unzip, 已列入本清单); rootfs 为 BTRFS, 打包依赖 btrfs-progs/rsync/fakeroot;
 #   EFI 打包依赖 python3(ukify)/mtools; 烧录 (qdl/EDL) 依赖 usbutils + libusb 等。
 #
 # 用法:
@@ -33,6 +33,8 @@ REQUIRED_TOOLS=(
   "make:make"                              # 内核 / 应用构建
   "gcc:build-essential"                    # 内核 host 工具编译
   "git:git"                                # 仓库 / 资源获取
+  "curl:curl"                              # 固件底包下载 (tools/fetch-prebuilds.sh)
+  "unzip:unzip"                            # 固件底包解压 (tools/fetch-prebuilds.sh)
   "file:file"                              # 镜像类型识别
   "flex:flex"                              # 内核编译 (词法分析)
   "bison:bison"                            # 内核编译 (语法分析)

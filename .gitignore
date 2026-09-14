@@ -9,7 +9,12 @@ projects/hello-h1/hello-h1
 #       不在此排除; 内核编译产物在 build/ (O= 输出) 已整体忽略
 
 # 原始固件镜像 (超大二进制, 不入库; 由厂商发布/单独分发)
+#   获取: ./tools/fetch-prebuilds.sh fetch  (官方固定地址自动下载+校验)
 prebuilds/
+
+# 固件底包下载缓存 (tools/fetch-prebuilds.sh; 压缩包约 3.2GB, 不入库;
+#   独立于 build/ 是为了不被 buildclean 清掉; 清理用 fetch-prebuilds.sh clean)
+download/
 
 # 交叉编译工具链 (体积大, 独立分发; 需要时从原始位置获取)
 # 例外: qcom-rootfs-toolchain 是 qemu wrapper 工具链 (symlink + 小脚本, buildapp 必需, 入库)
