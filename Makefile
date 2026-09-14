@@ -4,7 +4,7 @@
 SHELL := /bin/bash
 BUILD_SH := ./build.sh
 
-.PHONY: newapp app all check kernel boot overlays rootfs menuconfig defconfig savedefconfig clean help
+.PHONY: newapp app all check prebuilds kernel boot overlays rootfs menuconfig defconfig savedefconfig clean help
 
 # 从模板创建应用: make newapp NAME=myapp [TEMPLATE=hello]
 newapp:
@@ -20,6 +20,11 @@ all:
 
 check:
 	source $(BUILD_SH) >/dev/null && buildenv
+
+# 固件底包下载/校验 (make prebuilds FETCH=check 可只检查)
+FETCH ?= fetch
+prebuilds:
+	source $(BUILD_SH) >/dev/null && buildfetch $(FETCH)
 
 # 编译内核
 kernel:

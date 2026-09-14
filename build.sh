@@ -7,7 +7,8 @@
 #   source build.sh
 #   newapp <应用名> [模板]     # 从模板创建应用 (默认模板 hello)
 #   buildapp <应用目录>        # 编译应用 (自动识别 Makefile/CMake)
-#   buildenv / setenv        一键配置构建环境 (依赖安装/底包检查/sysroot/校验)
+#   buildenv / setenv        一键配置构建环境 (依赖安装/底包下载/sysroot/校验)
+#   buildfetch               固件底包下载 (缺什么补什么; 见 buildfetch help)
 #   buildkernel               # 编译内核 (Image + dtb + modules)
 #   buildboot                 # 打包启动镜像 (efi.bin + dtb.bin)
 #   buildoverlays             # 设备树 overlays (simple-h1: 预置 dtbo, 见说明)
@@ -83,9 +84,22 @@ elif command -v aarch64-linux-gnu-gcc >/dev/null 2>&1; then
     export CXX="${CROSS_COMPILE}g++"
     export AR="${CROSS_COMPILE}ar"
     export LD="${CROSS_COMPILE}ld"
+    export QPI_SYSROOT_MISSING=1
+    # 这条回退是"能编过但产物可能不对"的静默陷阱: 宿主 glibc 与设备目标 glibc
+    # 不一致, 而且 gcc 对不存在的 --sysroot 不报错, 所以必须显式警告。
+    {
+        echo "[build.sh] 警告: 未启用 SDK 应用工具链, 回退到宿主 aarch64-linux-gnu-gcc"
+        if [ -x "${ROOTFS_TOOLCHAIN}/bin/aarch64-linux-gnu-gcc" ] && [ ! -d "${QPI_SDK_TOPDIR}/prebuilds/sysroot" ]; then
+            echo "[build.sh]   原因: 缺少 prebuilds/sysroot"
+            echo "[build.sh]   后果: 产物链接宿主 glibc ($(ldd --version 2>/dev/null | head -1 | awk '{print $NF}')), 可能无法在设备上运行"
+            echo "[build.sh]   修复: ./tools/fetch-prebuilds.sh fetch && ./tools/extract-sysroot.sh"
+        fi
+    } >&2
 else
-    echo "[build.sh] 警告: 未找到可用的 aarch64 应用交叉编译器"
-    echo "          (可运行 tools/extract-sysroot.sh 提取 sysroot, 启用 qemu wrapper 工具链)"
+    echo "[build.sh] 警告: 未找到可用的 aarch64 应用交叉编译器" >&2
+    echo "[build.sh]   获取底包并提取 sysroot 可启用 SDK 工具链:" >&2
+    echo "[build.sh]     ./tools/fetch-prebuilds.sh fetch && ./tools/extract-sysroot.sh" >&2
+    export QPI_SYSROOT_MISSING=1
     export TOOLCHAIN=""
     export CROSS_COMPILE="aarch64-qcom-linux-"
 fi
@@ -227,9 +241,25 @@ PYEOF
 
 # 编译应用: buildapp <目录> (自动识别 Makefile/CMake, 与 M2 一致)
 buildapp() {
-    local dir="${1:-.}"
+    local dir="${1:-}"
     local app_dir
-    app_dir="$(cd "$dir" 2>/dev/null && pwd)" || { echo "ERROR: 目录不存在: $dir"; return 1; }
+
+    # 解析目标目录: 给了参数就用参数, 没给就用当前目录 (支持 cd <app> && buildapp)
+    if [ -z "${dir}" ]; then
+        app_dir="$(pwd)"
+    else
+        app_dir="$(cd "$dir" 2>/dev/null && pwd)" || { echo "ERROR: 目录不存在: $dir"; return 1; }
+    fi
+
+    # 拦住"在 SDK 根目录执行": 顶层 Makefile 的默认目标是 newapp,
+    # 会让 make 凭空建出一个工程 (且名字取自环境变量 NAME), 必须明确报错。
+    if [ "${app_dir}" = "${QPI_SDK_TOPDIR}" ]; then
+        echo "ERROR: 不能在 SDK 根目录执行 buildapp"
+        echo "       顶层 Makefile 的默认目标是 newapp, 会凭空创建工程"
+        echo "用法:  buildapp <应用目录>      例: buildapp projects/myapp"
+        echo "       (进入工程目录后可省略参数: cd projects/myapp && buildapp)"
+        return 1
+    fi
 
     if [ -f "${app_dir}/CMakeLists.txt" ]; then
         (cd "${app_dir}" && cmake -S . -B build && cmake --build build) || return 1
@@ -247,21 +277,60 @@ buildapp() {
 
 # 一键配置构建环境 (与 M2 buildenv/setenv 语义一致):
 #   [1/4] 系统构建依赖检查/安装 (setup-deps.sh, 缺失自动 apt 安装, sudo 密码从 stdin 读)
-#   [2/4] 固件底包检查 (prebuilds/efi.bin dtb.bin system.img, H1 由用户自行放置, 不下载)
+#   [2/4] 固件底包检查 (prebuilds/efi.bin dtb.bin system.img; 缺失时按官方地址自动下载)
 #   [3/4] sysroot 检查 (缺失时从 system.img btrfs restore 提取, 免 root)
 #   [4/4] 环境校验 (build-kernel check + build-rootfs check)
+#
+# 底包下载行为 (避免意外触发数 GB 下载):
+#   交互终端      -> 询问确认后下载 (回车 = 下载, n = 跳过)
+#   非交互 (扩展/CI/管道) -> 默认不下载, 只报错并给出下一步命令;
+#                            需要自动下载时设 QPI_AUTO_FETCH=1
+#   QPI_NO_FETCH=1        -> 任何情况下都禁用自动下载 (只检查)
+#   其他: QPI_PREBUILDS_URL 覆盖下载地址; QPI_DL_DIR 指定缓存目录
 buildenv() {
     echo " == [1/4] 检查 / 安装系统构建依赖 (sudo 密码从 stdin 读取) =="
     "${QPI_SDK_TOPDIR}/tools/setup-deps.sh" install || { echo "[buildenv] [1/4] 失败"; return 1; }
 
     echo " == [2/4] 检查固件底包 prebuilds =="
-    local ok=1
-    for f in efi.bin dtb.bin system.img; do
-        [ -f "${QPI_SDK_TOPDIR}/prebuilds/${f}" ] \
-            || { echo "[ERROR] 缺少 prebuilds/${f} (请放置官方 H1 固件底包)"; ok=0; }
-    done
-    [ "${ok}" = "1" ] || { echo "[buildenv] [2/4] 失败: 固件底包不完整"; return 1; }
-    echo "[OK] 固件底包齐全 (efi.bin / dtb.bin / system.img)"
+    local missing
+    missing="$("${QPI_SDK_TOPDIR}/tools/fetch-prebuilds.sh" check 2>/dev/null)"
+    if [ -n "${missing}" ]; then
+        echo "[INFO] 缺少固件底包: $(echo "${missing}" | tr '\n' ' ')"
+        if [ "${QPI_NO_FETCH:-0}" = "1" ]; then
+            echo "[ERROR] QPI_NO_FETCH=1, 已禁用自动下载"
+            echo "[ERROR] 请手动放置到底包目录, 或先执行: buildfetch fetch"
+            echo "[buildenv] [2/4] 失败: 固件底包不完整"
+            return 1
+        fi
+        # 决定是否下载: 交互终端询问; 非交互仅当 QPI_AUTO_FETCH=1 才下载
+        # (扩展 / CI 走非交互路径: 数 GB 下载不能无提示地挂在这里)
+        local do_fetch=0
+        if [ -t 0 ]; then
+            echo "[INFO] 官方底包约 3.2 GiB, 首次下载耗时较长 (已下载过的会断点续传/复用缓存)"
+            printf "[?] 立即下载官方底包? [Y/n] "
+            local ans=""
+            read -r ans || true
+            case "${ans}" in [Nn]*) do_fetch=0 ;; *) do_fetch=1 ;; esac
+        elif [ "${QPI_AUTO_FETCH:-0}" = "1" ]; then
+            echo "[INFO] QPI_AUTO_FETCH=1 (非交互), 自动下载固件底包"
+            do_fetch=1
+        fi
+        if [ "${do_fetch}" = "1" ]; then
+            echo "[INFO] 下载固件底包 (buildfetch)..."
+            "${QPI_SDK_TOPDIR}/tools/fetch-prebuilds.sh" fetch \
+                || { echo "[buildenv] [2/4] 失败: 固件底包获取失败"; return 1; }
+        else
+            echo "[ERROR] 固件底包不完整, 且当前为无提示环境 (未自动下载)"
+            echo "[ERROR] 请执行以下任一命令获取 (可断点续传):"
+            echo "[ERROR]     ./tools/fetch-prebuilds.sh fetch      # 直接下载"
+            echo "[ERROR]     source build.sh && buildfetch fetch  # 命令层等价写法"
+            echo "[ERROR]   若希望非交互环境自动下载: QPI_AUTO_FETCH=1 buildenv"
+            echo "[buildenv] [2/4] 失败: 固件底包不完整"
+            return 1
+        fi
+    else
+        echo "[OK] 固件底包齐全 (efi.bin / dtb.bin / system.img)"
+    fi
 
     echo " == [3/4] 检查应用编译 sysroot =="
     if [ ! -d "${QPI_SDK_TOPDIR}/prebuilds/sysroot" ] || [ -z "$(ls -A "${QPI_SDK_TOPDIR}/prebuilds/sysroot" 2>/dev/null)" ]; then
@@ -275,6 +344,22 @@ buildenv() {
     "${QPI_SDK_TOPDIR}/tools/build-kernel.sh" check || { echo "[buildenv] [4/4] 失败"; return 1; }
     "${QPI_SDK_TOPDIR}/tools/build-rootfs.sh" check || { echo "[buildenv] [4/4] 失败"; return 1; }
     echo "[buildenv] 构建环境配置完成"
+}
+
+# 固件底包: buildfetch [check|fetch|hash|pin|clean]
+#   buildfetch            缺什么补什么 (已齐全则跳过)
+#   buildfetch check      只检查缺失
+#   buildfetch fetch      下载 + sha256 校验 + 解压到 prebuilds/
+#   buildfetch hash/pin   查看 / 固化压缩包 sha256
+#   buildfetch clean      清理下载缓存 (不动 prebuilds/)
+buildfetch() {
+    "${QPI_SDK_TOPDIR}/tools/fetch-prebuilds.sh" "${@:-fetch}"
+}
+
+# 兼容别名: 早期文档 / 外部脚本里的 buildcheck 就是现在的 buildenv
+#   (buildenv 相较旧 buildcheck 增加了依赖安装与底包下载, 语义更宽)
+buildcheck() {
+    buildenv "$@"
 }
 
 buildkernel() {
@@ -293,7 +378,18 @@ buildoverlays() {
 buildrootfs() {
     # 目录级可复现打包: base + overlay → staging → mkfs 全新生成 system.img
     # (免挂载修改, 免 root; 见 tools/build-rootfs.sh 头部说明)
+    #
+    # 打包前先做底包新鲜度检查 (联网失败则用本地继续; 厂商已更新则先换新再打包):
+    _qpi_prebuilds_refresh || return 1
     "${QPI_SDK_TOPDIR}/tools/build-rootfs.sh" build
+}
+
+# 打包 system.img 前的底包新鲜度检查 (薄封装, 便于统一开关)
+#   QPI_NO_REFRESH=1   跳过检查
+#   QPI_ALLOW_STALE=1  厂商包已更新但下载失败时, 仍用旧底包继续
+_qpi_prebuilds_refresh() {
+    [ "${QPI_NO_REFRESH:-0}" = "1" ] && { echo "[build.sh] QPI_NO_REFRESH=1, 跳过底包新鲜度检查"; return 0; }
+    "${QPI_SDK_TOPDIR}/tools/fetch-prebuilds.sh" refresh
 }
 
 buildall() {
@@ -306,6 +402,8 @@ buildall() {
     fi
     "${QPI_SDK_TOPDIR}/scripts/pack-efi.sh" || return 1
     "${QPI_SDK_TOPDIR}/scripts/pack-dtb.sh" || return 1
+    # system.img 打包前做底包新鲜度检查 (同上)
+    _qpi_prebuilds_refresh || return 1
     "${QPI_SDK_TOPDIR}/tools/build-rootfs.sh" build || return 1
     echo "[build.sh] buildall 完成: ${OUT_DIR:-build/result}/{efi.bin, dtb.bin, system.img}"
 }
@@ -315,9 +413,12 @@ buildall() {
 # ---------------------------------------------------------------------------
 
 buildmenuconfig() {
-    cd "${KERNEL_SRC}" && make O="${KERNEL_OUT}" ARCH="${ARCH}" CROSS_COMPILE="${CROSS_COMPILE}" menuconfig
-    echo "menuconfig 配置已保存到 ${KERNEL_OUT}/.config"
-    echo "下次 buildkernel/buildall 会保留此配置 (增量编译)"
+    # 用子 shell 执行, 避免 source 后把用户的 cwd 留在内核源码目录
+    mkdir -p "${KERNEL_OUT}"
+    (cd "${KERNEL_SRC}" && make O="${KERNEL_OUT}" ARCH="${ARCH}" CROSS_COMPILE="${CROSS_COMPILE}" menuconfig) || return 1
+    # 注意: menuconfig 退出码不区分"保存"与"未保存", 所以不能断言已保存
+    echo "menuconfig 已退出 (配置仅在选择 < Save > 时写入)"
+    echo "当前 ${KERNEL_OUT}/.config 会被下次 buildkernel/buildall 沿用 (增量编译)"
 }
 
 builddefconfig() {
@@ -329,11 +430,15 @@ builddefconfig() {
 }
 
 buildsavedefconfig() {
-    # 将当前 .config 精简保存为基准 (备份原文件)
+    # 将当前 .config 精简保存为基准
+    #   顺序很重要: 必须"先备份旧基准, 再写入新配置"。
+    #   反过来的话 .bak 里存的是刚写进去的新配置, 旧基准就永久丢了。
     (cd "${KERNEL_SRC}" && make O="${KERNEL_OUT}" ARCH="${ARCH}" CROSS_COMPILE="${CROSS_COMPILE}" savedefconfig) || return 1
-    cp "${KERNEL_OUT}/defconfig" "${QPI_SDK_TOPDIR}/scripts/kernel-config" \
-        && echo "已保存基准配置: scripts/kernel-config (旧配置备份: scripts/kernel-config.bak)" \
-        && cp "${QPI_SDK_TOPDIR}/scripts/kernel-config" "${QPI_SDK_TOPDIR}/scripts/kernel-config.bak"
+    local cfg="${QPI_SDK_TOPDIR}/scripts/kernel-config"
+    if [ -f "${cfg}" ]; then
+        cp "${cfg}" "${cfg}.bak" && echo "旧基准已备份: scripts/kernel-config.bak"
+    fi
+    cp "${KERNEL_OUT}/defconfig" "${cfg}" && echo "已保存基准配置: scripts/kernel-config"
 }
 
 # ---------------------------------------------------------------------------
@@ -360,7 +465,9 @@ buildhelp() {
     echo "    buildapp <目录>        编译应用 (自动识别 Makefile/CMake)"
     echo ""
     echo "  ── 内核 / 固件 ──"
-    echo "    buildenv / setenv     配置构建环境 (依赖安装/底包检查/sysroot/校验)"
+    echo "    buildenv / setenv     配置构建环境 (依赖安装/底包下载/sysroot/校验)"
+    echo "                          (buildcheck 为兼容别名)"
+    echo "    buildfetch            固件底包下载 (check|fetch|hash|pin|clean)"
     echo "    buildkernel            编译内核 (Image + dtb + modules)"
     echo "    buildboot              打包启动镜像 (efi.bin + dtb.bin)"
     echo "    buildoverlays          设备树 overlays (预置 dtbo 说明)"
@@ -404,7 +511,8 @@ else
     case "$cmd" in
         newapp|new) newapp "$@" ;;
         app|buildapp) buildapp "$@" ;;
-        check|buildcheck|setenv|buildenv|env) buildenv "$@" ;;
+        check|buildcheck|setenv|buildenv|env) buildenv "$@";;
+        prebuilds|buildprebuilds|fetch|buildfetch|download) buildfetch "$@";;
         kernel|buildkernel) buildkernel "$@" ;;
         boot|buildboot) buildboot "$@" ;;
         overlays|buildoverlays) buildoverlays "$@" ;;

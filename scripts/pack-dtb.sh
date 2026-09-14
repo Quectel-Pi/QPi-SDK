@@ -16,8 +16,16 @@ MNT="${BUILD_DIR}/dtb-mnt"
 # sudo 支持 (仅 mtools 缺失回退挂载时需要; 默认 mtools 免 root)
 SUDO="${SUDO:-sudo}"
 
-[ -f "${SRC_DTB_BIN}" ] || { echo "[ERROR] 原始 dtb.bin 不存在: ${SRC_DTB_BIN}"; exit 1; }
-[ -f "${DTB}" ] || { echo "[ERROR] DTB 不存在: ${DTB}"; exit 1; }
+if [ ! -f "${SRC_DTB_BIN}" ]; then
+    echo "[ERROR] 厂商原始 dtb.bin 不存在: ${SRC_DTB_BIN}"
+    echo "[ERROR]   获取固件底包: ./tools/fetch-prebuilds.sh fetch"
+    exit 1
+fi
+if [ ! -f "${DTB}" ]; then
+    echo "[ERROR] DTB 不存在: ${DTB}"
+    echo "[ERROR]   看起来内核还没编译; 先运行: buildkernel (或 ./scripts/build-kernel.sh)"
+    exit 1
+fi
 
 echo "=========================================="
 echo "[simple-h1] 打包 dtb.bin"

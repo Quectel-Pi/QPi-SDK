@@ -49,6 +49,17 @@ STAGING="${STAGING:-${BUILD_DIR}/rootfs-staging}"
 OUT_IMG="${OUT_IMG:-${OUT_DIR}/system.img}"
 SUDO="${SUDO:-sudo}"
 
+# 保护原版: 新生成的 system.img 必须写到独立路径 (默认 build/result/system.img),
+# 绝不允许与厂商原始镜像 (prebuilds/system.img) 是同一个文件, 否则会覆盖原版。
+if [ "$(readlink -f "${OUT_IMG}" 2>/dev/null || echo "${OUT_IMG}")" = \
+     "$(readlink -f "${SRC_IMG}" 2>/dev/null || echo "${SRC_IMG}")" ]; then
+    echo "[ERROR] OUT_IMG 与 SRC_IMG 指向同一文件, 会覆盖厂商原始镜像:" >&2
+    echo "        OUT_IMG=${OUT_IMG}" >&2
+    echo "        SRC_IMG=${SRC_IMG}" >&2
+    echo "        原版必须保留; 请用 OUT_IMG 指定其他路径 (默认 build/result/system.img)" >&2
+    exit 1
+fi
+
 # 原始镜像属性 (默认值, 保证与分区/烧录兼容)
 SRC_SIZE="$(stat -c%s "${SRC_IMG}" 2>/dev/null || echo 13611565056)"
 SRC_UUID="$(btrfs inspect-internal dump-super "${SRC_IMG}" 2>/dev/null | awk '/^fsid/{print $2; exit}')"
@@ -73,7 +84,13 @@ check_env() {
     command -v fakeroot >/dev/null 2>&1 || { log_warn "未找到 fakeroot (repack 属主将不保真)"; }
     if [ ! -d "${BASE_ROOTFS}" ]; then
         log_warn "基准目录不存在: ${BASE_ROOTFS}"
-        log_warn "  运行 ./tools/build-rootfs.sh extract 从原始镜像建立"
+        if [ ! -f "${SRC_IMG}" ]; then
+            log_warn "  原始镜像也缺失: ${SRC_IMG}"
+            log_info "  1) 先获取固件底包: ./tools/fetch-prebuilds.sh fetch"
+            log_info "  2) 再运行: ./tools/build-rootfs.sh extract"
+        else
+            log_warn "  运行 ./tools/build-rootfs.sh extract 从原始镜像建立"
+        fi
         if [ -d "${SDK_ROOT}/prebuilds/sysroot" ]; then
             log_info "  (检测到 prebuilds/sysroot, 将自动作为 base 源)"
         fi
@@ -98,7 +115,13 @@ base_source() {
         # 注意: 本函数的结果经 $( ) 捕获为目录路径, 所以诊断信息必须走 stderr,
         # 否则会被调用方当成路径使用 (base_source 的返回值语义是"目录")。
         log_err "无可用基准目录: ${BASE_ROOTFS} 或 prebuilds/sysroot" >&2
-        log_err "先运行: ./tools/build-rootfs.sh extract" >&2
+        if [ ! -f "${SRC_IMG}" ]; then
+            log_err "原始镜像也缺失: ${SRC_IMG}" >&2
+            log_err "  1) 先获取固件底包: ./tools/fetch-prebuilds.sh fetch" >&2
+            log_err "  2) 再建立基准目录: ./tools/build-rootfs.sh extract" >&2
+        else
+            log_err "原始镜像已就绪, 请先建立基准目录: ./tools/build-rootfs.sh extract" >&2
+        fi
         return 1
     fi
 }

@@ -33,7 +33,18 @@ if [ -f "${DTBO_DIR}/qcm6490-graphics.dtbo" ] && [ -f "${DTBO_DIR}/qcm6490-camer
 fi
 
 for f in "${IMAGE}" "${DTB}" "${INITRAMFS}" "${EFI_STUB}"; do
-    [ -f "$f" ] || { echo "[ERROR] 缺少文件: $f"; exit 1; }
+    if [ ! -f "$f" ]; then
+        echo "[ERROR] 缺少文件: $f"
+        case "$f" in
+            "${KERNEL_OUT}"/*)
+                echo "[ERROR]   看起来内核还没编译; 先运行: buildkernel (或 ./scripts/build-kernel.sh)"
+                ;;
+            "${PREBUILDS_DIR}"/*)
+                echo "[ERROR]   这是厂商底包文件; 获取: ./tools/fetch-prebuilds.sh fetch"
+                ;;
+        esac
+        exit 1
+    fi
 done
 
 echo "=========================================="
@@ -61,6 +72,11 @@ python3 "${UKIFY}" build \
 echo "[simple-h1] UKI: ${UKI} ($(stat -c%s "${UKI}") bytes)"
 
 # 2. 从 prebuilds 复制原始 efi.bin
+if [ ! -f "${PREBUILDS_DIR}/efi.bin" ]; then
+    echo "[ERROR] 缺少厂商原始 efi.bin: ${PREBUILDS_DIR}/efi.bin"
+    echo "[ERROR]   获取固件底包: ./tools/fetch-prebuilds.sh fetch"
+    exit 1
+fi
 rm -f "${EFI_IMG}"
 cp "${PREBUILDS_DIR}/efi.bin" "${EFI_IMG}"
 

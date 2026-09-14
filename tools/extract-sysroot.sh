@@ -31,7 +31,11 @@ log_err()  { echo -e "${RED}[ERROR]${NC} $1"; }
 
 # --- 前置检查 ---------------------------------------------------------------
 command -v btrfs >/dev/null 2>&1 || { log_err "缺少 btrfs-progs (btrfs)"; exit 1; }
-[ -f "${IMG}" ] || { log_err "镜像不存在: ${IMG}"; exit 1; }
+if [ ! -f "${IMG}" ]; then
+    log_err "镜像不存在: ${IMG}"
+    log_err "  获取固件底包: ./tools/fetch-prebuilds.sh fetch   (= source build.sh && buildfetch fetch)"
+    exit 1
+fi
 
 need_mb=$(du -m "${IMG}" | cut -f1)
 avail_mb=$(df -Pm "$(dirname "${OUT}")" | awk 'NR==2{print $4}')
