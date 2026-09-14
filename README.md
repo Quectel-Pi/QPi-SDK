@@ -76,16 +76,101 @@ qpi-h1/
 - **烧录**：`usbutils` `libusb-1.0-0` `libxml2` `libzip`（qdl 运行时）
 - **WSL2 额外**：加载 `btrfs` 内核模块并写入 `/etc/modules-load.d/`（开机自动加载）
 
-### 需要厂商单独分发的资源
+## 固件底包获取（prebuilds/）
 
-以下内容**不在仓库内**（被 `.gitignore` 排除），缺失时无法产出可烧录固件：
+固件底包体积达数 GB，**不在仓库内**（被 `.gitignore` 排除），新 clone 的机器上 `prebuilds/`
+是空的。**用一条命令下载即可**：
+
+```bash
+./tools/fetch-prebuilds.sh fetch        # 下载 + 校验 + 解压到 prebuilds/
+# 或（等价，走 build.sh 命令层）
+source build.sh && buildfetch fetch
+make prebuilds                          # 同上
+```
+
+- 默认地址（官方固定 URL，可用 `QPI_PREBUILDS_URL` 覆盖）：
+  `https://developer.quectel.com/doc/files/quectel_pi/Quectel_Pi_H1_WF_Debian_RD2_Latest.zip`
+  （指向厂商"最新"底包，内容会随厂商更新）
+- 下载约 3.2 GiB，**支持断点续传**：中断后重跑同一条命令即继续；完整包会缓存在
+  `download/`（独立于 `build/`，不会被 `buildclean` 清掉），拷给同事可省一次下载。
+
+### 完整性校验：以厂商 md5 为准
+
+厂商为底包提供了 md5 文件，工具链会**主动取用**它：
+
+```
+https://developer.quectel.com/doc/files/quectel_pi/Quectel_Pi_H1_WF_Debian_RD2_Latest_md5.txt
+```
+
+**① 打包 system.img 之前自动校验**（`buildrootfs` / `buildall` 会先跑这一步）：
+
+| 情况 | 行为 |
+|------|------|
+| 联网失败 / 取不到 md5 | **使用本地底包继续打包**（不阻塞构建） |
+| 联网成功，md5 一致 | 本地已是最新，继续打包 |
+| 联网成功，md5 变了 | 下载最新包 → 校验 → **替换本地** → 重新解压 → 继续打包 |
+| 已更新但下载失败 | 中止打包（避免产出与厂商最新不一致的镜像）；`QPI_ALLOW_STALE=1` 可强行用旧底包 |
+
+开关：`QPI_NO_REFRESH=1` 跳过该检查；`QPI_ALLOW_STALE=1` 允许用旧底包继续。
+
+**② `fetch` 时也会校验**：本地包 md5 不一致即判为"厂商已更新或本地损坏"，
+旧文件留 `.stale` 并重新下载；下载完成后强制按厂商 md5 校验，不符即失败。
+
+替换底包时旧的原版镜像不会丢：`prebuilds/system.img` → `system.img.prev`，
+派生的 `base_rootfs`/`sysroot` 会移到 `.prev` 并重建（因为它们是从旧镜像派生的）。
+
+要点：**只有厂商 md5 能证明本地文件与厂商源一致**。本地自算的 sha256（`tools/prebuilds.sha256`）
+只是"文件自 pin 之后没变过"的复现记录，属自我引用——它能发现"之后被改动"，但发现不了
+"一开始就下坏了"。所以 md5 是权威判据，sha256 不一致但 md5 一致时会以厂商为准并自动刷新记录。
+
+相关子命令：
+
+```bash
+./tools/fetch-prebuilds.sh refresh  # 打包前的底包新鲜度检查（buildrootfs/buildall 内部调用）
+./tools/fetch-prebuilds.sh md5      # 对照厂商 md5 检查本地包是否最新（不下载）
+./tools/fetch-prebuilds.sh verify   # 厂商 md5 + 压缩包内部 CRC 双重校验
+./tools/fetch-prebuilds.sh hash     # 查看本地 zip 的 sha256
+./tools/fetch-prebuilds.sh pin      # 固化本地 sha256 记录
+./tools/fetch-prebuilds.sh clean    # 清理下载缓存（不动 prebuilds/）
+```
+
+### 产物不覆盖原版
+
+新生成的 `system.img` 一律写到 **`build/result/system.img`**，厂商原始镜像
+`prebuilds/system.img` 全程只读、不会被替换。工具内置保护：若有人把两者设成同一路径，
+`build-rootfs.sh` 会直接报错拒绝执行。
+
+按需重建的中间目录也各自独立，不占用原版路径：
+
+```bash
+./tools/build-rootfs.sh extract     # prebuilds/system.img → prebuilds/base_rootfs
+./tools/extract-sysroot.sh          # prebuilds/system.img → prebuilds/sysroot
+```
+
+也可以手工把厂商分发包解压后放到 `prebuilds/`（`system.img` / `efi.bin` / `dtb.bin`
+必须在 `prebuilds/` 根下）。
+
+`buildenv` 的 `[2/4]` 段会自动检查底包，缺失时的行为：
+
+| 环境 | 行为 |
+|------|------|
+| 交互终端 | 询问 `[Y/n]`，回车即下载 |
+| 非交互（扩展 / CI / 管道） | 默认**不**下载，报错并给出下一步命令（避免数 GB 下载无提示地挂住） |
+| 设 `QPI_AUTO_FETCH=1` | 非交互环境也自动下载 |
+| 设 `QPI_NO_FETCH=1` | 任何情况下都只检查、不下载 |
 
 | 路径 | 内容 | 缺失影响 |
 |------|------|---------|
 | `prebuilds/` | `system.img` / `efi.bin` / `dtb.bin` / `base_rootfs` / `sysroot` | 无法打包镜像；`buildapp` 退回宿主工具链 |
 
-请向 Quectel 获取后按原路径放置。内核交叉工具链 `toolchains/gcc/` 与
-`toolchains/uninative-lib/` **已随仓库分发**，无需另行获取。
+`prebuilds/base_rootfs` 与 `prebuilds/sysroot` 不用下载，由底包镜像本地生成：
+
+```bash
+./tools/build-rootfs.sh extract     # system.img -> prebuilds/base_rootfs
+./tools/extract-sysroot.sh          # system.img -> prebuilds/sysroot
+```
+
+内核交叉工具链 `toolchains/gcc/` 与 `toolchains/uninative-lib/` **已随仓库分发**，无需另行获取。
 
 ## 推荐入口：source build.sh
 
@@ -95,7 +180,8 @@ source build.sh
 
 newapp myapp           # 从模板创建应用
 buildapp projects/myapp  # 编译应用
-buildcheck             # 环境检查
+buildenv               # 一键配置构建环境 (依赖/底包下载/sysroot/校验)
+buildfetch             # 固件底包下载/校验 (check|fetch|hash|pin|clean)
 buildkernel            # 编译内核
 buildboot              # 打包启动镜像 (efi.bin + dtb.bin)
 buildoverlays          # 设备树 overlays

@@ -22,18 +22,44 @@ simple-h1 脱离 Yocto，仅两个功能：
 
 ### 环境
 ```bash
-cd /home/igni/Downloads/debian/simple-h1
+cd <SDK_ROOT>
 source scripts/env.sh     # 原生入口
 # 或推荐: source build.sh   (与 QPi-SDK/M2 命令兼容层, 自动 source env.sh)
 ```
 
+### 固件底包 (prebuilds/, 不入库, 必须先获取)
+```bash
+./tools/fetch-prebuilds.sh fetch   # 下载 + 校验 + 解压 (缺什么补什么)
+./tools/fetch-prebuilds.sh check   # 只检查缺失
+./tools/fetch-prebuilds.sh md5     # 对照厂商 md5 检查本地包是否最新
+./tools/fetch-prebuilds.sh verify  # 厂商 md5 + 压缩包 CRC 双重校验
+# 等价: source build.sh && buildfetch fetch   /   make prebuilds
+```
+- 官方固定地址 (可用 QPI_PREBUILDS_URL 覆盖, 指向厂商最新底包):
+  `https://developer.quectel.com/doc/files/quectel_pi/Quectel_Pi_H1_WF_Debian_RD2_Latest.zip`
+- **完整性以厂商 md5 为准** (同目录 `..._Latest_md5.txt`):
+  * **打包 system.img 之前自动校验**: 联网失败 -> 用本地继续; md5 一致 -> 继续;
+    md5 变了 -> 下载新的替换本地再打包; 已更新但下载失败 -> 中止
+    (`QPI_ALLOW_STALE=1` 强行用旧底包; `QPI_NO_REFRESH=1` 跳过检查)
+  * fetch 时: 本地 md5 不一致即重下; 下载完成后强制按厂商 md5 校验
+  * 替换时旧原版保留为 `system.img.prev`; 派生的 base_rootfs/sysroot 移到 `.prev` 并重建
+- **新产物不覆盖原版**: 生成的 system.img 只写 `build/result/system.img`;
+  `prebuilds/system.img` 全程只读 (若两者设为同一路径, build-rootfs.sh 报错拒绝)
+- 约 3.2 GiB, 断点续传; 缓存 `download/`; 本地 sha256 记录 `tools/prebuilds.sha256`
+  (仅复现用, 属自我引用, 不能证明与厂商源一致)
+- 缺底包的症状: `buildenv` 报"缺少 prebuilds/system.img"; `buildrootfs`/`buildall` 报
+  "无可用基准目录"; `buildboot` 裸报 `cp: cannot stat .../efi.bin`
+- buildenv 的 [2/4] 段: 交互终端询问后下载; 非交互默认不下载 (免数 GB 下载挂住扩展/CI),
+  非交互要自动下载设 QPI_AUTO_FETCH=1, 彻底禁用设 QPI_NO_FETCH=1
+
 > M2 兼容命令 (同一套命令在 simple-h1 与 QPi-SDK/M2 通用):
-> source build.sh 后 → buildcheck/buildkernel/buildboot/buildoverlays/buildrootfs/
+> source build.sh 后 → buildenv/buildfetch/buildkernel/buildboot/buildoverlays/buildrootfs/
 > buildall/buildmenuconfig/builddefconfig/buildclean/newapp/buildapp; 或
-> make check|kernel|boot|rootfs|all|clean|...; 或 ./tools/build-kernel.sh <子命令>
+> make check|prebuilds|kernel|boot|rootfs|all|clean|...; 或 ./tools/build-kernel.sh <子命令>
 > / ./tools/build-rootfs.sh <子命令>。映射: buildkernel→scripts/build-kernel.sh,
-> buildboot→pack-efi.sh+pack-dtb.sh, buildrootfs→pack-system.sh,
-> buildall→build-all.sh (SKIP_KERNEL=1 语义保留)。
+> buildboot→pack-efi.sh+pack-dtb.sh, buildrootfs→tools/build-rootfs.sh build,
+> buildall→(内核+pack-efi+pack-dtb+build-rootfs, SKIP_KERNEL=1 语义保留),
+> buildenv→依赖安装+底包下载+sysroot+校验。
 
 ### 内核编译
 ```bash
