@@ -95,6 +95,48 @@ human() { # 字节 -> 人类可读
 }
 
 # ---------------------------------------------------------------------------
+# 下载进度上报 (与 M2 的 fetch-base-image.sh 同一约定, 供 VS Code 插件消费)
+# ---------------------------------------------------------------------------
+# 输出机器可读进度标记, 插件后端 (python/quecpi/executor.py) 解析后渲染成
+# 右下角通知 + 状态栏的 "下载中 n% (已下 / 总)" 进度条。
+# 注意: 插件终端里不会显示这些标记行 (被转成进度事件); 手工运行本脚本时会看到,
+#       属正常现象。
+emit_progress() {
+    local done="${1:-0}" total="${2:-0}" pct=0
+    case "${total}" in ''|*[!0-9]*) total=0 ;; esac
+    case "${done}"  in ''|*[!0-9]*) done=0 ;; esac
+    if [ "${total}" -gt 0 ]; then
+        pct=$((done * 100 / total))
+        [ "${pct}" -gt 100 ] && pct=100
+    fi
+    printf '[QPI-PROGRESS] total=%s done=%s pct=%s\n' "${total}" "${done}" "${pct}"
+}
+
+# 文件当前字节数 (GNU stat; 回退 BSD stat / wc)
+_dl_size() {
+    [ -f "$1" ] || { echo 0; return; }
+    stat -c%s "$1" 2>/dev/null || stat -f%z "$1" 2>/dev/null || wc -c < "$1" | tr -d ' '
+}
+
+# 后台执行下载 + 每秒轮询已下字节数上报进度, 返回值 = 下载进程退出码。
+# 为什么必须后台 + 轮询: curl/wget 自身的进度条用 \r 原地刷新、不产生换行,
+#   前台静默运行时整段下载期间没有任何输出 —— 终端看起来像卡死, 插件侧 SSE 也会
+#   因长时间无数据被 bodyTimeout 掐断。轮询文件大小则每秒都有稳定的进度产出。
+download_with_progress() {
+    local out="$1" total="${2:-0}"; shift 2
+    local rc=0 pid
+    "$@" &
+    pid=$!
+    while kill -0 "${pid}" 2>/dev/null; do
+        emit_progress "$(_dl_size "${out}")" "${total}"
+        sleep 1
+    done
+    wait "${pid}" || rc=$?
+    emit_progress "$(_dl_size "${out}")" "${total}"
+    return "${rc}"
+}
+
+# ---------------------------------------------------------------------------
 # 缺失项检测 (只用本机已有的文件判断, 不联网)
 # ---------------------------------------------------------------------------
 missing_files() {
@@ -242,9 +284,10 @@ download_zip() {
     # 优先 aria2c (多连接, 有则明显更快), 其次 curl -C -, 最后 wget -c
     if [ -n "${QPI_ARIA2:-}" ] && command -v aria2c >/dev/null 2>&1; then
         log_info "使用 aria2c (多连接): ${URL}"
-        aria2c -c -x 8 -s 8 -k 1M --file-allocation=none \
-               --console-log-level=warn --summary-interval=30 \
-               -d "${DL_DIR}" -o "$(basename "${PART_PATH}")" "${URL}" || {
+        download_with_progress "${PART_PATH}" "${rsz}" \
+            aria2c -c -x 8 -s 8 -k 1M --file-allocation=none \
+                   --console-log-level=error --summary-interval=0 \
+                   -d "${DL_DIR}" -o "$(basename "${PART_PATH}")" "${URL}" || {
             log_err "aria2c 下载失败"; return 1; }
     elif command -v curl >/dev/null 2>&1; then
         log_info "使用 curl 下载 (支持断点续传): ${URL}"
@@ -261,9 +304,11 @@ download_zip() {
             attempt=$((attempt+1))
             prev_size="$(stat -c%s "${PART_PATH}" 2>/dev/null || echo 0)"
 
-            curl -L -C - --fail --connect-timeout 30 --max-time 0 \
-                 --retry 0 --speed-limit 1024 --speed-time 30 \
-                 -o "${PART_PATH}" "${URL}" && break
+            # -sS: 静默掉 curl 原生进度条 (改由 [QPI-PROGRESS] 上报) 但保留错误信息
+            download_with_progress "${PART_PATH}" "${rsz}" \
+                curl -L -C - --fail --connect-timeout 30 --max-time 0 \
+                     --retry 0 --speed-limit 1024 --speed-time 30 \
+                     -sS -o "${PART_PATH}" "${URL}" && break
 
             local rc=$?
             cur_size="$(stat -c%s "${PART_PATH}" 2>/dev/null || echo 0)"
@@ -290,7 +335,8 @@ download_zip() {
         done
     elif command -v wget >/dev/null 2>&1; then
         log_info "使用 wget 下载 (支持断点续传): ${URL}"
-        wget -c -O "${PART_PATH}" "${URL}" || { log_err "wget 下载失败"; return 1; }
+        download_with_progress "${PART_PATH}" "${rsz}" \
+            wget -c -q -O "${PART_PATH}" "${URL}" || { log_err "wget 下载失败"; return 1; }
     else
         log_err "未找到 curl / wget / aria2c, 无法下载"
         log_err "  安装: ./tools/setup-deps.sh install"

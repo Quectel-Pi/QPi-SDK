@@ -47,7 +47,121 @@ SRC_IMG="${SRC_IMG:-${PREBUILDS_DIR}/system.img}"
 BASE_ROOTFS="${BASE_ROOTFS:-${PREBUILDS_DIR}/base_rootfs}"
 STAGING="${STAGING:-${BUILD_DIR}/rootfs-staging}"
 OUT_IMG="${OUT_IMG:-${OUT_DIR}/system.img}"
+# 非 root 属主文件的容许上限: 原厂 rootfs 仅 /home/pi 等极少几个。
+# 组包前后的校验都用这一个阈值 —— 两处必须一致, 否则会出现
+# "前置检查跳过、repack 又拒绝" 的自相矛盾。
+NONROOT_MAX="${NONROOT_MAX:-1000}"
+
 SUDO="${SUDO:-sudo}"
+
+# ---------------------------------------------------------------------------
+# sudo 垫片 (供 VS Code 插件 / CI 等【非交互】场景使用)
+# ---------------------------------------------------------------------------
+# 问题: 本脚本用 ${SUDO} -n true 检查"凭据是否已缓存"。插件经管道执行时没有
+#   tty, sudo 连密码都没法提示, 该检查必然失败 -> 整个 build 以
+#   "apply 需要 root" 中止 (手动在终端跑则没事, 因为 sudo 能弹密码提示)。
+# 做法: 调用方通过环境变量 QPI_SUDO_PASS 传密码。有密码时把 SUDO 换成同名函数
+#   —— bash 里 ${SUDO} xxx 展开出的命令名会查找函数, 于是本脚本全部 27 处
+#   ${SUDO} 调用点【无需改动】, 一律改走 sudo -A + SUDO_ASKPASS 提供密码。
+# 未传密码时保持原样: 手动运行仍走系统 sudo 正常提示输入。
+QPI_SUDO_PASS="${QPI_SUDO_PASS:-}"
+_qpi_sudo() {
+    local args=("$@")
+    # 只丢掉【紧跟在 ${SUDO} 后面】的 -n (脚本用 ${SUDO} -n true 检查凭据是否已缓存;
+    # -n 会阻止 sudo 询问密码, 与"已提供密码"冲突)。
+    # ★ 绝不能过滤命令自己的 -n: 例如 repack 里的 ${SUDO} mkfs.btrfs -n 4096 ...
+    #   那个 -n 是"节点大小", 吃掉它会把 4096 当成设备文件, mkfs 直接失败。
+    if [ "${args[0]:-}" = "-n" ]; then
+        args=("${args[@]:1}")
+    fi
+
+    # 用 sudo -A + SUDO_ASKPASS 提供密码, 而【不是】sudo -S 从 stdin 读。
+    # 原因: 本脚本有 `echo "y" | ${SUDO} btrfstune ...` 这种靠 stdin 把确认送给
+    #   命令的写法; sudo -S 会把那个 "y" 当成密码吃掉 -> btrfstune 报错。
+    #   askpass 则完全不碰 stdin, 原样留给命令。
+    # 密码放在 0600 的临时文件里而非环境变量: sudo 默认 env_reset 会清掉自定义
+    #   变量, askpass 程序就拿不到了。两个文件都在脚本退出时删除。
+    if [ -z "${_QPI_ASKPASS:-}" ]; then
+        local _pw
+        _QPI_PW_FILE="$(mktemp "${TMPDIR:-/tmp}/.qpi-sudo-pw.XXXXXX")"
+        _QPI_ASKPASS="$(mktemp "${TMPDIR:-/tmp}/.qpi-sudo-askpass.XXXXXX")"
+        printf '%s\n' "${QPI_SUDO_PASS}" > "${_QPI_PW_FILE}"
+        chmod 600 "${_QPI_PW_FILE}"
+        printf '#!/bin/sh\ncat %s\n' "${_QPI_PW_FILE}" > "${_QPI_ASKPASS}"
+        chmod 700 "${_QPI_ASKPASS}"
+        trap 'rm -f "${_QPI_ASKPASS:-}" "${_QPI_PW_FILE:-}"' EXIT
+    fi
+    SUDO_ASKPASS="${_QPI_ASKPASS}" sudo -A -p '' "${args[@]}"
+}
+
+# sudo 可用性检查 (统一入口, 失败时给出与场景相符的提示)
+_qpi_sudo_ok() {
+    local what="${1:-操作}" reason="${2:-}"
+    ${SUDO} -n true 2>/dev/null && return 0
+    log_err "${what} 需要 root${reason:+ (${reason})}"
+    if [ -n "${QPI_SUDO_PASS}" ]; then
+        log_err "  sudo 认证失败: 请确认输入的系统密码正确"
+        log_err "  (插件已把密码经环境变量 QPI_SUDO_PASS 传入; 密码错会走到这里)"
+    else
+        log_err "  请先执行: ${SUDO} -v   (base 属主错误会导致设备无法启动)"
+    fi
+    return 1
+}
+
+if [ -n "${QPI_SUDO_PASS}" ] && [ "$(id -u)" != "0" ] && [ "${SUDO}" = "sudo" ]; then
+    SUDO="_qpi_sudo"
+fi
+
+# ---------------------------------------------------------------------------
+# 进度上报 (与 fetch-prebuilds.sh / extract-sysroot.sh 同一约定, 由插件消费)
+# ---------------------------------------------------------------------------
+# mount+rsync 一次要搬十几 GB, 而 rsync 默认【什么都不输出】——不打进度的话整段
+# 时间界面完全静止 (用户以为卡死), 插件侧 SSE 也可能因长时间无数据被掐断。
+# 这里用"后台 rsync + 每秒轮询目标目录已搬字节数"上报。
+# 标记行不会显示在插件终端里 (被转成进度事件); 手工运行时能看到, 属正常现象。
+emit_progress() { # <已搬运字节> <估算总字节> <整体百分比> <阶段文案>
+    local done="${1:-0}" total="${2:-0}" pct="${3:-0}" label="${4:-}"
+    case "${done}"  in ''|*[!0-9]*) done=0 ;; esac
+    case "${total}" in ''|*[!0-9]*) total=0 ;; esac
+    case "${pct}"   in ''|*[!0-9]*) pct=0 ;; esac
+    [ "${pct}" -gt 100 ] && pct=100
+    printf '[QPI-PROGRESS] total=%s done=%s pct=%s label=%s\n' \
+        "${total}" "${done}" "${pct}" "${label}"
+}
+
+# 目录当前字节数。必须经 ${SUDO}: 这些目录里绝大多数是 root 属主文件,
+# 普通用户 du 不下去, 会少算导致百分比虚低。
+_dir_bytes() {
+    local b
+    b="$(${SUDO} du -sb "$1" 2>/dev/null | cut -f1)" || true
+    case "${b}" in ''|*[!0-9]*) b=0 ;; esac
+    echo "${b}"
+}
+
+# 带进度的 sudo rsync: sudo_rsync_progress <源目录> <目标目录> <阶段文案>
+# 退出码原样透传 rsync 的, 调用处的错误处理不受影响。
+sudo_rsync_progress() {
+    local src="$1" dst="$2" label="$3"
+    local total done pct rc=0 pid
+    total="$(_dir_bytes "${src}")"
+    ${SUDO} rsync -aHAX --numeric-ids "${src}/" "${dst}/" &
+    pid=$!
+    while kill -0 "${pid}" 2>/dev/null; do
+        done="$(_dir_bytes "${dst}")"
+        pct=0
+        [ "${total}" -gt 0 ] && pct=$(( done * 100 / total ))
+        [ "${pct}" -gt 100 ] && pct=100   # 目标可能已有旧内容, 封顶
+        emit_progress "${done}" "${total}" "${pct}" "${label}"
+        sleep 1
+    done
+    wait "${pid}" || rc=$?
+    done="$(_dir_bytes "${dst}")"
+    pct=0
+    [ "${total}" -gt 0 ] && pct=$(( done * 100 / total ))
+    [ "${pct}" -gt 100 ] && pct=100
+    emit_progress "${done}" "${total}" "${pct}" "${label}"
+    return "${rc}"
+}
 
 # 保护原版: 新生成的 system.img 必须写到独立路径 (默认 build/result/system.img),
 # 绝不允许与厂商原始镜像 (prebuilds/system.img) 是同一个文件, 否则会覆盖原版。
@@ -143,18 +257,14 @@ cmd_extract() {
     fi
 
     # sudo 检查 (保真提取必须 root)
-    if ! ${SUDO} -n true 2>/dev/null; then
-        log_err "extract base 需要 root (mount+rsync 保真属主)"
-        log_err "请先执行: ${SUDO} -v   (base 属主错误会导致设备无法启动)"
-        return 1
-    fi
+    _qpi_sudo_ok "extract base" "mount+rsync 保真属主" || return 1
 
     mkdir -p "${dst}"
     local mnt
     mnt="$(mktemp -d)"
     log_info "mount + rsync 保真提取: ${img} → ${dst} ..."
     ${SUDO} mount -o loop,ro "${img}" "${mnt}" || { log_err "挂载失败"; rmdir "${mnt}"; return 1; }
-    ${SUDO} rsync -aHAX --numeric-ids "${mnt}/" "${dst}/"
+    sudo_rsync_progress "${mnt}" "${dst}" "正在保真提取 base"
     ${SUDO} umount "${mnt}"
     rmdir "${mnt}"
 
@@ -178,11 +288,7 @@ apply_overlay() {
     ${SUDO} mkdir -p "${STAGING}"
 
     # sudo 检查 (保真复制需要 root 保留属主; 普通 cp -a 会把 root 属主变自己)
-    if ! ${SUDO} -n true 2>/dev/null; then
-        log_err "apply 需要 root (保真复制 base 属主)"
-        log_err "请先执行: ${SUDO} -v   (base 属主错误会导致设备无法启动)"
-        return 1
-    fi
+    _qpi_sudo_ok "apply" "保真复制 base 属主" || return 1
 
     # 1. base → staging (reflink 优先, 快且省空间; sudo 保留属主)
     ${SUDO} cp -a --reflink=auto "${src}/." "${STAGING}/" 2>/dev/null \
@@ -270,11 +376,7 @@ repack_img() {
     command -v rsync >/dev/null 2>&1 || { log_err "缺少 rsync"; return 1; }
 
     # sudo 检查 (挂载填充需要)
-    if ! ${SUDO} -n true 2>/dev/null; then
-        log_err "repack 需要 root (mount loop 填充 staging)"
-        log_err "请先执行: ${SUDO} -v   (或 ${SUDO} -n 配置免密)"
-        return 1
-    fi
+    _qpi_sudo_ok "repack" "mount loop 填充 staging" || return 1
 
     local size_mb=$(( IMG_SIZE / 1024 / 1024 ))
     log_info "打包: ${src} → ${img}"
@@ -317,7 +419,7 @@ repack_img() {
         rmdir "${mnt}"
         return 1
     fi
-    ${SUDO} rsync -aHAX --numeric-ids "${src}/" "${mnt}/"
+    sudo_rsync_progress "${src}" "${mnt}" "正在写入 system.img"
     ${SUDO} sync
     ${SUDO} umount "${mnt}"
     rmdir "${mnt}"
@@ -328,7 +430,7 @@ repack_img() {
     local total
     total="$(${SUDO} find "${src}" 2>/dev/null | wc -l)"
     log_info "属主校验: 非 root ${nonroot}/${total} 个 (base≈2, overlay 定制文件会少量增加)"
-    if [ "${nonroot}" -gt 1000 ]; then
+    if [ "${nonroot}" -gt "${NONROOT_MAX}" ]; then
         log_err "非 root 属主文件过多 (${nonroot}), base 可能用 btrfs restore 提取过"
         log_err "请用 sudo 重新 extract (mount+rsync 保真): sudo ./tools/build-rootfs.sh extract"
         return 1
@@ -340,9 +442,48 @@ repack_img() {
 }
 
 # ---------------------------------------------------------------------------
+# 保真 base 保障: 打包 system.img 前, 必须有一个"属主正确"的 base 目录
+# ---------------------------------------------------------------------------
+# 背景: 组包要求 base 内绝大多数文件属主为 root (设备 init/systemd 依赖属主)。
+#   - prebuilds/sysroot      由 extract-sysroot.sh 用 btrfs restore 【免 root】解出,
+#                            属主会被归一为当前用户; 它只用于【交叉编译】, 不能打包
+#   - prebuilds/base_rootfs  由 `extract` 用 sudo mount+rsync 【保真】提取, 打包用它
+# 若 base_rootfs 缺失而直接 build, 会一路跑到最后 repack 的属主校验才失败, 提示
+# "请用 sudo 重新 extract"。而插件的 build all 没有入口去单独执行 extract, 用户就
+# 卡死在这里 —— 所以这里在 build 之前自动补上这一步。
+# 单独跑 apply/repack 时行为不变 (仍由 repack 的校验兜底并给出原提示)。
+ensure_faithful_base() {
+    if [ -d "${BASE_ROOTFS}" ]; then
+        return 0
+    fi
+    local src="${SDK_ROOT}/prebuilds/sysroot"
+    if [ -d "${src}" ]; then
+        local nonroot
+        nonroot="$(find "${src}" -not -user 0 2>/dev/null | wc -l)"
+        if [ "${nonroot}" -le "${NONROOT_MAX}" ]; then
+            # 属主本来就是对的 (如用户手工保真提取过), 不必多跑一次 13GB 复制
+            log_info "现有 base 属主正常 (非 root ${nonroot} 个), 无需保真提取"
+            return 0
+        fi
+        log_warn "现有 base 属主不保真: ${src} 有 ${nonroot} 个非 root 文件"
+        log_warn "  该目录是 btrfs restore 免 root 解出的, 只能用于交叉编译。"
+        log_info "打包需要属主为 root 的 base, 现在自动执行保真提取 (mount+rsync)..."
+    else
+        log_info "缺少打包基准目录, 现在执行保真提取: ${BASE_ROOTFS} ..."
+    fi
+    cmd_extract || {
+        log_err "保真提取失败, 无法打包 system.img"
+        log_err "  可手工重试: sudo ./tools/build-rootfs.sh extract"
+        return 1
+    }
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # build: apply + repack (完整打包)
 # ---------------------------------------------------------------------------
 cmd_build() {
+    ensure_faithful_base || return 1
     apply_overlay || return 1
     repack_img || return 1
     log_ok "system.img 打包完成: ${OUT_IMG}"

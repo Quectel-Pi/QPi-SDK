@@ -392,6 +392,51 @@ _qpi_prebuilds_refresh() {
     "${QPI_SDK_TOPDIR}/tools/fetch-prebuilds.sh" refresh
 }
 
+# 把烧录所需的基础固件从底包收集到输出目录。
+# 为什么需要: build/result 里只有 efi.bin/dtb.bin/system.img 三个自研产物, 而
+#   qdl / QFIL 全盘烧录还要厂商底包里的 firehose 程序、GPT、各 LUN 的
+#   rawprogram/patch xml 等; 缺任何一个, flash.sh / flash.bat 会直接报
+#   "firmware missing ..." 中止。
+#   (scripts/build-all.sh 一直有这一步, build.sh buildall 之前漏了, 导致插件的
+#    "全量编译"完成后直接点烧录会失败)
+_qpi_copy_flash_firmware() {
+    local out="${OUT_DIR:-${QPI_SDK_TOPDIR}/build/result}"
+    local pre="${PREBUILDS_DIR:-${QPI_SDK_TOPDIR}/prebuilds}"
+    if [ ! -d "${pre}" ]; then
+        echo "[build.sh] 警告: 底包目录不存在, 跳过烧录固件收集: ${pre}"
+        return 0
+    fi
+    mkdir -p "${out}"
+    echo "[build.sh] 收集烧录固件: ${pre} → ${out}"
+    # 注意: 必须在 ${pre} 内展开通配符。若写成 `for f in gpt_main*.bin` 让 shell 在
+    # 当前目录展开, 那里没有这些文件, 模式会原样保留 -> 后续 [ -e ] 判不存在 ->
+    # 这些文件被静默漏掉 (这正是 scripts/build-all.sh 的写法存在的问题)。
+    local n=0 f
+    (
+        cd "${pre}" || exit 1
+        for f in *; do
+            case "${f}" in
+                prog_firehose_Qcm6490_ddr.elf|partition_ufs|partition_emmc) ;;
+                gpt_main*.bin|gpt_backup*.bin|gpt_empty*.bin) ;;
+                xbl.elf|xbl_config*.elf|XblRamdump.elf|zeros_*.bin) ;;
+                aop.mbn|cpucp.elf|devcfg.mbn|hypvm.mbn|imagefv.elf|logfs_ufs_8mb.bin) ;;
+                multi_image.mbn|qupv3fw.elf|shrm.elf|tz.mbn) ;;
+                uefi.elf|uefi_sec.mbn|tools.fv|el2-dtb.bin) ;;
+                rawprogram*.xml|patch*.xml) ;;
+                *) continue ;;
+            esac
+            # 不覆盖输出目录已有的文件 (efi.bin/dtb.bin/system.img 是本次编译产物)
+            [ -e "${out}/${f}" ] && continue
+            cp -a "${f}" "${out}/" 2>/dev/null && echo "  + ${f}" || true
+        done
+    )
+    # zeros_33sectorS.bin: WIPE xml 引用的大小写变体 (与 zeros_33sectors.bin 同内容)
+    if [ -e "${out}/zeros_33sectors.bin" ] && [ ! -e "${out}/zeros_33sectorS.bin" ]; then
+        cp "${out}/zeros_33sectors.bin" "${out}/zeros_33sectorS.bin" 2>/dev/null || true
+    fi
+    return 0
+}
+
 buildall() {
     # 全量: 内核(可跳过) + efi.bin/dtb.bin + system.img (目录级可复现打包)
     # 应用层改动: SKIP_KERNEL=1 buildall
@@ -405,6 +450,8 @@ buildall() {
     # system.img 打包前做底包新鲜度检查 (同上)
     _qpi_prebuilds_refresh || return 1
     "${QPI_SDK_TOPDIR}/tools/build-rootfs.sh" build || return 1
+    # 收集烧录固件: 否则 build/result 只有三个产物, 点烧录会报 firmware missing
+    _qpi_copy_flash_firmware || true
     echo "[build.sh] buildall 完成: ${OUT_DIR:-build/result}/{efi.bin, dtb.bin, system.img}"
 }
 
