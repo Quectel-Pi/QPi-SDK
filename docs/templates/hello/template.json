@@ -4,12 +4,18 @@
   "description": "Quectel PI H1 (QCS6490) 最小可运行应用示例。演示 SDK 交叉编译、SYSROOT 注入与安装到 overlay 的完整流程。",
   "variables": {
     "APP_NAME": {
-      "default": "myapp"
+      "label": "应用名称",
+      "type": "text",
+      "default": "myapp",
+      "hint": "仅限字母、数字、下划线"
     },
     "MESSAGE": {
+      "label": "启动输出文本",
+      "type": "text",
       "default": "Hello from QPi H1"
     },
     "LOG_LEVEL": {
+      "label": "日志级别",
       "type": "choice",
       "default": "info",
       "choices": [

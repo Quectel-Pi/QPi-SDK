@@ -278,7 +278,17 @@ download_zip() {
     check_space || return 1
 
     if [ -s "${PART_PATH}" ]; then
-        log_info "检测到未完成文件 $(human "$(stat -c%s "${PART_PATH}")"), 断点续传..."
+        local psz
+        psz="$(stat -c%s "${PART_PATH}")"
+        # 厂商 "Latest" 包更新后, 本地 .part 可能大于远端 (旧版包更大):
+        # 此时续传偏移已超过文件长度, 服务器必然回 416, 必须作废旧文件重新下载
+        if [ -n "${rsz}" ] && [ "${psz}" -ge "${rsz}" ]; then
+            log_warn "未完成文件 $(human "${psz}") 已不小于远端大小 $(human "${rsz}") (旧版底包残留)"
+            log_warn "  续传不可行 (HTTP 416), 将旧文件移到 .stale 后重新下载"
+            mv -f "${PART_PATH}" "${PART_PATH}.stale" 2>/dev/null || rm -f "${PART_PATH}"
+        else
+            log_info "检测到未完成文件 $(human "${psz}"), 断点续传..."
+        fi
     fi
 
     # 优先 aria2c (多连接, 有则明显更快), 其次 curl -C -, 最后 wget -c
@@ -312,6 +322,12 @@ download_zip() {
 
             local rc=$?
             cur_size="$(stat -c%s "${PART_PATH}" 2>/dev/null || echo 0)"
+            # 文件已不小于远端 -> 服务器会一直回 416, 重试无意义, 立即放弃并给出处理办法
+            if [ -n "${rsz}" ] && [ "${cur_size}" -ge "${rsz}" ]; then
+                log_err "本地文件 $(human "${cur_size}") 已不小于远端 $(human "${rsz}"), 无法续传 (服务端 416)"
+                log_err "  处理: rm -f ${PART_PATH} && $0 fetch   (删除旧缓存后重新下载)"
+                return 1
+            fi
             if [ "${cur_size}" -gt "${prev_size}" ]; then
                 stall=0
                 log_warn "  下载中断 (curl rc=${rc}), 已续传到 $(human "${cur_size}"), 重试 ${attempt}/${max_attempts}..."
