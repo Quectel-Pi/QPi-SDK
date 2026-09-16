@@ -33,6 +33,65 @@ log_ok()   { echo -e "${GREEN}[OK]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_err()  { echo -e "${RED}[ERROR]${NC} $1"; }
 
+# --- 进度上报 (与 H1 / fetch-base-image.sh 同一约定, 由 VS Code 插件消费) -----
+# 标记行不会显示在插件终端里 (被转成进度事件); 手工运行脚本时会看到, 属正常现象。
+# label 是当前阶段的展示文案 —— SDK 最了解自己的阶段, 插件不维护阶段名称。
+emit_progress() { # <已处理量> <估算总量> <整体百分比> <阶段文案>
+    local done="${1:-0}" total="${2:-0}" pct="${3:-0}" label="${4:-}"
+    case "${done}"  in ''|*[!0-9]*) done=0 ;; esac
+    case "${total}" in ''|*[!0-9]*) total=0 ;; esac
+    case "${pct}"   in ''|*[!0-9]*) pct=0 ;; esac
+    [ "${pct}" -gt 100 ] && pct=100
+    printf '[QPI-PROGRESS] total=%s done=%s pct=%s label=%s\n' \
+        "${total}" "${done}" "${pct}" "${label}"
+}
+
+# 目录当前字节数 (du 会递归 stat: 实测 20 万文件约 0.13s, 每秒一次开销可忽略)
+_dir_bytes() {
+    local b
+    b="$(du -sb "$1" 2>/dev/null | cut -f1)" || true
+    case "${b}" in ''|*[!0-9]*) b=0 ;; esac
+    echo "${b}"
+}
+
+# ext4 镜像内已用字节 = (Block count - Free blocks) * Block size (debugfs 免 root)。
+# 用作阶段1 解压进度的估算分母 —— 7z 自己不报任何进度。
+# 只认 "Block count:"/"Free blocks:"/"Block size:" 三个字段: 输出末尾那句
+# "28629 free blocks, ..." 的 $1 是数字, 不会误命中。
+_img_used_bytes() {
+    debugfs -R "stats" "$1" 2>/dev/null | awk '
+        $1=="Block" && $2=="count:"  { bc=$3 }
+        $1=="Free"  && $2=="blocks:" { fb=$3 }
+        $1=="Block" && $2=="size:"   { bs=$3 }
+        END { if (bc!="" && fb!="" && bs!="") print (bc-fb)*bs }'
+}
+
+# 整体百分比按阶段划分 (实测耗时占比: 7z 解压最久, 其次是权限修复与链接重建)
+EXTRACT_MAX=70        # [1/5] 7z 解压        -> 0..70
+LINK_PCT_LO=75        # [3/5] 重建符号链接   -> 75..88
+LINK_PCT_HI=88
+
+emit_stage1_progress() {
+    local done pct=0
+    done="$(_dir_bytes "${OUT}")"
+    if [ "${EST_BYTES:-0}" -gt 0 ]; then
+        pct=$(( done * EXTRACT_MAX / EST_BYTES ))
+        # 封顶而非映射满: 估算可能偏 (7z 解出的实际大小与镜像占用不一致),
+        # 后面还有枚举/重建/权限/验证四个阶段
+        [ "${pct}" -gt "${EXTRACT_MAX}" ] && pct="${EXTRACT_MAX}"
+    fi
+    emit_progress "${done}" "${EST_BYTES:-0}" "${pct}" "正在解压 rootfs"
+}
+
+emit_stage3_progress() { # <已处理链接数> <链接总数>
+    local done="${1:-0}" total="${2:-1}" pct="${LINK_PCT_LO}"
+    if [ "${total}" -gt 0 ]; then
+        pct=$(( LINK_PCT_LO + done * (LINK_PCT_HI - LINK_PCT_LO) / total ))
+        [ "${pct}" -gt "${LINK_PCT_HI}" ] && pct="${LINK_PCT_HI}"
+    fi
+    emit_progress "${done}" "${total}" "${pct}" "正在重建符号链接"
+}
+
 # --- 前置检查 --------------------------------------------------------------
 for t in 7z debugfs; do
     command -v "$t" >/dev/null 2>&1 || { log_err "缺少依赖工具: $t (请先安装 p7zip-full 和 e2fsprogs)"; exit 1; }
@@ -66,10 +125,28 @@ trap 'rm -rf "$WORK"' EXIT
 
 # --- 1/5: 7z 解压全部 (设备节点解压失败可忽略) -------------------------------
 log_info "[1/5] 7z 解压 rootfs.img → $OUT ..."
-7z x -y "$IMG" -o"$OUT" >/dev/null 2>&1 || true
+# 7z 没有任何进度输出, 且这一步要解出数 GB / 十几万文件, 通常是整个提取里最久的
+# 一步。因此改成【后台执行 + 每秒轮询已解出字节数】上报进度: 否则整段解压期间
+# 一行输出都没有, 终端像卡死, 插件 SSE 也会因长时间无数据被 undici bodyTimeout 掐断。
+EST_BYTES="$(_img_used_bytes "${IMG}")"
+case "${EST_BYTES}" in ''|*[!0-9]*) EST_BYTES=0 ;; esac
+if [ "${EST_BYTES}" -gt 0 ]; then
+    log_info "镜像内占用约 $(awk -v b="${EST_BYTES}" 'BEGIN{printf "%.1f", b/1048576}')MB (用作进度估算; 实际解压量会有偏差)"
+else
+    log_warn "无法读取镜像占用字节, 进度只显示已解压量"
+fi
+7z x -y "$IMG" -o"$OUT" > "$WORK/extract.log" 2>&1 &
+EXTRACT_PID=$!
+while kill -0 "${EXTRACT_PID}" 2>/dev/null; do
+    emit_stage1_progress
+    sleep 1
+done
+wait "${EXTRACT_PID}" || true   # 与原实现一致: 7z 的非 0 退出不在这里中止
+emit_stage1_progress
 log_ok "解压完成: $(find "$OUT" -type f | wc -l) 个文件"
 
 # --- 2/5: debugfs 枚举符号链接 ----------------------------------------------
+emit_progress 0 0 72 "正在枚举符号链接"
 log_info "[2/5] debugfs 枚举镜像内符号链接 ..."
 # 目录 -> debugfs 命令 (根目录=/, 子目录=/usr 等, 不能有双斜杠)
 find "$OUT" -type d | sed "s#^$OUT##" | awk '{ if ($0=="") print "ls -l /"; else print "ls -l " $0 }' > "$WORK/dirs.cmd"
@@ -93,7 +170,15 @@ log_info "发现 $nlinks 个符号链接, 开始重建 ..."
 # --- 3/5: 重建符号链接 (target 取 7z 占位内容, 目录冲突时用 debugfs Fast link dest) ---
 rebuilt=0
 skipped=0
+seen=0
+# 每约 2.5% 上报一次 (nlinks 通常 1.3 万+, 逐条上报会把队列刷爆)
+link_step=$(( nlinks / 40 ))
+[ "${link_step}" -lt 1 ] && link_step=1
 while IFS= read -r p; do
+    seen=$((seen + 1))
+    if [ $((seen % link_step)) -eq 0 ]; then
+        emit_stage3_progress "${seen}" "${nlinks}"
+    fi
     f="$OUT$p"
     # 跳过 dev/ 下的 (最后会整体清空)
     case "$p" in /dev/*|/dev) continue ;; esac
@@ -123,9 +208,11 @@ while IFS= read -r p; do
         rebuilt=$((rebuilt + 1))
     fi
 done < "$WORK/symlinks.txt"
+emit_stage3_progress "${nlinks}" "${nlinks}"
 log_ok "符号链接重建完成: $rebuilt 个 (跳过 $skipped)"
 
 # --- 4/5: 清空 /dev + 修复权限 ----------------------------------------------
+emit_progress 0 0 90 "正在修复权限"
 log_info "[3/5] 处理 /dev 与权限 ..."
 rm -rf "$OUT/dev"
 mkdir -p "$OUT/dev"
@@ -139,6 +226,7 @@ for d in bin sbin usr/bin usr/sbin usr/libexec; do
 done
 
 # --- 5/5: 验证 ---------------------------------------------------------------
+emit_progress 0 0 94 "正在验证 sysroot"
 log_info "[4/5] 验证解压结果 ..."
 ok=1
 chk() { # 描述 判断命令
@@ -151,6 +239,7 @@ chk "libc.so.6 存在" "[ -e '$OUT/usr/lib/aarch64-linux-gnu/libc.so.6' ]"
 chk "关键头文件 stdio.h 存在" "[ -f '$OUT/usr/include/stdio.h' ]"
 chk "dev/ 为空" "[ -z \"\$(ls -A '$OUT/dev')\" ]"
 
+emit_progress 0 0 97 "正在交叉编译自检"
 log_info "[5/5] 交叉编译冒烟测试 ..."
 CC=""
 NEED_B=0
@@ -196,6 +285,7 @@ fi
 
 echo
 if [ "$ok" = "1" ]; then
+    emit_progress 0 0 100 "sysroot 就绪"
     log_ok "sysroot 提取完成且验证通过: $OUT"
     echo "  文件数: $(find "$OUT" -type f | wc -l)  目录: $(find "$OUT" -type d | wc -l)  符号链接: $nlink_now"
 else
