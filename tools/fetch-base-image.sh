@@ -94,6 +94,15 @@ if [ "$DO_SYSROOT" = "1" ]; then
 fi
 mkdir -p "$PREBUILTS_DIR"
 
+# 并发锁: 插件(容器内 docker.run)与宿主手动 buildenv 可能同时下载同一个 zip,
+# 并发 curl -C - 续传会互相追加导致文件膨胀 (即注释里"被重复断点续传撑坏的 zip")。
+# 加锁后同一 prebuilds/ 目录的 fetch 串行执行, 根除膨胀源。
+exec 9>"$PREBUILTS_DIR/.fetch.lock"
+if ! flock -x 9; then
+    log_err "无法获取下载锁: $PREBUILTS_DIR/.fetch.lock"
+    exit 1
+fi
+
 avail_mb=$(df -Pm "$PREBUILTS_DIR" | awk 'NR==2{print $4}')
 log_info "下载地址: $URL"
 log_info "目标分区可用 ${avail_mb}MB (zip 约 5GB, 解压后约 10GB, 建议 >30GB)"
@@ -161,6 +170,13 @@ download() {
 
     # curl 报错可能是 416(已完整) 或网络中断, 以 zip 完整性为准
     zip_ok "$out" && return 0
+    # 本地比远端还大 = 被并发写入叠加的膨胀 zip (含重复数据), 续传永远无法修复:
+    # 删除后请重跑, 而不是保留让下次 -C - 继续追加。
+    if [ -n "$total" ] && [ "$total" -gt 0 ] 2>/dev/null && [ "$(_dl_size "$out")" -gt "$total" ]; then
+        log_err "本地文件 $(du -h "$out" | cut -f1) 大于远端 ${total} 字节: 检测到并发写入导致 zip 膨胀"
+        log_err "  已删除异常文件, 请重跑本命令重新下载"
+        rm -f "$out"
+    fi
     return 1
 }
 
