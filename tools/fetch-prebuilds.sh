@@ -269,6 +269,15 @@ download_zip() {
 
     local rsz; rsz="$(remote_size)"
     [ -n "${rsz}" ] && log_info "远端大小: $(human "${rsz}")"
+    # 清理上次并发写入/异常残留的膨胀 .stale (大小超过远端 = 含重复数据, 无保留价值,
+    # 且 9 GB 级文件白占磁盘)。正常厂商换包时旧包 <= 新包, 不会误删有效备份。
+    if [ -s "${PART_PATH}.stale" ] && [ -n "${rsz}" ]; then
+        local stsz; stsz="$(stat -c%s "${PART_PATH}.stale")"
+        if [ "${stsz}" -gt "${rsz}" ]; then
+            rm -f "${PART_PATH}.stale"
+            log_warn "删除膨胀残留 ${PART_PATH}.stale ($(human "${stsz}") > 远端 $(human "${rsz}"))"
+        fi
+    fi
     local rmd5; rmd5="$(remote_md5)" || true
     if [ -n "${rmd5}" ]; then
         log_info "厂商 md5: ${rmd5}  (下载完成后据此校验)"
@@ -292,6 +301,8 @@ download_zip() {
     fi
 
     # 优先 aria2c (多连接, 有则明显更快), 其次 curl -C -, 最后 wget -c
+    # lmd5: 下载过程/校验可能重复需要本地 md5 (3.2 GiB 算一次要一两分钟), 缓存复用
+    local lmd5=""
     if [ -n "${QPI_ARIA2:-}" ] && command -v aria2c >/dev/null 2>&1; then
         log_info "使用 aria2c (多连接): ${URL}"
         download_with_progress "${PART_PATH}" "${rsz}" \
@@ -309,7 +320,7 @@ download_zip() {
         # 正确做法: 外层 bash 循环, 每次失败都【重新启动 curl】, 让它重新读取
         #   .part 当前大小并从该偏移续传。只有连接层错误才重试。
         local attempt=0 max_attempts="${QPI_DL_ATTEMPTS:-40}"
-        local prev_size cur_size stall=0
+        local prev_size cur_size stall=0 heal=0
         while :; do
             attempt=$((attempt+1))
             prev_size="$(stat -c%s "${PART_PATH}" 2>/dev/null || echo 0)"
@@ -318,15 +329,49 @@ download_zip() {
             download_with_progress "${PART_PATH}" "${rsz}" \
                 curl -L -C - --fail --connect-timeout 30 --max-time 0 \
                      --retry 0 --speed-limit 1024 --speed-time 30 \
-                     -sS -o "${PART_PATH}" "${URL}" && break
-
+                     -sS -o "${PART_PATH}" "${URL}"
             local rc=$?
             cur_size="$(stat -c%s "${PART_PATH}" 2>/dev/null || echo 0)"
-            # 文件已不小于远端 -> 服务器会一直回 416, 重试无意义, 立即放弃并给出处理办法
+
+            if [ "${rc}" -eq 0 ]; then
+                # curl 声称成功, 但"成功"也可能被服务端坑: 断点续传时 HEAD 的
+                # Content-Length 与 GET 实际下发可能不一致 (CDN 多节点 / 厂商
+                # "Latest" 中途换包), 文件会比 HEAD 报告略大。此时不能直接当成功:
+                #   ① 有厂商 md5 就先判它 —— md5 一致 = 文件完整, 只是 HEAD 长度过时;
+                #   ② md5 不符或拿不到 -> 文件确实膨胀/损坏, 删掉从零自动重下 (自愈)。
+                if [ -n "${rsz}" ] && [ "${cur_size}" -gt "${rsz}" ]; then
+                    local ok=0
+                    if [ -n "${rmd5}" ]; then
+                        log_warn "下载完成但本地 $(human "${cur_size}") > HEAD 报告 $(human "${rsz}") (续传偏移重叠或 HEAD 过时), 校验厂商 md5 ..."
+                        lmd5="$(file_md5 "${PART_PATH}")"
+                        if [ "${lmd5}" = "${rmd5}" ]; then
+                            log_warn "  md5 与厂商一致, 文件完整 (HEAD Content-Length 过期), 接受"
+                            ok=1
+                        fi
+                    fi
+                    if [ "${ok}" = "1" ]; then
+                        break
+                    fi
+                    heal=$((heal+1))
+                    log_warn "  校验未通过, 删除异常文件并重新下载 (自动从零开始, 第 ${heal} 次自愈)..."
+                    rm -f "${PART_PATH}"
+                    if [ "${heal}" -ge 2 ]; then
+                        log_err "连续 2 次下载后文件都异常 (服务端 HEAD/GET 不一致或网络改写), 放弃"
+                        log_err "  处理: 稍后重跑本命令 $0 fetch"
+                        return 1
+                    fi
+                    continue
+                fi
+                break
+            fi
+
+            # 文件已不小于远端 -> 服务器回 416 续传不动, 或并发写入导致文件膨胀。
+            # 此时 .part 已损坏 (含重复数据), 保留无意义: 删除后从零重新下载 (自愈)。
             if [ -n "${rsz}" ] && [ "${cur_size}" -ge "${rsz}" ]; then
-                log_err "本地文件 $(human "${cur_size}") 已不小于远端 $(human "${rsz}"), 无法续传 (服务端 416)"
-                log_err "  处理: rm -f ${PART_PATH} && $0 fetch   (删除旧缓存后重新下载)"
-                return 1
+                log_warn "本地文件 $(human "${cur_size}") 已不小于远端 $(human "${rsz}") (416 或并发写入膨胀)"
+                log_warn "  删除异常文件, 重新下载 ..."
+                rm -f "${PART_PATH}"
+                continue
             fi
             if [ "${cur_size}" -gt "${prev_size}" ]; then
                 stall=0
@@ -367,7 +412,27 @@ download_zip() {
         log_err "  已保留 ${PART_PATH} ($(human "${lsz}")) 供续传; 重跑本命令即可: $0 fetch"
         return 1
     fi
-    if [ "${lsz}" != "${rsz}" ]; then
+
+    # 大小只是快筛, 厂商 md5 才是权威依据。此前常见两类误判:
+    #   ① 并发写入膨胀 (curl 失败路径已自动删除重下, 见上面循环);
+    #   ② HEAD 的 Content-Length 与 GET 实际下发不一致 (CDN 多节点 / 厂商
+    #      "Latest" 中途换包) -> "下载成功"但本地比 HEAD 报告略大, 此时 md5
+    #      一致即为完整, 不应仅凭大小判死。故本地 != 远端且拿得到 md5 时,
+    #      先算本地 md5 作为判定依据 (避免下面重复计算一次)。
+    if [ -n "${rmd5}" ] && [ "${lsz}" -ne "${rsz}" ] && [ -z "${lmd5}" ]; then
+        lmd5="$(file_md5 "${PART_PATH}")"
+    fi
+
+    if [ "${lsz}" -gt "${rsz}" ]; then
+        if [ -n "${lmd5}" ] && [ "${lmd5}" = "${rmd5}" ]; then
+            log_warn "本地 $(human "${lsz}") 略大于 HEAD 报告 $(human "${rsz}"), 但 md5 与厂商一致 -> 接受 (HEAD Content-Length 过期)"
+        else
+            log_err "本地 $(human "${lsz}") 大于远端 $(human "${rsz}") 且校验未通过: 下载文件损坏 (并发写入膨胀)"
+            log_err "  已删除异常文件, 请重跑本命令重新下载: $0 fetch"
+            rm -f "${PART_PATH}"
+            return 1
+        fi
+    elif [ "${lsz}" -lt "${rsz}" ]; then
         log_err "下载不完整: 本地 $(human "${lsz}") / 远端 $(human "${rsz}")"
         log_err "  重跑本命令继续续传 (文件保留在 ${PART_PATH})"
         return 1
@@ -376,8 +441,10 @@ download_zip() {
     # 大小对了还不够: 必须与厂商 md5 一致才算拿到权威确认的包。
     # (仅大小相符无法发现"内容被写坏"; 这正是此前 system.img 解压失败的场景。)
     if [ -n "${rmd5}" ]; then
-        log_info "校验厂商 md5 (3.2 GiB 需要一两分钟)..."
-        local lmd5; lmd5="$(file_md5 "${PART_PATH}")"
+        if [ -z "${lmd5}" ]; then
+            log_info "校验厂商 md5 (3.2 GiB 需要一两分钟)..."
+            lmd5="$(file_md5 "${PART_PATH}")"
+        fi
         if [ "${lmd5}" != "${rmd5}" ]; then
             log_err "md5 校验失败: 下载内容与厂商不一致"
             log_err "  本地 md5: ${lmd5}"
@@ -691,6 +758,17 @@ write_manifest() {
 # 主流程
 # ---------------------------------------------------------------------------
 cmd_fetch() {
+    # 并发锁: 容器内 (插件 docker.run) 与容器外 (宿主手动 buildenv) 同时下载会并发
+    # 续传同一个 .part —— 多个 curl 各自从不同偏移追加, 文件被叠加膨胀到超过远端大小
+    # (表现为 "下载不完整: 本地 9.07 GiB / 远端 3.22 GiB")。加锁后串行下载, 根除该问题。
+    local lock="${DL_DIR}/.fetch.lock"
+    mkdir -p "${DL_DIR}" 2>/dev/null || true
+    exec 9>"${lock}"
+    if ! flock -x 9; then
+        log_err "无法获取下载锁: ${lock}"
+        return 1
+    fi
+    log_info "已获取下载锁 (${lock}); 同目录并发 fetch 会在此等待"
     if [ -z "${QPI_FETCH_FORCE:-}" ]; then
         local miss; miss="$(missing_files)"
         if [ -z "${miss}" ]; then
@@ -733,7 +811,8 @@ cmd_clean() {
     local freed=0
     [ -s "${ZIP_PATH}" ] && freed=$((freed + $(stat -c%s "${ZIP_PATH}")))
     [ -s "${PART_PATH}" ] && freed=$((freed + $(stat -c%s "${PART_PATH}")))
-    rm -f "${ZIP_PATH}" "${PART_PATH}"
+    [ -s "${PART_PATH}.stale" ] && freed=$((freed + $(stat -c%s "${PART_PATH}.stale")))
+    rm -f "${ZIP_PATH}" "${PART_PATH}" "${PART_PATH}.stale"
     rm -rf "${UNPACK_DIR}"
     log_ok "已清理下载缓存 (释放 $(human "${freed}")), prebuilds/ 未改动"
 }
