@@ -2,7 +2,7 @@
 # ============================================================================
 # setup-deps.sh - M2 SDK 构建依赖检测 / 一键安装
 # ============================================================================
-# 本 SDK 的构建依赖清单集中维护在本脚本 REQUIRED_TOOLS 数组:
+# 本 SDK 的构建依赖清单集中维护在本脚本 REQUIRED_TOOLS / REQUIRED_FILES 数组:
 #   - 不同 SDK (M1/M2/H1/L1...) 环境需求不同, 各自维护自己的 setup-deps.sh
 #   - 插件 / CI / 用户只需要调用本脚本, 不需要知道装了哪些包
 #
@@ -34,9 +34,21 @@ REQUIRED_TOOLS=(
   "qemu-aarch64-static:qemu-user-static"   # 应用层交叉编译 (rootfs GCC wrapper)
   "make:make"                              # 内核 / 应用构建
   "gcc:build-essential"                    # 内核 host 工具编译
+  "flex:flex"                              # 内核 Kconfig 词法分析器 (lexer.lex.c)
+  "bison:bison"                            # 内核 Kconfig 语法分析器 (parser.tab.c)
+  "bc:bc"                                  # 内核 Kbuild 生成 timeconst.h (echo $CONFIG_HZ | bc -q)
+  "lz4c:lz4"                               # 内核 Image.lz4 压缩 (Makefile: LZ4 = lz4c)
+  "python:python-is-python3"               # mkimg -> bmpconvert 转换开机 logo (env python)
   "cmake:cmake"                            # CMake 工程应用
   "file:file"                              # 镜像类型识别
   "git:git"                                # 仓库 / 资源获取
+)
+
+# ---- 头文件依赖: "检测文件路径:apt 包名" ----
+# 只提供头文件/库的包没有命令行工具, command -v 探不到, 用文件存在性探测。
+# 路径为 Debian/Ubuntu 常规安装位置 (本脚本已限定 apt 系发行版)。
+REQUIRED_FILES=(
+  "/usr/include/openssl/bio.h:libssl-dev"  # 内核 certs/extract-cert 的 openssl 头文件
 )
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -46,9 +58,16 @@ log_err()  { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 
 # 输出缺失的 apt 包名 (每行一个, 保持清单顺序)
 missing_pkgs() {
+    local entry item pkg
     for entry in "${REQUIRED_TOOLS[@]}"; do
-        local tool="${entry%%:*}" pkg="${entry#*:}"
-        if ! command -v "$tool" >/dev/null 2>&1; then
+        item="${entry%%:*}" pkg="${entry#*:}"
+        if ! command -v "$item" >/dev/null 2>&1; then
+            echo "$pkg"
+        fi
+    done
+    for entry in "${REQUIRED_FILES[@]}"; do
+        item="${entry%%:*}" pkg="${entry#*:}"
+        if [ ! -e "$item" ]; then
             echo "$pkg"
         fi
     done
