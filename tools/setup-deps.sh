@@ -39,6 +39,8 @@ REQUIRED_TOOLS=(
   "flex:flex"                              # 内核编译 (词法分析)
   "bison:bison"                            # 内核编译 (语法分析)
   "bc:bc"                                  # 内核编译 (算术)
+  "lz4c:lz4"                               # 内核 Image.lz4 压缩 (Makefile: LZ4 = lz4)
+  "python:python-is-python3"               # mkimg/bmpconvert 等 env python 脚本兼容
   "dtc:device-tree-compiler"               # dtc 设备树编译
   "fdtoverlay:device-tree-compiler"        # dtbo overlay 合并 (与 dtc 同包)
   "python3:python3"                        # ukify 打包 UKI
@@ -52,11 +54,12 @@ REQUIRED_TOOLS=(
   "lsusb:usbutils"                         # 烧录 EDL 设备探测
 )
 
-# ---- 动态库依赖 (qdl 烧录运行时, 无命令可探测, 用 dpkg -s) ----
+# ---- 动态库 / 开发头文件依赖 (无命令可探测, 用 dpkg -s) ----
 REQUIRED_LIBS=(
   "libusb-1.0-0"                           # qdl USB 通信
   "libxml2-dev"                            # qdl XML 解析
   "libzip-dev"                             # qdl 压缩包读取
+  "libssl-dev"                             # openssl 头文件 (模块签名 / certs 工具, 切换配置时启用)
 )
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
