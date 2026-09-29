@@ -13,4 +13,15 @@ BOOT_FORMAT=FIT (U-Boot, magic 0xd00dfeed)
 SECURE_BOOT=disabled
 TOOLCHAIN=aarch64-none-linux-gnu gcc-arm-10.3-2021.07
 SYSROOT_SOURCE=debian/binary
+
+# 烧录 (Rockchip rockusb)
+# 宿主机烧录工具随 SDK 分发于 tools/flash/, 由扩展直接引用 (无需扩展内置或联网下载)。
+# FLASH_TOOLS_WINDOWS 为命令行版 (供自动化烧录), _GUI 为图形版 (人工操作)。
+FLASH_PROTOCOL=Rockchip rockusb
+FLASH_TOOLS_LINUX=tools/flash/linux/upgrade_tool
+FLASH_TOOLS_MAC=tools/flash/mac/upgrade_tool
+FLASH_TOOLS_WINDOWS=tools/flash/windows/upgrade_tool.exe
+FLASH_TOOLS_WINDOWS_GUI=tools/flash/windows/RKDevTool/RKDevTool_Release/RKDevTool.exe
+UPDATE_IMG_SUPPORTED=yes
+
 GENERATED_DATE=2026-08-27
