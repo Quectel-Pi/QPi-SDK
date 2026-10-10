@@ -104,22 +104,29 @@ cmd_install() {
     local SUDO_PASS=""
     if [ "$(id -u)" != "0" ]; then
         command -v sudo >/dev/null 2>&1 || { log_err "当前非 root 且未找到 sudo"; return 1; }
+        # 免密 sudo (如构建容器内预置的 q1000..q1020 用户) 无需密码, 直接放行
+        if sudo -n true 2>/dev/null; then
+            :
         # 密码只从 stdin 读一次: 交互终端静默提示, 管道/重定向按行读
-        if [ -t 0 ]; then
+        elif [ -t 0 ]; then
             read -r -s -p "[sudo] password for $USER: " SUDO_PASS
             echo >&2
         else
             IFS= read -r SUDO_PASS || true
         fi
-        [ -n "$SUDO_PASS" ] || { log_err "未提供 sudo 密码 (echo '<密码>' | $0 install 或 < 密码文件)"; return 1; }
+        if [ -z "$SUDO_PASS" ] && ! sudo -n true 2>/dev/null; then
+            log_err "未提供 sudo 密码 (echo '<密码>' | $0 install 或 < 密码文件)"; return 1
+        fi
     fi
 
-    # run_sudo: root 直接执行; 非 root 用 here-string 喂密码给 sudo -S (不进 argv)
+    # run_sudo: root 直接执行; 非 root 优先免密, 否则用 here-string 喂密码给 sudo -S (不进 argv)
     run_sudo() {
         if [ "$(id -u)" = "0" ]; then
             "$@"
-        else
+        elif [ -n "$SUDO_PASS" ]; then
             sudo -S -p '' "$@" <<< "$SUDO_PASS"
+        else
+            sudo -n "$@"
         fi
     }
 
