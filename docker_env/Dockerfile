@@ -17,7 +17,7 @@ RUN apt-get install -y git-core gnupg flex bison build-essential zip curl zlib1g
 						util-linux uuid-dev  python3-distutils \
 						bc device-tree-compiler python3-pefile sudo btrfs-progs \
 						mtools cmake usbutils libusb-1.0-0 libxml2-dev libzip-dev \
-						p7zip-full libssl-dev
+						p7zip-full libssl-dev kmod patchelf
 
 # Set the locale
 RUN apt-get install -y locales
