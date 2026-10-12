@@ -5,6 +5,13 @@ Quectel PI M2 (RK3576) 开发 SDK，支持两个核心功能，**脱离原生 SD
 1. **内核编译打包** — 修改内核源码 → 编译 ko 驱动放 overlay → 内核二进制 + 设备树打包到启动镜像
 2. **应用层自定义开发** — 开放文件系统镜像，通过 overlay 机制追加客户自定义应用/脚本/服务等文件
 
+## VS Code 插件开发
+
+SDK 支持 VS Code 插件开发：
+
+- 插件仓库地址：https://github.com/Quectel-Pi/QPi-VSCode-Extension
+- 插件使用说明文档：https://github.com/quectel-developer/qpi-vscode-extension-doc
+
 ## 目录结构
 
 ```
@@ -166,6 +173,8 @@ $(TARGET): main.c
 clean:
 	rm -f $(TARGET)
 ```
+
+
 
 ## 详细文档
 
