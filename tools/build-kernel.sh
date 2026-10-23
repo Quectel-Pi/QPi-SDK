@@ -38,18 +38,31 @@ DEFCONFIG="rockchip_linux_defconfig"           # RK_KERNEL_CFG
 # 与官方 M2 构建 (mk-kernel.sh do_make_kernel_config) 保持一致:
 #   芯片级 fragment (POSSIBLE_FRAGMENTS 机制自动发现) → defconfig 声明 → RT → Panfrost
 #   - rk3576.config        芯片级配置 (Mali Bifrost 等)
-#   - cma.config / quectel-pwm-fan.config / rockchip-debug.config  RK_KERNEL_CFG_FRAGMENTS
+#   - RK_KERNEL_CFG_FRAGMENTS (对齐
+#     device/rockchip/.chip/rockchip_rk3576_quectel_pi_m2_debian_defconfig):
+#       cma.config quectel-pwm-fan.config quectel-container.config
+#       quectel-exfat.config quectel-joystick.config
 #   - rockchip_rt.config   RT 优化 (关闭温控降频/DMC动态调频/SWAP 等, 官方自动追加)
 #   - rockchip_panfrost.config  Debian trixie GNOME-on-Wayland 用主线 Panfrost 替代
 #                              libmali 专有驱动 (官方 RK_DEBIAN_TRIXIE 时自动追加),
 #                              否则 GNOME 无法用 GBM/KMS 硬件加速 → 界面卡顿
 #   - quectel-overlays.config  (当前 SDK 特有: 开启设备树 overlay 运行时加载)
+#
+# ⚠️ 不要加 rockchip-debug.config !
+#   它会打开 CONFIG_KPROBES / CONFIG_KALLSYMS_ALL / CONFIG_FTRACE 等, 导致内核
+#   struct module 布局与官方量产内核不同。rootfs 里 aic8800_bsp.ko 等模块是官方
+#   内核编译的预编译产物, 加载时 mod_sysfs_setup 按错误的偏移取字段 → Oops:
+#     Unable to handle kernel paging request ...
+#     pc : mod_sysfs_setup+0x228/0x67c   Comm: insmod  Modules linked in: aic8800_bsp(O+)
+#   因此默认 fragment 必须与官方逐项一致, 需要调试配置请显式用
+#   FORCE_DEFCONFIG=1 之外的方式单独验证。
 KERNEL_FRAGMENTS_CHIP="rk3576.config"
-KERNEL_FRAGMENTS="cma.config quectel-pwm-fan.config rockchip-debug.config quectel-overlays.config"
+KERNEL_FRAGMENTS="cma.config quectel-pwm-fan.config quectel-container.config quectel-exfat.config quectel-joystick.config"
 KERNEL_FRAGMENTS_RT="rockchip_rt.config"
 KERNEL_FRAGMENTS_GPU="rockchip_panfrost.config"
+KERNEL_FRAGMENTS_SDK="quectel-overlays.config"
 # 完整 merge 集合 (顺序与官方一致: 后 merge 的生效)
-KERNEL_FRAGMENTS_ALL="$KERNEL_FRAGMENTS_CHIP $KERNEL_FRAGMENTS $KERNEL_FRAGMENTS_RT $KERNEL_FRAGMENTS_GPU"
+KERNEL_FRAGMENTS_ALL="$KERNEL_FRAGMENTS_CHIP $KERNEL_FRAGMENTS $KERNEL_FRAGMENTS_RT $KERNEL_FRAGMENTS_GPU $KERNEL_FRAGMENTS_SDK"
 FIT_ITS="boot-debian.its"                      # RK_BOOT_FIT_ITS_NAME
 
 JOBS="${JOBS:-$(nproc)}"
@@ -89,11 +102,46 @@ find_toolchain() {
 check_env() {
     [ -d "$KERNEL_DIR" ] || { log_err "缺少内核源码目录: $KERNEL_DIR"; return 1; }
     [ -d "$BASE_IMAGE_DIR" ] || { log_err "缺少底包目录: $BASE_IMAGE_DIR"; return 1; }
+    ensure_package_file || return 1;
     [ -f "$BASE_IMAGE_DIR/package-file" ] || { log_err "缺少 $BASE_IMAGE_DIR/package-file"; return 1; }
     [ -x "$PACK_TOOL_DIR/afptool" ] || { log_err "缺少 $PACK_TOOL_DIR/afptool"; return 1; }
     [ -x "$PACK_TOOL_DIR/rkImageMaker" ] || { log_err "缺少 $PACK_TOOL_DIR/rkImageMaker"; return 1; }
     [ -f "$BOOT_DIR/$FIT_ITS" ] || { log_err "缺少 $BOOT_DIR/$FIT_ITS"; return 1; }
     [ -x "$BOOT_DIR/mkimage" ] || { log_err "缺少 $BOOT_DIR/mkimage (U-Boot FIT 打包工具)"; return 1; }
+    return 0
+}
+
+# ----------------------------------------------------------------------------
+# 兜底: 生成 package-file
+#   afptool -pack 依赖底包目录里的 package-file (分区名 → 文件名映射)。
+#   官方「Quectel_Pi_M2编译资源包」通常不带该文件 (它原本在 output/update/Image/
+#   下), 因此这里按 RK3576 标准分区顺序 + 底包实际存在的镜像自动补齐。
+#   已有同名文件时不做任何改动。
+# ----------------------------------------------------------------------------
+ensure_package_file() {
+    local pf="$BASE_IMAGE_DIR/package-file"
+    [ -f "$pf" ] && return 0
+
+    log_warn "缺少 $pf, 按 RK3576 标准分区表自动生成"
+    {
+        echo "# NAME  PATH"
+        echo "package-file    package-file"
+        echo "parameter       parameter.txt"
+        local pkg f
+        for pkg in bootloader uboot misc boot recovery backup rootfs ota_bak oem userdata; do
+            case "$pkg" in
+                bootloader) f="MiniLoaderAll.bin" ;;
+                backup|ota_bak) f="RESERVED" ;;   # 底包不提供该分区, 打包时留空
+                *)          f="$pkg.img" ;;
+            esac
+            if [ "$f" = "RESERVED" ] || [ -f "$BASE_IMAGE_DIR/$f" ]; then
+                printf '%-15s %s\n' "$pkg" "$f"
+            fi
+        done
+    } > "$pf"
+
+    [ -s "$pf" ] || { log_err "生成 $pf 失败"; return 1; }
+    log_ok "已生成 $pf"
     return 0
 }
 
