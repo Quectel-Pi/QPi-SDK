@@ -404,8 +404,36 @@ cmd_menuconfig() {
 cmd_clean() {
     log_info "清理构建产物..."
     rm -rf "$WORK_DIR"
-    [ -d "$KERNEL_DIR" ] && { cd "$KERNEL_DIR" && make ARCH=arm64 distclean >/dev/null 2>&1 || true; }
-    log_ok "清理完成"
+
+    if [ -d "$KERNEL_DIR" ]; then
+        cd "$KERNEL_DIR"
+        local btf_src="tools/bpf/resolve_btfids"
+        local btf_bak="tools/bpf/.resolve_btfids.cleanbak"
+        local bypassed=0
+        if [ -d "$btf_src" ]; then
+            mv "$btf_src" "$btf_bak"
+            bypassed=1
+        fi
+
+        if make ARCH=arm64 distclean >/dev/null 2>&1; then
+            log_info "make distclean 完成"
+        else
+            log_warn "make distclean 未完全成功, 已强制清理关键产物"
+        fi
+
+        if [ "$bypassed" = 1 ]; then
+            mv "$btf_bak" "$btf_src"
+        fi
+
+        # 兜底: 保证内核配置与烧录产物不残留, 清理后下次编译必须重新 defconfig
+        rm -f .config .config.old .version Module.symvers System.map \
+              vmlinux vmlinux.a vmlinux.o vmlinux.symvers boot.img resource.img
+        rm -rf include/config include/generated
+        rm -f arch/arm64/boot/Image arch/arm64/boot/Image.lz4 arch/arm64/boot/Image.gz
+        find arch/arm64/boot/dts -type f \( -name '*.dtb' -o -name '*.dtb.img' \) -delete 2>/dev/null || true
+    fi
+
+    log_ok "清理完成 (内核 .config 已删除, 下次编译将重新生成)"
 }
 
 main() {
