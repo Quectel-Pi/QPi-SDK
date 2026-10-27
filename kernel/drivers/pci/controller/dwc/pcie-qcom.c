@@ -17,6 +17,7 @@
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
+#include <linux/jiffies.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/of.h>
@@ -26,6 +27,7 @@
 #include <linux/pci-ecam.h>
 #include <linux/pm_runtime.h>
 #include <linux/platform_device.h>
+#include <linux/workqueue.h>
 #include <linux/phy/pcie.h>
 #include <linux/phy/phy.h>
 #include <linux/regulator/consumer.h>
@@ -260,6 +262,13 @@ struct qcom_pcie {
 	union qcom_pcie_resources res;
 	struct phy *phy;
 	struct gpio_desc *reset;
+	struct gpio_desc *pwkey;		/* 5G modem power key (M.2 HAT) */
+	u32 pwkey_pulse_ms;			/* DT "pwkey-pulse-ms" */
+	u32 modem_power_delay_ms;		/* DT "delay-ms" */
+	u32 wait_for_link_ms;			/* DT "wait-for-link-ms" */
+	struct work_struct host_init_work;	/* deferred host bring-up */
+	int global_irq;				/* DT "interrupts" global entry, <=0 if absent */
+	bool host_up;				/* host initialised (dbi_base is valid) */
 	struct icc_path *icc_mem;
 	const struct qcom_pcie_cfg *cfg;
 	struct dentry *debugfs;
@@ -271,8 +280,36 @@ struct qcom_pcie {
 
 static void qcom_ep_reset_assert(struct qcom_pcie *pcie)
 {
+	struct device *dev = pcie->pci->dev;
+
 	gpiod_set_value_cansleep(pcie->reset, 1);
 	usleep_range(PERST_DELAY_US, PERST_DELAY_US + 500);
+
+	/*
+	 * Optional 5G modem power key. Only boards carrying a modem on the
+	 * PCIe slot (e.g. an M.2 5G HAT) wire this line up.
+	 *
+	 * When "pwkey-pulse-ms" is set the key is pressed for that long and
+	 * then released, so the module gets a proper power-on key pulse
+	 * (needed on a cold boot). Without the property the historical
+	 * behaviour of leaving the key asserted is kept.
+	 */
+	if (pcie->pwkey) {
+		msleep(100);
+		gpiod_set_value_cansleep(pcie->pwkey, 1);
+		if (pcie->pwkey_pulse_ms) {
+			msleep(pcie->pwkey_pulse_ms);
+			gpiod_set_value_cansleep(pcie->pwkey, 0);
+			dev_info(dev, "5G HAT power key pulse %ums\n",
+				 pcie->pwkey_pulse_ms);
+		} else {
+			dev_info(dev, "5G HAT power key asserted\n");
+		}
+
+		/* Give the module time to boot before link training starts */
+		if (pcie->modem_power_delay_ms)
+			msleep(pcie->modem_power_delay_ms);
+	}
 }
 
 static void qcom_ep_reset_deassert(struct qcom_pcie *pcie)
@@ -296,6 +333,26 @@ static int qcom_pcie_start_link(struct dw_pcie *pci)
 	/* Enable Link Training state machine */
 	if (pcie->cfg->ops->ltssm_enable)
 		pcie->cfg->ops->ltssm_enable(pcie);
+
+	/*
+	 * A cold booted modem can take far longer than the ~1s window used by
+	 * dw_pcie_wait_for_link() to get its PCIe endpoint ready; the link
+	 * then fails with "Phy link never came up". Boards that need a longer
+	 * window set "wait-for-link-ms".
+	 */
+	if (pcie->wait_for_link_ms) {
+		unsigned long timeout = jiffies +
+					msecs_to_jiffies(pcie->wait_for_link_ms);
+
+		dev_info(pci->dev, "Waiting up to %ums for PCIe link\n",
+			 pcie->wait_for_link_ms);
+
+		while (time_before(jiffies, timeout)) {
+			if (dw_pcie_link_up(pci))
+				break;
+			msleep(20);
+		}
+	}
 
 	return 0;
 }
@@ -1569,6 +1626,57 @@ static const struct pci_ecam_ops pci_qcom_ecam_ops = {
 	}
 };
 
+/*
+ * Host bring-up, deferred when the port advertises "wait-for-link-ms" (its
+ * endpoint may be absent or still cold booting). Same calls, same order as the
+ * inline path in probe(); only the context changes, so the boot does not wait
+ * for it -- the pre-/init wait_for_device_probe() waits on probe, not on a
+ * plain workqueue.
+ */
+static void qcom_pcie_deferred_host_init(struct work_struct *work)
+{
+	struct qcom_pcie *pcie = container_of(work, struct qcom_pcie,
+					      host_init_work);
+	struct dw_pcie_rp *pp = &pcie->pci->pp;
+	struct device *dev = pcie->pci->dev;
+	char *name;
+	int ret;
+
+	ret = dw_pcie_host_init(pp);
+	if (ret) {
+		/* Keep booting without this port; PM stays away (see host_up). */
+		dev_err(dev, "deferred: cannot initialize host: %d\n", ret);
+		return;
+	}
+	pcie->host_up = true;
+
+	name = devm_kasprintf(dev, GFP_KERNEL, "qcom_pcie_global_irq%d",
+			      pci_domain_nr(pp->bridge->bus));
+	if (!name)
+		return;
+
+	if (pcie->global_irq > 0) {
+		ret = devm_request_threaded_irq(dev, pcie->global_irq, NULL,
+						qcom_pcie_global_irq_thread,
+						IRQF_ONESHOT, name, pcie);
+		if (ret) {
+			dev_err(dev, "deferred: failed to request Global IRQ: %d\n",
+				ret);
+			return;
+		}
+
+		writel_relaxed(PARF_INT_ALL_LINK_UP | PARF_INT_MSI_DEV_0_7,
+			       pcie->parf + PARF_INT_ALL_MASK);
+	}
+	/* If the soc features RPMh, cmd_db must have been prepared by now */
+	pcie->soc_is_rpmh = !cmd_db_ready();
+
+	qcom_pcie_icc_update(pcie);
+
+	if (pcie->mhi)
+		qcom_pcie_init_debugfs(pcie);
+}
+
 static int qcom_pcie_probe(struct platform_device *pdev)
 {
 	const struct qcom_pcie_cfg *pcie_cfg;
@@ -1643,11 +1751,26 @@ static int qcom_pcie_probe(struct platform_device *pdev)
 
 	pcie->cfg = pcie_cfg;
 
+	pcie->pwkey = devm_gpiod_get_optional(dev, "pwkey", GPIOD_OUT_LOW);
+	if (IS_ERR(pcie->pwkey)) {
+		ret = PTR_ERR(pcie->pwkey);
+		goto err_pm_runtime_put;
+	}
+
 	pcie->reset = devm_gpiod_get_optional(dev, "perst", GPIOD_OUT_HIGH);
 	if (IS_ERR(pcie->reset)) {
 		ret = PTR_ERR(pcie->reset);
 		goto err_pm_runtime_put;
 	}
+
+	/*
+	 * Optional modem power sequencing timing. device_property_read_u32()
+	 * leaves the (zeroed) value untouched when the property is absent, so
+	 * the values stay 0 and the historical behaviour is preserved.
+	 */
+	device_property_read_u32(dev, "delay-ms", &pcie->modem_power_delay_ms);
+	device_property_read_u32(dev, "pwkey-pulse-ms", &pcie->pwkey_pulse_ms);
+	device_property_read_u32(dev, "wait-for-link-ms", &pcie->wait_for_link_ms);
 
 	pcie->parf = devm_platform_ioremap_resource_byname(pdev, "parf");
 	if (IS_ERR(pcie->parf)) {
@@ -1696,12 +1819,25 @@ static int qcom_pcie_probe(struct platform_device *pdev)
 	irq = platform_get_irq_byname_optional(pdev, "global");
 	if (irq > 0)
 		pp->use_linkup_irq = true;
+	pcie->global_irq = irq;
+
+	/*
+	 * Defer the bring-up for ports that may have no endpoint (or a cold
+	 * booting one), so boot does not wait for it. Ports without the property
+	 * keep the synchronous path.
+	 */
+	INIT_WORK(&pcie->host_init_work, qcom_pcie_deferred_host_init);
+	if (pcie->wait_for_link_ms) {
+		schedule_work(&pcie->host_init_work);
+		return 0;
+	}
 
 	ret = dw_pcie_host_init(pp);
 	if (ret) {
 		dev_err(dev, "cannot initialize host\n");
 		goto err_phy_exit;
 	}
+	pcie->host_up = true;
 
 	name = devm_kasprintf(dev, GFP_KERNEL, "qcom_pcie_global_irq%d",
 			      pci_domain_nr(pp->bridge->bus));
@@ -1815,6 +1951,12 @@ static int qcom_pcie_suspend_noirq(struct device *dev)
 		return 0;
 
 	if (pcie->suspended)
+		return 0;
+
+	/* Deferred bring-up may still be running; do not race it. */
+	flush_work(&pcie->host_init_work);
+
+	if (!pcie->host_up)
 		return 0;
 
 	if (!dw_pcie_link_up(pcie->pci))

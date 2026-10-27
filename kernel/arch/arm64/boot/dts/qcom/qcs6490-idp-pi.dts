@@ -94,6 +94,8 @@
 		#size-cells = <0>;
 		orientation-gpios = <&tlmm 140 GPIO_ACTIVE_HIGH>;
 		qcom,thermal-mitigation = <3000000 1500000 1000000 500000>;
+		/* No battery on this board: don't advertise a battery power supply */
+		qcom,battery-absent;
 
 		connector@0 {
 			compatible = "usb-c-connector";
@@ -1039,7 +1041,19 @@
 };
 
 &pmk8350_rtc {
+	/* RTC 时间偏移保存到 sdam_2，使内核可回写 RTC（配合 chrony rtcsync） */
+	nvmem-cells = <&rtc_offset>;
+	nvmem-cell-names = "offset";
+
 	status = "okay";
+};
+
+&pmk8350_sdam_2 {
+	status = "okay";
+
+	rtc_offset: rtc-offset@bc {
+		reg = <0xbc 0x4>;
+	};
 };
 
 &pmk8350_vadc {
@@ -1155,6 +1169,8 @@
 
 	delay-ms = <3000>; 
 	pwkey-gpios = <&tlmm 49 GPIO_ACTIVE_LOW>;
+	pwkey-pulse-ms = <1000>;	//5G HAT PWRKEY: press for 1s then release
+	wait-for-link-ms = <10000>;	//link training window for cold booted 5G module
 	max-link-speed = <1>;		//limit for waveshare pci to 5G HAT
 
 	iommu-map = <0x0 &apps_smmu 0x1c80 0x1>,
@@ -1955,7 +1971,35 @@
 };
 
 &uart12 { //PIN8_UART_TXD PIN10_UART_RXD PIN29_GPIO49 PIN31_GPIO48
-	status = "disabled";
+	status = "okay";
+};
+
+&qup_uart12_rx {
+	drive-strength = <2>;
+	bias-pull-up;
+};
+
+&qup_uart12_tx {
+	drive-strength = <2>;
+	bias-disable;
+};
+
+&spi10 { //PIN19_SPI_MOSI PIN21_SPI_MISO PIN23_SPI_SCLK PIN24_SPI_CS
+	status = "okay";
+	//CS0: PIN24 native(GPIO_43), CS1: PIN26(GPIO_80)
+	cs-gpios = <0>, <&tlmm 80 GPIO_ACTIVE_LOW>;
+
+	spidev@0 {
+		compatible = "rohm,dh2228fv";
+		spi-max-frequency = <10000000>;
+		reg = <0>;
+	};
+
+	spidev@1 {
+		compatible = "rohm,dh2228fv";
+		spi-max-frequency = <10000000>;
+		reg = <1>;
+	};
 };
 
 &tlmm {
