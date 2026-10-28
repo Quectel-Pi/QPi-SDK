@@ -108,6 +108,15 @@ config OF_OVERLAY
 	  While this option is selected automatically when needed, you can
 	  enable it manually to improve device tree unit test coverage.
 
+config OF_CONFIGFS
+	bool "Device Tree overlays via configfs"
+	select OF_OVERLAY
+	select CONFIGFS_FS
+	select FW_LOADER
+	help
+	  Enable loading device tree overlays through configfs under
+	  device-tree/overlays using firmware paths or binary DTBO data.
+
 config OF_NUMA
 	bool
 

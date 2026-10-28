@@ -248,6 +248,7 @@ raid_class_release(struct raid_template *r)
 	kfree(i);
 }
 EXPORT_SYMBOL(raid_class_release);
+	put_device(&rc->dev);
 
 static __init int raid_init(void)
 {

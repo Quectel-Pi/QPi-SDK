@@ -7,7 +7,7 @@
 
 #include "rk3576-quectel-pi-common.dtsi"
 #include "rk3576-quectel-pi-m2-audio.dtsi"
-#include "display/dsi-panel-waveshare-8inch-c-m2.dtsi"
+#include "display/dsi-panel-waveshare-auto-m2.dtsi"
 #include "display/rk3576-hdmi-m2.dtsi"
 
 /* ========== M2-specific regulators ========== */
@@ -129,7 +129,30 @@
 &wireless_bluetooth {
 	/delete-property/ clock-names;
 	/delete-property/ BT,reset_gpio;
+	/*
+	 * AIC8800/FCS960K 蓝牙上电由 aicbsp 经 WIFI,poweren_gpio(GPIO2_B3) 控制，
+	 * 不依赖 rfkill-bt 的 uart_rts_gpios 上电脉冲（实测该脉冲在蓝牙正常工作时
+	 * 从未发出）。释放 GPIO1_C2 / UART4_RTS 及其 GPIO、UART 两个 pinctrl 状态，
+	 * 让该脚由 &uart4 独占做四线流控，避免两个设备同时申请 pin-50 时 rfkill-bt
+	 * probe 失败（dmesg: pin gpio1-18 already requested by 2ad70000.serial）。
+	 */
+	/delete-property/ uart_rts_gpios;
+	/delete-property/ pinctrl-names;
+	/delete-property/ pinctrl-0;
+	/delete-property/ pinctrl-1;
 	wakeup-source;
+};
+
+/*
+ * FCS960K 蓝牙四线流控。模组 BT_RXD/BT_TXD/BT_RTS/BT_CTS 对应 UART4 M1 的
+ * RX(GPIO1_C5)/TX(GPIO1_C4)/RTS(GPIO1_C2)/CTS(GPIO1_C3)，定义见
+ * rk3576-pinctrl.dtsi 的 uart4m1_xfer/uart4m1_ctsn/uart4m1_rtsn。
+ * evb.dtsi 继承的 uart4 只复用了 xfer+ctsn（缺 RTS），此处按四线补齐 rtsn；
+ * pinctrl-names 沿用 evb.dtsi 的 "default"。RTS 脚所有权已由上面的
+ * &wireless_bluetooth 释放，不会与 rfkill-bt 冲突。
+ */
+&uart4 {
+	pinctrl-0 = <&uart4m1_xfer &uart4m1_ctsn &uart4m1_rtsn>;
 };
 
 &wifi_poweren_gpio {
@@ -158,6 +181,21 @@
 };
 
 &rockchip_suspend {
+	rockchip,sleep-mode-config = <
+		(0
+		| RKPM_SLP_ARMOFF_LOGOFF
+		| RKPM_SLP_PMU_PMUALIVE_32K
+		| RKPM_SLP_32K_EXT
+		)
+	>;
+
+	rockchip,wakeup-config = <
+		(0
+		| RKPM_GPIO_WKUP_EN
+		| RKPM_USB_WKUP_EN
+		)
+	>;
+
 	/*
 	 * Keep the upstream 3.3V rail and FCS960K control pins asserted in
 	 * BL31 deep sleep. Hardware probing showed GPIO3_A3/WIFI_BT_PWR_EN_3V3
@@ -240,7 +278,9 @@
 
 &sdmmc {
 	broken-cd;			/* Flip-type SD holder has no card-detect switch */
-	/delete-property/ sd-uhs-sdr104;	/* M2 SD slot IO is fixed 3.3V, no 1.8V UHS */
+	/* 实验:强制加回 UHS 属性,验证 vqmmc 能否切 1.8V */
+	sd-uhs-sdr104;
+	sd-uhs-sdr50;
 	vmmc-supply = <&vcc_sd>;	/* SD_3V3 via load switch controlled by GPIO0_B6 */
 };
 
@@ -265,6 +305,12 @@
 
 &pwm2_8ch_3 {
 	pinctrl-0 = <&pwm2m2_ch3>;
+	status = "okay";
+};
+
+&pwm1_6ch_5 {
+	/* 40-pin Pin 35: RGMII1_TX0 / SAI4_TX0, GPIO2_C6, PWM1_CH5_M2 */
+	pinctrl-0 = <&pwm1m2_ch5>;
 	status = "okay";
 };
 
@@ -309,8 +355,10 @@
 	pwkey-gpios = <&gpio2 RK_PD5 GPIO_ACTIVE_LOW>;
 	modem-reset-gpios = <&gpio2 RK_PD4 GPIO_ACTIVE_HIGH>;
 	delay-ms = <3000>;
+	modem-pwkey-pulse-ms = <1000>;
 	modem-reset-pulse-ms = <500>;
 	rockchip,perst-inactive-ms = <3000>;
+	rockchip,wait-for-link-ms = <10000>;
 	rockchip,skip-scan-in-resume;
 	supports-clkreq;
 	pinctrl-names = "default";
@@ -320,6 +368,30 @@
 };
 
 /* ========== M2 USB ========== */
+
+/* M2 has USB3.1 SuperSpeed traces to the CH634M USB3.0 HUB.
+ * The common dtsi disables usbdp_phy (SMARC uses GPIO4_PC4 for PCIe1
+ * reset), but M2 does not use that pin — re-enable the PHY and its
+ * USB3 port so USB0 OTG (ADB) negotiates SuperSpeed instead of 2.0.
+ * DP port stays disabled (M2 has no USB-C DP Alt Mode circuit). */
+&usbdp_phy {
+	status = "okay";
+};
+
+&usbdp_phy_u3 {
+	status = "okay";
+};
+
+/* Override rk3576-usb.dtsi defaults (maximum-speed=high-speed, usb2-phy only):
+ * M2 USB0 OTG runs USB3.1 SuperSpeed on the usbdp_phy u3 lane. */
+&usb_drd0_dwc3 {
+	dr_mode = "peripheral";
+	extcon = <&u2phy0>;
+	maximum-speed = "super-speed";
+	phys = <&u2phy0_otg>, <&usbdp_phy_u3>;
+	phy-names = "usb2-phy", "usb3-phy";
+	status = "okay";
+};
 
 &u2phy0 {
 	status = "okay";
@@ -333,6 +405,7 @@
 };
 
 &u2phy1 {
+	wakeup-source;
 	status = "okay";
 };
 
@@ -348,12 +421,6 @@
 	/delete-property/ vbus-supply;
 };
 
-&usb_drd0_dwc3 {
-	dr_mode = "peripheral";
-	extcon = <&u2phy0>;
-	status = "okay";
-};
-
 &usb_drd1_dwc3 {
 	dr_mode = "host";
 	status = "okay";
@@ -361,6 +428,34 @@
 
 &usbc1 {
 	status = "disabled";
+};
+
+&vdd_logic_s0 {
+	regulator-state-mem {
+		regulator-on-in-suspend;
+		regulator-suspend-microvolt = <800000>;
+	};
+};
+
+&vcca_1v8_s0 {
+	regulator-state-mem {
+		regulator-on-in-suspend;
+		regulator-suspend-microvolt = <1800000>;
+	};
+};
+
+&vdda_0v85_s0 {
+	regulator-state-mem {
+		regulator-on-in-suspend;
+		regulator-suspend-microvolt = <850000>;
+	};
+};
+
+&vdda_0v75_s0 {
+	regulator-state-mem {
+		regulator-on-in-suspend;
+		regulator-suspend-microvolt = <750000>;
+	};
 };
 
 /* ========== M2 Display (DSI + HDMI, no DP) ========== */

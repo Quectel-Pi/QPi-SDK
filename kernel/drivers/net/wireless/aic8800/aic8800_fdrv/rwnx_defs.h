@@ -341,6 +341,7 @@ struct rwnx_vif {
 	struct rwnx_key key[6];
     unsigned long drv_flags;
 	atomic_t drv_conn_state;
+	spinlock_t conn_state_lock;
 	u8 drv_vif_index;           /* Identifier of the VIF in driver */
 	u8 vif_index;               /* Identifier of the station in FW */
 	u8 ch_index;                /* Channel context identifier */
@@ -475,6 +476,20 @@ struct rwnx_rx_rate_stats {
 struct rwnx_sta_stats {
 	struct hw_vect last_rx;
 	struct rwnx_rx_rate_stats rx_rate;
+	u32 last_chan_time;
+	u32 last_chan_busy_time;
+	u32 tx_ack_succ_stat;
+	u32 tx_ack_fail_stat;
+	u32 last_chan_tx_busy_time;
+	u8_l rxnss;
+	u8_l rxmcs;
+	u8_l txnss;
+	u8_l txmcs;
+	u8_l phymode;
+	u32_l tx_phyrate;
+	u32_l rx_phyrate;
+	//u64 tx_bytes_ms;
+	u32_l tx_air_time_us;
 };
 
 #if (defined CONFIG_HE_FOR_OLD_KERNEL) || (defined CONFIG_VHT_FOR_OLD_KERNEL)
@@ -648,7 +663,7 @@ struct amsdu_subframe_hdr {
 
 
 /* rwnx driver status */
-void rwnx_set_conn_state(atomic_t *drv_conn_state, int state);
+void rwnx_set_conn_state(struct rwnx_vif *vif, atomic_t *drv_conn_state, int state);
 
 enum rwnx_drv_connect_status { 
 	RWNX_DRV_STATUS_DISCONNECTED = 0,
@@ -785,14 +800,26 @@ struct rwnx_hw {
 #ifdef CONFIG_SCHED_SCAN
     bool is_sched_scan;
 #endif//CONFIG_SCHED_SCAN
-	s8_l temp;
+	//s8_l temp;
 #ifdef CONFIG_TEMP_CONTROL
 	unsigned long started_jiffies;
+	s8_l temp;
+#endif
+#ifdef CONFIG_DYNAMIC_PWR
+	struct timer_list pwrloss_timer;
+	struct work_struct pwrloss_work;
+	struct rwnx_vif *read_rssi_vif;
+	s8 pwrloss_lvl;
+	u8 sta_rssi_idx;
 #endif
 #ifdef CONFIG_BAND_STEERING
 	u8_l iface_idx;
 	struct tmp_feature_sta feature_table[NX_REMOTE_STA_MAX + NX_VIRT_DEV_MAX];
 #endif
+
+	ktime_t last_time;
+	char last_alpha2[3];
+
 };
 
 u8 *rwnx_build_bcn(struct rwnx_bcn *bcn, struct cfg80211_beacon_data *new);

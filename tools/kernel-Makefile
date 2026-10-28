@@ -38,9 +38,13 @@ export PATH := $(dir $(CROSS_COMPILE)):$(PATH)
 DEFCONFIG := rockchip_linux_defconfig
 # 与官方 M2 构建 (mk-kernel.sh do_make_kernel_config) 保持一致:
 #   芯片级 rk3576.config + defconfig fragments + RT 优化 + Panfrost GPU
-FRAGMENTS := rk3576.config cma.config quectel-pwm-fan.config rockchip-debug.config rockchip_rt.config rockchip_panfrost.config quectel-overlays.config
-DTS_NAME  := rk3576-quectel-pi-m2-linux
+# 与 build-kernel.sh 使用相同顺序；缺少片段时必须报错，不降级构建。
 KERNEL_DIR := $(ROOT_DIR)/kernel
+CONFIGS_DIR := $(KERNEL_DIR)/arch/arm64/configs
+FRAGMENTS := rk3576.config cma.config quectel-pwm-fan.config quectel-container.config \
+			 quectel-exfat.config quectel-joystick.config quectel-m2-overlay.config \
+			 rockchip_rt.config rockchip_panfrost.config quectel-overlays.config
+DTS_NAME  := rk3576-quectel-pi-m2-linux
 
 .PHONY: menuconfig defconfig savedefconfig kernel boot all clean help
 

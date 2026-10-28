@@ -2150,6 +2150,12 @@ void bq27xxx_battery_teardown(struct bq27xxx_device_info *di)
 	list_del(&di->list);
 	mutex_unlock(&bq27xxx_list_lock);
 
+void bq27xxx_battery_teardown(struct bq27xxx_device_info *di)
+{
+	mutex_lock(&bq27xxx_list_lock);
+	list_del(&di->list);
+	mutex_unlock(&bq27xxx_list_lock);
+
 	/* Set removed to avoid bq27xxx_battery_update() re-queuing the work */
 	mutex_lock(&di->lock);
 	di->removed = true;

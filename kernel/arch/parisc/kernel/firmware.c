@@ -1327,6 +1327,8 @@ int pdc_iodc_print(const unsigned char *str, unsigned count)
 
 	count = min_t(unsigned int, count, sizeof(iodc_dbuf));
 
+	count = min_t(unsigned int, count, sizeof(iodc_dbuf));
+
 	spin_lock_irqsave(&pdc_lock, flags);
 	for (i = 0; i < count;) {
 		switch(str[i]) {
@@ -1374,7 +1376,7 @@ int pdc_iodc_getc(void)
 	spin_lock_irqsave(&pdc_lock, flags);
 	real32_call(PAGE0->mem_kbd.iodc_io,
 		    (unsigned long)PAGE0->mem_kbd.hpa, ENTRY_IO_CIN,
-		    PAGE0->mem_kbd.spa, __pa(PAGE0->mem_kbd.dp.layers), 
+		    PAGE0->mem_kbd.spa, __pa(PAGE0->mem_kbd.dp.layers),
 		    __pa(pdc_result), 0, __pa(iodc_dbuf), 1, 0);
 
 	ch = *iodc_dbuf;
@@ -1713,25 +1715,24 @@ int pdc_pat_mem_read_cell_pdt(struct pdc_pat_mem_read_pd_retinfo *pret,
 		pret->actual_count_bytes = entries * sizeof(unsigned long);
 	}
 
+print:
+	real32_call(PAGE0->mem_cons.iodc_io,
+		(unsigned long)PAGE0->mem_cons.hpa, ENTRY_IO_COUT,
+		PAGE0->mem_cons.spa, __pa(PAGE0->mem_cons.dp.layers),
+		__pa(pdc_result), 0, __pa(iodc_dbuf), i, 0);
 	spin_unlock_irqrestore(&pdc_lock, flags);
-	WARN_ON(retval == PDC_OK && pdc_result[0] > max_entries);
 
 	return retval;
 }
-/**
- * pdc_pat_mem_read_pd_pdt - Read PDT entries from (newer) PAT firmware
- * @pret: array of PDT entries
- * @pdt_entries_ptr: ptr to hold number of PDT entries
- * @count: number of bytes to read
- * @offset: offset to start (in bytes)
- *
- */
-int pdc_pat_mem_read_pd_pdt(struct pdc_pat_mem_read_pd_retinfo *pret,
-		unsigned long *pdt_entries_ptr, unsigned long count,
-		unsigned long offset)
-{
-	int retval;
-	unsigned long flags, entries;
+	real32_call(PAGE0->mem_kbd.iodc_io,
+		    (unsigned long)PAGE0->mem_kbd.hpa, ENTRY_IO_CIN,
+		    PAGE0->mem_kbd.spa, __pa(PAGE0->mem_kbd.dp.layers),
+		    __pa(pdc_result), 0, __pa(iodc_dbuf), 1, 0);
+
+	ch = *iodc_dbuf;
+	/* like convert_to_wide() but for first return value only: */
+	status = *(int *)&pdc_result;
+	spin_unlock_irqrestore(&pdc_lock, flags);
 
 	spin_lock_irqsave(&pdc_lock, flags);
 	retval = mem_pdc_call(PDC_PAT_MEM, PDC_PAT_MEM_PD_READ,

@@ -26,6 +26,16 @@
 
 #include "es8389.h"
 
+/*
+ * Default digital gain for the ADC OSR volume stage (register 0x26).
+ *
+ * 0xE6 = 230  ->  dB = -95.5 + 230 * 0.5 = +19.5 dB   (adc_vol_tlv: 0.5 dB/step)
+ *
+ * 原代码在 hw_params() 里按 coeff_div[] 的 Reg0x26 列写入 0xBF(191 = 0 dB)，
+ * 对板载 ES8389 麦克风偏小。本板改为固定使用这里定义的值，并不再使用
+ * coeff_div[] 的 Reg0x26 列。芯片上电默认是 0xDF(223 = +16.0 dB)。
+ */
+#define ES8389_OSR_VOL_DEFAULT		0xDF
 
 /* codec private data */
 
@@ -36,10 +46,32 @@ struct	es8389_private {
 	unsigned int sysclk;
 	int mastermode;
 
+	/*
+	 * "ADC OSR Volume" (reg 0x26) as set by the user.  Every hw_params()
+	 * would otherwise rewrite that register from coeff_div[]/default, so a
+	 * user value is cached here and re-applied after the clock setup.
+	 */
+	unsigned int osr_vol;
+	bool osr_vol_override;
+
 	u8 mclk_src;
 	u8 vddd;
 	enum snd_soc_bias_level bias_level;
 };
+
+/*
+ * 统一的 OSR 音量写入点（reg 0x26）。
+ *
+ * 0x26 会被芯片软复位打回上电默认值，而复位在 set_bias_level() 里，
+ * 所以 init / bias ON / bias STANDBY / hw_params 每个复位点之后都要重新落一次，
+ * 这样任何时刻 readback 都是本板默认值（或用户手动设的值）。
+ */
+static void es8389_apply_osr_vol(struct es8389_private *es8389)
+{
+	regmap_write(es8389->regmap, ES8389_OSR_VOL,
+		     es8389->osr_vol_override ? es8389->osr_vol :
+						ES8389_OSR_VOL_DEFAULT);
+}
 
 static const char * const es8389_core_supplies[] = {
 	"vddd",
@@ -88,6 +120,46 @@ static int es8389_dmic_set(struct snd_kcontrol *kcontrol,
 		return snd_soc_dapm_mux_update_power(dapm, kcontrol, val, e, NULL);
 	else
 		return 0;
+}
+
+static int es8389_osr_vol_get(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct es8389_private *es8389 = snd_soc_component_get_drvdata(component);
+	unsigned int val;
+
+	regmap_read(es8389->regmap, ES8389_OSR_VOL, &val);
+	ucontrol->value.integer.value[0] = val & 0xff;
+
+	return 0;
+}
+
+static int es8389_osr_vol_put(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct es8389_private *es8389 = snd_soc_component_get_drvdata(component);
+	unsigned int val = ucontrol->value.integer.value[0] & 0xff;
+	unsigned int old;
+	int ret;
+
+	ret = regmap_read(es8389->regmap, ES8389_OSR_VOL, &old);
+	if (ret)
+		return ret;
+
+	/*
+	 * Mark the value as user-controlled so every following hw_params() keeps
+	 * it instead of reverting to the board default (ES8389_OSR_VOL_DEFAULT).
+	 */
+	es8389->osr_vol = val;
+	es8389->osr_vol_override = true;
+
+	ret = regmap_write(es8389->regmap, ES8389_OSR_VOL, val);
+	if (ret)
+		return ret;
+
+	return (old & 0xff) != val;
 }
 
 static const char *const alc[] = {
@@ -237,7 +309,8 @@ static const struct snd_kcontrol_new es8389_snd_controls[] = {
 	SOC_ENUM("ADC Ramp Rate", alc_ramprate),
 	SOC_ENUM("ALC Capture Winsize", alc_winsize),
 	SOC_DOUBLE("ADC OSR Volume ON Switch", ES8389_ADC_MUTE, 6, 7, 1, 0),
-	SOC_SINGLE_TLV("ADC OSR Volume", ES8389_OSR_VOL, 0, 0xFF, 0, adc_vol_tlv),
+	SOC_SINGLE_EXT_TLV("ADC OSR Volume", ES8389_OSR_VOL, 0, 0xFF, 0,
+			es8389_osr_vol_get, es8389_osr_vol_put, adc_vol_tlv),
 	SOC_DOUBLE("ADC OUTPUT Invert Switch", ES8389_ADC_HPF2, 5, 6, 1, 0),
 
 	SOC_SINGLE_TLV("DACL Playback Volume", ES8389_DACL_VOL, 0, 0xFF, 0, dac_vol_tlv),
@@ -622,7 +695,6 @@ static int es8389_pcm_hw_params(struct snd_pcm_substream *substream,
 		regmap_write(es8389->regmap, ES8389_CLK_DIV2, coeff_div[coeff].Reg0x11);
 		regmap_write(es8389->regmap, ES8389_ADC_OSR, coeff_div[coeff].Reg0x21);
 		regmap_write(es8389->regmap, ES8389_ADC_DSP, coeff_div[coeff].Reg0x22);
-		regmap_write(es8389->regmap, ES8389_OSR_VOL, coeff_div[coeff].Reg0x26);
 		regmap_update_bits(es8389->regmap, ES8389_SYSTEM30,
 						0xC0, coeff_div[coeff].Reg0x30);
 		regmap_write(es8389->regmap, ES8389_DAC_DSM_OSR, coeff_div[coeff].Reg0x41);
@@ -638,6 +710,14 @@ static int es8389_pcm_hw_params(struct snd_pcm_substream *substream,
 	} else {
 		dev_warn(component->dev, "Clock coefficients do not match");
 	}
+
+	/*
+	 * The coefficient table above programs a per-sample-rate default for
+	 * the ADC OSR volume.  If the user configured "ADC OSR Volume" himself,
+	 * write his value back over that default so it survives stream starts
+	 * and sample-rate changes.
+	 */
+	es8389_apply_osr_vol(es8389);
 
 	return 0;
 }
@@ -660,6 +740,8 @@ static int es8389_set_bias_level(struct snd_soc_component *component,
 		regmap_write(es8389->regmap, ES8389_CSM_JUMP, 0xE4);
 		regmap_write(es8389->regmap, ES8389_RESET, 0x01);
 		regmap_write(es8389->regmap, ES8389_CLK_OFF1, 0xC3);
+		/* 上面 RESET 会把 0x26 打回 223，必须重新落一次 */
+		es8389_apply_osr_vol(es8389);
 		break;
 	case SND_SOC_BIAS_PREPARE:
 		break;
@@ -675,6 +757,8 @@ static int es8389_set_bias_level(struct snd_soc_component *component,
 		regmap_update_bits(es8389->regmap, ES8389_DAC_INV, 0x80, 0x80);
 		usleep_range(8000, 8500);
 		regmap_update_bits(es8389->regmap, ES8389_DAC_INV, 0x80, 0x00);
+		/* 上面 RESET 0x3E 是软复位，0x26 同样会被打回，重新落一次 */
+		es8389_apply_osr_vol(es8389);
 
 		//clk_disable_unprepare(es8389->mclk);
 		break;
@@ -825,6 +909,9 @@ static void es8389_init(struct snd_soc_component *component)
 
 	regmap_update_bits(es8389->regmap, ES8389_ADC_FORMAT_MUTE, 0x03, 0x03);
 	regmap_update_bits(es8389->regmap, ES8389_DAC_FORMAT_MUTE, 0x03, 0x03);
+
+	/* 初始化时就落一次，开机后无需开流，amixer cget 读到的就是本板默认值 */
+	es8389_apply_osr_vol(es8389);
 }
 
 static int es8389_suspend(struct snd_soc_component *component)

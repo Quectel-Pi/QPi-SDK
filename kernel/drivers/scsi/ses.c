@@ -474,6 +474,16 @@ static int ses_process_descriptor(struct enclosure_component *ecomp,
 		/* only take the phy0 addr */
 		addr = (u64)d[12] << 56 |
 			(u64)d[13] << 48 |
+		} else {
+			if (max_desc_len <= 23)
+				return 1;
+			d = desc + 4;
+		}
+
+
+		/* only take the phy0 addr */
+		addr = (u64)d[12] << 56 |
+			(u64)d[13] << 48 |
 			(u64)d[14] << 40 |
 			(u64)d[15] << 32 |
 			(u64)d[16] << 24 |
@@ -610,6 +620,17 @@ static void ses_enclosure_data_process(struct enclosure_device *edev,
 					if (create)
 						enclosure_component_register(
 							ecomp);
+					if (addl_desc_ptr) {
+						max_desc_len = ses_dev->page10_len -
+						    (addl_desc_ptr - ses_dev->page10);
+						if (ses_process_descriptor(ecomp,
+						    addl_desc_ptr,
+						    max_desc_len))
+							addl_desc_ptr = NULL;
+					}
+					if (create)
+						enclosure_component_register(
+							ecomp);
 				}
 			}
 			if (desc_ptr)
@@ -703,6 +724,12 @@ static int ses_intf_add(struct device *cdev,
 	result = ses_recv_diag(sdev, page, buf, len);
 	if (result)
 		goto recv_failed;
+
+
+	if (components == 0) {
+		sdev_printk(KERN_WARNING, sdev, "enclosure has no enumerated components\n");
+		goto err_free;
+	}
 
 	types = 0;
 

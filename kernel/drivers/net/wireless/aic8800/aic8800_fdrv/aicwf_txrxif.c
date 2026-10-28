@@ -534,7 +534,7 @@ static struct recv_msdu *aicwf_rxframe_queue_init(struct list_head *q, int qsize
 	int i;
 	struct recv_msdu *req, *reqs;
 
-	reqs = vmalloc(qsize*sizeof(struct recv_msdu));
+	reqs = vzalloc(qsize*sizeof(struct recv_msdu));
 	if (reqs == NULL)
 		return NULL;
 

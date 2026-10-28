@@ -17,9 +17,10 @@
 		interrupt-parent = <&gpio0>;
 		interrupts = <6 IRQ_TYPE_LEVEL_LOW>;
 
-		pinctrl-names = "default", "pmic-power-off";
+		pinctrl-names = "default", "pmic-power-off", "pmic-reset";
 		pinctrl-0 = <&pmic_pins>, <&rk806_dvs1_null>, <&rk806_dvs2_null>, <&rk806_dvs3_null>;
 		pinctrl-1 = <&rk806_dvs1_pwrdn>;
+		pinctrl-2 = <&rk806_dvs1_rst>;
 
 		/* 2800mv-3500mv */
 		low_voltage_threshold = <3000>;
@@ -44,8 +45,13 @@
 		 * 2: Reset all the power off reset registers,
 		 *    forcing the state to switch to ACTIVE mode,
 		 *    and simultaneously pull down the RESETB PIN for 5mS before releasing
+		 *
+		 * Use mode 2: CRU soft-reset alone can occasionally fail to
+		 * bring the DDR/power domain back cleanly on reboot (device
+		 * hangs after "reboot: Restarting system"). Pulling RESETB
+		 * gives a full PMIC power-cycle reset.
 		 */
-		pmic-reset-func = <1>;
+		pmic-reset-func = <2>;
 		/* buck5 external feedback resister disable */
 		buck5-feedback-disable;
 

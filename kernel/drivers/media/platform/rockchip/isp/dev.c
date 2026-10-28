@@ -566,11 +566,19 @@ static int _set_pipeline_default_fmt(struct rkisp_device *dev, bool is_init)
 	v4l2_subdev_call(isp, pad, set_selection, NULL, &sel);
 
 	/* change fmt&size of MP/SP */
+	/* 默认格式用 NV12M（2 planes）而非 NV12（1 plane）：
+	 * gst 的 v4l2src 对 NV12 优先映射为 NV12M（2 planes），
+	 * 若默认是 1-plane NV12，gst 首次 G_FMT 读到 1 plane，
+	 * 按 1-plane 请求 S_FMT(NV12M) 被内核改为 2-plane，
+	 * 随后 QUERYBUF 因 planes 数不匹配返回 EINVAL
+	 * （现象：gst 第一次打开失败，第二次成功）。
+	 * NV12M 是 rkisp 原生支持的格式（mp_fmts 表内），
+	 * 该改动仅影响 G_FMT 的首次返回值，S_FMT 仍可正常覆盖。 */
 	rkisp_set_stream_def_fmt(dev, RKISP_STREAM_MP,
-				 width, height, V4L2_PIX_FMT_NV12);
+				 width, height, V4L2_PIX_FMT_NV12M);
 	if (dev->isp_ver != ISP_V10_1)
 		rkisp_set_stream_def_fmt(dev, RKISP_STREAM_SP,
-					 width, height, V4L2_PIX_FMT_NV12);
+					 width, height, V4L2_PIX_FMT_NV12M);
 	if ((dev->isp_ver == ISP_V20 || dev->isp_ver == ISP_V21) &&
 	    dev->isp_inp == INP_CSI && dev->active_sensor) {
 		width = dev->active_sensor->fmt[1].format.width;

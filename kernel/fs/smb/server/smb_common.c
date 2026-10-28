@@ -323,6 +323,10 @@ static int init_smb1_rsp_hdr(struct ksmbd_work *work)
 	struct smb_hdr *rsp_hdr = (struct smb_hdr *)work->response_buf;
 	struct smb_hdr *rcv_hdr = (struct smb_hdr *)work->request_buf;
 
+	/* Remove the four-byte direct TCP header from the SMB1 length. */
+	*(__be32 *)work->response_buf =
+		cpu_to_be32(sizeof(struct smb_hdr) - 4);
+
 	rsp_hdr->Command = SMB_COM_NEGOTIATE;
 	*(__le32 *)rsp_hdr->Protocol = SMB1_PROTO_NUMBER;
 	rsp_hdr->Flags = SMBFLG_RESPONSE;
@@ -405,21 +409,19 @@ static int init_smb1_server(struct ksmbd_conn *conn)
 	return 0;
 }
 
-int ksmbd_init_smb_server(struct ksmbd_work *work)
+void ksmbd_init_smb_server(struct ksmbd_work *work)
 {
 	struct ksmbd_conn *conn = work->conn;
 	__le32 proto;
 
-	proto = *(__le32 *)((struct smb_hdr *)work->request_buf)->Protocol;
-	if (conn->need_neg == false) {
-		if (proto == SMB1_PROTO_NUMBER)
-			return -EINVAL;
-		return 0;
-	}
+	if (conn->need_neg == false)
+		return;
 
+	proto = *(__le32 *)((struct smb_hdr *)work->request_buf)->Protocol;
 	if (proto == SMB1_PROTO_NUMBER)
-		return init_smb1_server(conn);
-	return init_smb3_11_server(conn);
+		init_smb1_server(conn);
+	else
+		init_smb3_11_server(conn);
 }
 
 int ksmbd_populate_dot_dotdot_entries(struct ksmbd_work *work, int info_level,
@@ -573,6 +575,8 @@ static int smb_handle_negotiate(struct ksmbd_work *work)
 			      sizeof(struct smb_negotiate_rsp) - 4))
 		return -ENOMEM;
 
+	/* Add two-byte BCC and two-byte DialectIndex. */
+	inc_rfc1001_len(work->response_buf, 4);
 	neg_rsp->hdr.Status.CifsError = STATUS_SUCCESS;
 	neg_rsp->hdr.WordCount = 1;
 	neg_rsp->DialectIndex = cpu_to_le16(work->conn->dialect);
@@ -585,8 +589,7 @@ int ksmbd_smb_negotiate_common(struct ksmbd_work *work, unsigned int command)
 	struct ksmbd_conn *conn = work->conn;
 	int ret;
 
-	conn->dialect =
-		ksmbd_negotiate_smb_dialect(work->request_buf);
+	conn->dialect = ksmbd_negotiate_smb_dialect(work->request_buf);
 	ksmbd_debug(SMB, "conn->dialect 0x%x\n", conn->dialect);
 
 	if (command == SMB2_NEGOTIATE_HE) {

@@ -223,6 +223,9 @@ static ssize_t ntfs_list_ea(struct ntfs_inode *ni, char *buffer,
 			break;
 		}
 
+		if (!ea->name_len)
+			break;
+
 		if (buffer) {
 			/* Check if we can use field ea->name */
 			if (off + ea_size > size)

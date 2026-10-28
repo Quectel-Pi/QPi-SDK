@@ -1417,10 +1417,18 @@ static int amdgpu_vm_verify_parameters(struct amdgpu_device *adev,
 	if (check_add_overflow(saddr, size, &tmp)
 	    || check_add_overflow(offset, size, &tmp)
 	    || size == 0 /* which also leads to end < begin */)
+	uint64_t eaddr;
+
+	/* validate the parameters */
+	if (saddr & ~PAGE_MASK || offset & ~PAGE_MASK || size & ~PAGE_MASK)
+		return -EINVAL;
+	if (saddr + size <= saddr || offset + size <= offset)
 		return -EINVAL;
 
 	/* make sure object fit at this offset */
-	if (bo && offset + size > amdgpu_bo_size(bo))
+	eaddr = saddr + size - 1;
+	if ((bo && offset + size > amdgpu_bo_size(bo)) ||
+	    (eaddr >= adev->vm_manager.max_pfn << AMDGPU_GPU_PAGE_SHIFT))
 		return -EINVAL;
 
 	/* Ensure last pfn not exceed max_pfn */
@@ -2397,8 +2405,16 @@ int amdgpu_vm_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 	long timeout = msecs_to_jiffies(2000);
 	int r;
 
-	/* No valid flags defined yet */
-	if (args->in.flags)
+	/* validate the parameters */
+	if (saddr & ~PAGE_MASK || offset & ~PAGE_MASK || size & ~PAGE_MASK)
+		return -EINVAL;
+	if (saddr + size <= saddr || offset + size <= offset)
+		return -EINVAL;
+
+	/* make sure object fit at this offset */
+	eaddr = saddr + size - 1;
+	if ((bo && offset + size > amdgpu_bo_size(bo)) ||
+	    (eaddr >= adev->vm_manager.max_pfn << AMDGPU_GPU_PAGE_SHIFT))
 		return -EINVAL;
 
 	switch (args->in.op) {

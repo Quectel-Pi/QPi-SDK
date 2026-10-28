@@ -1074,6 +1074,8 @@ out_error:
 		if (copied)
 			goto partial_message;
 		if (head != kcm->seq_skb)
+	else if (copied)
+		kcm_tx_msg(head)->last_skb = skb;
 			kfree_skb(head);
 	} else {
 		kfree_skb(head);

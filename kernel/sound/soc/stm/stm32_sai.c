@@ -122,7 +122,6 @@ static int stm32_sai_set_sync(struct stm32_sai_data *sai_client,
 	if (!pdev) {
 		dev_err(&sai_client->pdev->dev,
 			"Device not found for node %pOFn\n", np_provider);
-		of_node_put(np_provider);
 		return -ENODEV;
 	}
 
@@ -144,7 +143,6 @@ static int stm32_sai_set_sync(struct stm32_sai_data *sai_client,
 
 error:
 	put_device(&pdev->dev);
-	of_node_put(np_provider);
 	return ret;
 }
 

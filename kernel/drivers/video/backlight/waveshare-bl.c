@@ -14,6 +14,7 @@
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
@@ -38,6 +39,12 @@ struct ws_panel {
 	struct device *dev;
 	u32 min_brightness;
 	bool present;
+	bool auto_detect;
+	bool handoff;
+	bool prepared_4_3;
+	u8 touch_address;
+	struct regulator *power;
+	struct mutex lock; /* Serialize 4.3-inch LCD power and backlight writes. */
 };
 
 static struct ws_panel *g_ws_panel;
@@ -47,6 +54,86 @@ static struct ws_panel *ws_panel_get_instance(void)
 	return g_ws_panel;
 }
 
+/* Goodix product ID is four ASCII bytes at the 16-bit register 0x8140. */
+static bool ws_panel_touch_present(struct ws_panel *panel, u8 addr)
+{
+	u8 reg[] = { 0x81, 0x40 };
+	u8 id[4];
+	struct i2c_msg msgs[] = {
+		{ .addr = addr, .len = sizeof(reg), .buf = reg },
+		{ .addr = addr, .flags = I2C_M_RD, .len = sizeof(id), .buf = id },
+	};
+	int i;
+
+	if (i2c_transfer(panel->i2c->adapter, msgs, ARRAY_SIZE(msgs)) != 2)
+		return false;
+
+	for (i = 0; i < 3; i++) {
+		if (id[i] < '0' || id[i] > '9')
+			return false;
+	}
+	return !id[3] || (id[3] >= '0' && id[3] <= '9');
+}
+
+static int ws_panel_detect_touch(struct ws_panel *panel)
+{
+	bool ws8, ws43;
+	int retry;
+
+	for (retry = 0; retry < 3; retry++) {
+		ws8 = ws_panel_touch_present(panel, WS_TOUCH_8INCH);
+		ws43 = ws_panel_touch_present(panel, WS_TOUCH_4_3INCH);
+		if (ws8 && ws43)
+			return -EINVAL;
+		if (ws8 || ws43) {
+			panel->touch_address = ws8 ? WS_TOUCH_8INCH : WS_TOUCH_4_3INCH;
+			panel->present = true;
+			return 0;
+		}
+		msleep(100);
+	}
+	return -ENODEV;
+}
+
+int ws_panel_get_touch_address(void)
+{
+	struct ws_panel *panel = ws_panel_get_instance();
+
+	if (!panel)
+		return -EPROBE_DEFER;
+	if (!panel->auto_detect)
+		return -ENODEV;
+	/* Zero means detection finished without an unambiguous screen. */
+	return panel->touch_address;
+}
+EXPORT_SYMBOL_GPL(ws_panel_get_touch_address);
+
+bool ws_panel_has_handoff(void)
+{
+	struct ws_panel *panel = ws_panel_get_instance();
+
+	return panel && panel->handoff;
+}
+EXPORT_SYMBOL_GPL(ws_panel_has_handoff);
+
+static bool ws_panel_boot_handoff(struct ws_panel *panel)
+{
+	struct device_node *chosen;
+	u32 addr;
+	bool ready;
+
+	if (!panel->present)
+		return false;
+	chosen = of_find_node_by_path("/chosen");
+	if (!chosen)
+		return false;
+	ready = of_property_read_bool(chosen, "quectel,waveshare-backlight-handoff") &&
+		!of_property_read_u32(chosen, "quectel,waveshare-touch-address", &addr) &&
+		addr == panel->touch_address;
+	of_node_put(chosen);
+	return ready;
+}
+
 int ws_panel_detect_presence(void)
 {
 	struct ws_panel *panel = ws_panel_get_instance();
@@ -54,6 +141,9 @@ int ws_panel_detect_presence(void)
 
 	if (!panel || !panel->i2c)
 		return -ENODEV;
+
+	if (panel->auto_detect)
+		return panel->present ? panel->touch_address : -ENODEV;
 
 	ret = i2c_smbus_read_byte_data(panel->i2c, WS_PANEL_DETECT_REG);
 	if (ret < 0) {
@@ -117,12 +207,94 @@ int ws_panel_i2c_write(u8 reg, u8 val)
 }
 EXPORT_SYMBOL_GPL(ws_panel_i2c_write);
 
+/* 4.3-inch MCU: LCD control 0x95, PWM 0x96 (non-inverted). */
+int ws_panel_prepare_4_3(void)
+{
+	struct ws_panel *panel = ws_panel_get_instance();
+	int ret;
+
+	if (!panel || !panel->present || panel->touch_address != WS_TOUCH_4_3INCH)
+		return -ENODEV;
+
+	mutex_lock(&panel->lock);
+	if (panel->prepared_4_3) {
+		ret = 0;
+		goto out;
+	}
+	ret = ws_panel_i2c_write(0x95, 0x10); /* IOVCC */
+	if (ret)
+		goto rollback;
+	msleep(20);
+	ret = ws_panel_i2c_write(0x95, 0x11); /* AVDD, reset held low */
+	if (ret)
+		goto rollback;
+	/* 20 ms AVDD settling, then hold LCD reset low for 60 ms. */
+	msleep(80);
+	ret = ws_panel_i2c_write(0x95, 0x13); /* Release LCD reset */
+	if (ret)
+		goto rollback;
+	panel->prepared_4_3 = true;
+	goto out;
+rollback:
+	ws_panel_i2c_write(0x95, 0);
+out:
+	mutex_unlock(&panel->lock);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(ws_panel_prepare_4_3);
+
+int ws_panel_unprepare_4_3(void)
+{
+	struct ws_panel *panel = ws_panel_get_instance();
+	int ret, err;
+
+	if (!panel || !panel->present || panel->touch_address != WS_TOUCH_4_3INCH)
+		return -ENODEV;
+
+	mutex_lock(&panel->lock);
+	panel->prepared_4_3 = false;
+	panel->handoff = false;
+	ret = ws_panel_i2c_write(0x96, 0);
+	err = ws_panel_i2c_write(0x95, 0x11); /* Reset low, backlight off */
+	if (!ret)
+		ret = err;
+	msleep(20);
+	err = ws_panel_i2c_write(0x95, 0x10); /* AVDD off */
+	if (!ret)
+		ret = err;
+	msleep(20);
+	err = ws_panel_i2c_write(0x95, 0); /* IOVCC off; keep touch powered */
+	if (!ret)
+		ret = err;
+	msleep(20);
+	mutex_unlock(&panel->lock);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(ws_panel_unprepare_4_3);
+
 int ws_panel_set_backlight(unsigned int value)
 {
+	struct ws_panel *panel = ws_panel_get_instance();
 	int ret;
 
 	if (value > WS_PANEL_DEFAULT_MAX_BRIGHTNESS)
 		value = WS_PANEL_DEFAULT_MAX_BRIGHTNESS;
+
+	if (!panel || !panel->present)
+		return -ENODEV;
+
+	if (panel->touch_address == WS_TOUCH_4_3INCH) {
+		mutex_lock(&panel->lock);
+		/* PM may unblank the backlight before DRM prepares the panel. */
+		if (!panel->prepared_4_3)
+			value = 0;
+		ret = ws_panel_i2c_write(0x96, value);
+		if (!ret)
+			ret = ws_panel_i2c_write(0x95, panel->prepared_4_3 ?
+						0x13 | (value ? 0x04 : 0) : 0);
+		mutex_unlock(&panel->lock);
+		return ret;
+	}
 
 	ret = ws_panel_i2c_write(WS_PANEL_BRIGHTNESS_REG,
 				 WS_PANEL_DEFAULT_MAX_BRIGHTNESS - value);
@@ -165,7 +337,7 @@ static int ws_panel_bl_update_status(struct backlight_device *bl)
 
 	if (backlight_is_blank(bl))
 		brightness = 0;
-	else if (brightness < panel->min_brightness)
+	else if (brightness && brightness < panel->min_brightness)
 		brightness = panel->min_brightness;
 
 	return ws_panel_set_backlight(brightness);
@@ -255,7 +427,8 @@ static ssize_t backlight_brightness_store(struct device *dev,
 		brightness = min_t(unsigned int, brightness,
 				   panel->bl_dev->props.max_brightness);
 
-	brightness = max_t(unsigned int, brightness, panel->min_brightness);
+	if (brightness)
+		brightness = max_t(unsigned int, brightness, panel->min_brightness);
 
 	ret = ws_panel_set_backlight(brightness);
 	if (ret)
@@ -542,6 +715,11 @@ static void ws_panel_debugfs_exit(struct ws_panel *panel)
 		debugfs_remove_recursive(panel->debugfs_dir);
 }
 
+static void ws_panel_disable_power(void *data)
+{
+	regulator_disable(data);
+}
+
 static int ws_panel_probe(struct i2c_client *i2c,
 			  const struct i2c_device_id *id)
 {
@@ -555,6 +733,23 @@ static int ws_panel_probe(struct i2c_client *i2c,
 
 	panel->i2c = i2c;
 	panel->dev = dev;
+	panel->auto_detect = of_device_is_compatible(dev->of_node,
+						    "waveshare,m2-auto-backlight");
+	mutex_init(&panel->lock);
+	if (panel->auto_detect) {
+		if (!i2c_check_functionality(i2c->adapter,
+					     I2C_FUNC_I2C | I2C_FUNC_SMBUS_BYTE_DATA))
+			return -EOPNOTSUPP;
+		panel->power = devm_regulator_get(dev, "power");
+		if (IS_ERR(panel->power))
+			return dev_err_probe(dev, PTR_ERR(panel->power), "no panel supply\n");
+		ret = regulator_enable(panel->power);
+		if (ret)
+			return ret;
+		ret = devm_add_action_or_reset(dev, ws_panel_disable_power, panel->power);
+		if (ret)
+			return ret;
+	}
 	i2c_set_clientdata(i2c, panel);
 
 	panel->switch_gpio = devm_gpiod_get_optional(dev, "switch", GPIOD_ASIS);
@@ -567,8 +762,28 @@ static int ws_panel_probe(struct i2c_client *i2c,
 
 	msleep(100);
 
+	if (panel->auto_detect) {
+		ret = ws_panel_detect_touch(panel);
+		if (ret)
+			dev_warn(dev, "no unique touch address (%d), DSI disconnected\n", ret);
+		panel->handoff = ws_panel_boot_handoff(panel);
+		panel->prepared_4_3 = panel->handoff &&
+			panel->touch_address == WS_TOUCH_4_3INCH;
+		/* Never send a panel-specific MCU command before identification. */
+		if (panel->touch_address == WS_TOUCH_4_3INCH && !panel->handoff) {
+			ret = i2c_smbus_write_byte_data(i2c, 0x94, 0x03);
+			if (!ret)
+				ret = i2c_smbus_write_byte_data(i2c, 0x95, 0);
+			if (!ret)
+				ret = i2c_smbus_write_byte_data(i2c, 0x96, 0);
+			if (ret)
+				return dev_err_probe(dev, ret, "MCU initialization failed\n");
+			msleep(200);
+		}
+	}
 	g_ws_panel = panel;
-	ws_panel_detect_presence();
+	if (!panel->auto_detect)
+		ws_panel_detect_presence();
 
 	panel->bl_dev = ws_panel_create_backlight(panel);
 	if (IS_ERR(panel->bl_dev)) {
@@ -579,7 +794,8 @@ static int ws_panel_probe(struct i2c_client *i2c,
 
 	dev_set_drvdata(dev, panel);
 	if (panel->present) {
-		backlight_update_status(panel->bl_dev);
+		if (!panel->handoff)
+			backlight_update_status(panel->bl_dev);
 	} else {
 		panel->bl_dev->props.power = FB_BLANK_POWERDOWN;
 		panel->bl_dev->props.brightness = 0;
@@ -643,6 +859,7 @@ static const struct dev_pm_ops ws_panel_pm_ops = {
 
 static const struct of_device_id ws_panel_of_ids[] = {
 	{ .compatible = "waveshare-bl" },
+	{ .compatible = "waveshare,m2-auto-backlight" },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, ws_panel_of_ids);

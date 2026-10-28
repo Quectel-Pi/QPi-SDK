@@ -1,23 +1,41 @@
 #include "aic8800d80x2_compat.h"
 #include "aic_bsp_driver.h"
 
-#define USER_PWROFST_COVER_CALIB_FLAG           (0x01U << 0)
-#define USER_CHAN_MAX_TXPWR_EN_FLAG             (0x01U << 1)
-#define USER_TX_USE_ANA_F_FLAG                  (0x01U << 2)
+#define RAM_FMAC_FW_ADDR_8800D80X2           0x128000
+#define RAM_FMAC_RF_FW_ADDR_8800D80X2        0x128000
+
+#define USER_PWROFST_COVER_CALIB_FLAG   (0x01U << 0)
+#define USER_CHAN_MAX_TXPWR_EN_FLAG     (0x01U << 1)
 #define USER_APM_PRBRSP_OFFLOAD_DISABLE_FLAG    (0x01U << 3)
 #define USER_HE_MU_EDCA_UPDATE_DISABLE_FLAG     (0x01U << 4)
+#define USER_CAPA_CALIB_DISABLE_FLAG    (0x01U << 7)
+#define USER_RF_WITH_SAW_EN_FLAG        (0x01U << 10)
+#define USER_SETCH_LOFT_CALIB_EN_FLAG   (0x01U << 11)
+#define USER_SETCH_RXDC_CALIB_EN_FLAG   (0x01U << 12)
 
-#define RAM_FMAC_FW_ADDR_8800D80X2           0x120000
-#define RAM_FMAC_RF_FW_ADDR_8800D80X2        0x120000
+#define USER_EXT_FLAGS_DEFAULT_D80X2 \
+    (USER_PWROFST_COVER_CALIB_FLAG | \
+     USER_CHAN_MAX_TXPWR_EN_FLAG   | \
+     USER_SETCH_LOFT_CALIB_EN_FLAG)
 
-#define CFG_USER_CHAN_MAX_TXPWR_EN  1
-#define CFG_USER_TX_USE_ANA_F       0
+#define CFG_USER_PWROFST_COVER_CALIB_EN     (1)
+#ifdef CONFIG_POWER_LIMIT
+#define CFG_USER_CHAN_MAX_TXPWR_EN 1
+#else
+#define CFG_USER_CHAN_MAX_TXPWR_EN 0
+#endif
 #ifdef CONFIG_PRBREQ_REPORT
 #define CFG_USER_APM_PRBRSP_OFFLOAD_DISABLE 1
 #else
 #define CFG_USER_APM_PRBRSP_OFFLOAD_DISABLE 0
 #endif
+#define CFG_USER_HE_MU_EDCA_UPDATE_DISABLE  (0)
+#define CFG_USER_CAPA_CALIB_DISABLE         (1)
+#define CFG_USER_RF_WITH_SAW_EN             (0)
+#define CFG_USER_SETCH_LOFT_CALIB_EN        (1)
+#define CFG_USER_SETCH_RXDC_CALIB_EN        (0)
 
+extern int testmode;
 extern int adap_test;
 #define NEW_PATCH_BUFFER_MAP    1
 #define AIC_PATCH_MAGIG_NUM     0x48435450 // "PTCH"
@@ -49,17 +67,39 @@ u32 patch_tbl_d80x2[][2] =
     {0x0224, 0x50000a01},//hs aggr
     {0x0228, 0x50000a00},//ss aggr
 
-    {0x01f0, 0x00000001
-        #if CFG_USER_CHAN_MAX_TXPWR_EN
-        | USER_CHAN_MAX_TXPWR_EN_FLAG
-        #endif
-        #if CFG_USER_TX_USE_ANA_F
-        | USER_TX_USE_ANA_F_FLAG
-        #endif
-        #if CFG_USER_APM_PRBRSP_OFFLOAD_DISABLE
-        | USER_APM_PRBRSP_OFFLOAD_DISABLE_FLAG
-        #endif
+    {0x01f0,
+        (USER_EXT_FLAGS_DEFAULT_D80X2 |
+            #if CFG_USER_APM_PRBRSP_OFFLOAD_DISABLE
+            USER_APM_PRBRSP_OFFLOAD_DISABLE_FLAG |
+            #endif
+            #if CFG_USER_HE_MU_EDCA_UPDATE_DISABLE
+            USER_HE_MU_EDCA_UPDATE_DISABLE_FLAG |
+            #endif
+            #if CFG_USER_CAPA_CALIB_DISABLE
+            USER_CAPA_CALIB_DISABLE_FLAG |
+            #endif
+            #if CFG_USER_RF_WITH_SAW_EN
+            USER_RF_WITH_SAW_EN_FLAG |
+            #endif
+            #if CFG_USER_SETCH_RXDC_CALIB_EN
+            USER_SETCH_RXDC_CALIB_EN_FLAG |
+            #endif
+        0) & ~(
+            #if !CFG_USER_PWROFST_COVER_CALIB_EN
+            USER_PWROFST_COVER_CALIB_FLAG |
+            #endif
+            #if !CFG_USER_CHAN_MAX_TXPWR_EN
+            USER_CHAN_MAX_TXPWR_EN_FLAG |
+            #endif
+            #if !CFG_USER_SETCH_LOFT_CALIB_EN
+            USER_SETCH_LOFT_CALIB_EN_FLAG |
+            #endif
+        0)
     }, // user_ext_flags
+
+	#ifdef CONFIG_GPIO_SET
+	{0x238, 0x0001000F}
+	#endif
 };
 
 //adap test
@@ -86,13 +126,14 @@ int aicwifi_patch_config_8800d80x2(struct aic_sdio_dev *sdiodev)
     int cnt = 0;
     //adap test
     int adap_patch_cnt = 0;
+	u32 fw_addr = (testmode)? RAM_FMAC_RF_FW_ADDR_8800D80X2 : RAM_FMAC_FW_ADDR_8800D80X2;
 
     if (adap_test) {
         AICWFDBG(LOGINFO, "%s adap test \r\n", __func__);
         adap_patch_cnt = sizeof(adaptivity_patch_tbl_d80x2)/sizeof(u32)/2;
     }
 
-    rd_patch_addr = RAM_FMAC_FW_ADDR_8800D80X2 + 0x01A8;
+    rd_patch_addr = fw_addr + 0x01A8;
     aic_patch_addr = rd_patch_addr + 8;
 
     AICWFDBG(LOGINFO, "Read FW mem: %08x\n", rd_patch_addr);

@@ -1564,7 +1564,9 @@ static int f2fs_do_zero_range(struct dnode_of_data *dn, pgoff_t start,
 		f2fs_set_data_blkaddr(dn, NEW_ADDR);
 	}
 
-	f2fs_update_read_extent_cache_range(dn, start, 0, index - start);
+	if (index > start)
+		f2fs_update_read_extent_cache_range(dn, start, 0,
+							index - start);
 
 	return ret;
 }
@@ -1942,9 +1944,17 @@ static int f2fs_release_file(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-static int f2fs_file_flush(struct file *file, fl_owner_t id)
-{
-	struct inode *inode = file_inode(file);
+	 * before dropping file lock, it needs to do in ->flush.
+	 */
+	if (F2FS_I(inode)->atomic_write_task == current &&
+				(current->flags & PF_EXITING)) {
+		inode_lock(inode);
+		f2fs_abort_atomic_write(inode, true);
+		inode_unlock(inode);
+	}
+
+	return 0;
+}
 
 	/*
 	 * If the process doing a transaction is crashed, we should do
@@ -2000,8 +2010,9 @@ static int f2fs_setflags_common(struct inode *inode, u32 iflags, u32 mask)
 
 			f2fs_down_write(&F2FS_I(inode)->i_sem);
 			if (!f2fs_may_compress(inode) ||
-					(S_ISREG(inode->i_mode) &&
-					F2FS_HAS_BLOCKS(inode))) {
+				atomic_read(&fi->writeback) ||
+				(S_ISREG(inode->i_mode) &&
+				F2FS_HAS_BLOCKS(inode))) {
 				f2fs_up_write(&F2FS_I(inode)->i_sem);
 				return -EINVAL;
 			}
@@ -4095,28 +4106,36 @@ static int f2fs_ioc_set_compress_option(struct file *filp, unsigned long arg)
 		goto out;
 	}
 
-	if (f2fs_is_mmap_file(inode) || get_dirty_pages(inode)) {
-		ret = -EBUSY;
-		goto out;
+	/* Check if the inode already has a COW inode */
+	if (fi->cow_inode == NULL) {
+		/* Create a COW inode for atomic write */
+		pinode = f2fs_iget(inode->i_sb, fi->i_pino);
+		if (IS_ERR(pinode)) {
+			f2fs_up_write(&fi->i_gc_rwsem[WRITE]);
+			ret = PTR_ERR(pinode);
+			goto out;
+		}
+
+		ret = f2fs_get_tmpfile(mnt_userns, pinode, &fi->cow_inode);
+		iput(pinode);
+		if (ret) {
+			f2fs_up_write(&fi->i_gc_rwsem[WRITE]);
+			goto out;
+		}
+
+		set_inode_flag(fi->cow_inode, FI_COW_FILE);
+		clear_inode_flag(fi->cow_inode, FI_INLINE_DATA);
+	} else {
+		/* Reuse the already created COW inode */
+		f2fs_do_truncate_blocks(fi->cow_inode, 0, true);
 	}
 
-	if (F2FS_HAS_BLOCKS(inode)) {
-		ret = -EFBIG;
-		goto out;
-	}
+	stat_inc_atomic_inode(inode);
 
-	F2FS_I(inode)->i_compress_algorithm = option.algorithm;
-	F2FS_I(inode)->i_log_cluster_size = option.log_cluster_size;
-	F2FS_I(inode)->i_cluster_size = BIT(option.log_cluster_size);
-	/* Set default level */
-	if (F2FS_I(inode)->i_compress_algorithm == COMPRESS_ZSTD)
-		F2FS_I(inode)->i_compress_level = F2FS_ZSTD_DEFAULT_CLEVEL;
-	else
-		F2FS_I(inode)->i_compress_level = 0;
-	/* Adjust mount option level */
-	if (option.algorithm == F2FS_OPTION(sbi).compress_algorithm &&
-	    F2FS_OPTION(sbi).compress_level)
-		F2FS_I(inode)->i_compress_level = F2FS_OPTION(sbi).compress_level;
+	set_inode_flag(inode, FI_ATOMIC_FILE);
+	f2fs_up_write(&fi->i_gc_rwsem[WRITE]);
+
+	f2fs_update_time(sbi, REQ_TIME);
 	f2fs_mark_inode_dirty_sync(inode, true);
 
 	if (!f2fs_is_compress_backend_ready(inode))

@@ -15,7 +15,9 @@
 / {
 	model = "Quectel PI M2 RK3576 Board";
 	compatible = "quectel,pi-m2-rk3576", "rockchip,rk3576";
-};
 
-/* TODO: Add M2 Linux-specific overrides here */
+	chosen {
+		bootargs_ext = "nvme_core.default_ps_max_latency_us=0 pcie_aspm=off pcie_port_pm=off";
+	};
+};
 

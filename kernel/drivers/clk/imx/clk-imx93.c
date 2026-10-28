@@ -288,6 +288,13 @@ static int imx93_clocks_probe(struct platform_device *pdev)
 	anatop_base = devm_of_iomap(dev, np, 0, NULL);
 	of_node_put(np);
 	if (WARN_ON(IS_ERR(anatop_base))) {
+		ret = PTR_ERR(base);
+		goto unregister_hws;
+	}
+
+	clks[IMX93_CLK_AUDIO_PLL] = imx_clk_fracn_gppll("audio_pll", "osc_24m", anatop_base + 0x1200,
+							&imx_fracn_gppll);
+	if (WARN_ON(IS_ERR(anatop_base))) {
 		ret = PTR_ERR(anatop_base);
 		goto unregister_hws;
 	}

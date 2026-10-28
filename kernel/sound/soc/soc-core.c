@@ -937,6 +937,9 @@ static int soc_dai_link_sanity_check(struct snd_soc_card *card,
 void snd_soc_remove_pcm_runtime(struct snd_soc_card *card,
 				struct snd_soc_pcm_runtime *rtd)
 {
+	if (!rtd)
+		return;
+
 	lockdep_assert_held(&client_mutex);
 
 	/* release machine specific resources */
@@ -1902,6 +1905,9 @@ static void soc_cleanup_card_resources(struct snd_soc_card *card)
 
 	/* remove auxiliary devices */
 	soc_remove_aux_devices(card);
+	/* flush delayed work before removing DAIs and DAPM widgets */
+	snd_soc_flush_all_delayed_work(card);
+
 	soc_unbind_aux_dev(card);
 
 	snd_soc_dapm_free(&card->dapm);

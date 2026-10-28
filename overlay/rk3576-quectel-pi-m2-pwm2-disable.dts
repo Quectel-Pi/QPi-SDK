@@ -1,0 +1,27 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * 关闭 pwm2（风扇 PWM）。
+ *
+ * 来源：上游 kernel-6.1 中的
+ *   arch/arm64/boot/dts/rockchip/rk3576-quectel-pi-m2-pwm2-disable.dts
+ * 上游 2026-10-15 (aec0df2f97) 把该文件改名为 can0-enable.dts，
+ * 内建 overlay 列表里不再有 pwm2-disable。
+ *
+ * 为避免“同步上游后本功能丢失”，这里保留一份 SDK 自有副本：
+ * overlay/*.dts 由 tools/build-kernel.sh overlays 编译，
+ * 与内核内建 overlay 一样进 rootfs /boot/overlays/，文件名不变。
+ */
+
+/ {
+	compatible = "quectel,pi-m2-rk3576";
+
+	fragment@0 {
+		target-path = "/pwm@2ade3000";
+
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+};

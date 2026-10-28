@@ -22,6 +22,7 @@
 #include <linux/slab.h>
 #include <linux/acpi.h>
 #include <linux/of.h>
+#include <linux/waveshare-bl.h>
 #include <asm/unaligned.h>
 #include "goodix.h"
 
@@ -1374,6 +1375,15 @@ static int goodix_ts_probe(struct i2c_client *client,
 	int error;
 
 	dev_dbg(&client->dev, "I2C Address: 0x%02x\n", client->addr);
+
+	/* M2 describes both addresses; only the detected panel may own touch. */
+	if (of_property_read_bool(client->dev.of_node, "waveshare,controller")) {
+		error = ws_panel_get_touch_address();
+		if (error < 0)
+			return error;
+		if (error != client->addr)
+			return -ENODEV;
+	}
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		dev_err(&client->dev, "I2C check functionality failed.\n");

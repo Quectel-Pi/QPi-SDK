@@ -222,6 +222,11 @@ buildall() {
     "$QPI_SDK_TOPDIR/tools/build-kernel.sh" all
 }
 
+# 只打包: 不编内核, 用现有 boot.img + 底包直接出 update.img
+buildpack() {
+    "$QPI_SDK_TOPDIR/tools/build-kernel.sh" pack
+}
+
 # ---------------------------------------------------------------------------
 # 内核配置
 # ---------------------------------------------------------------------------
@@ -241,6 +246,11 @@ buildsavedefconfig() {
 # ---------------------------------------------------------------------------
 # 其他
 # ---------------------------------------------------------------------------
+
+buildcheck() {
+    "$QPI_SDK_TOPDIR/tools/build-kernel.sh" check || return 1
+    "$QPI_SDK_TOPDIR/tools/build-rootfs.sh" check
+}
 
 buildclean() {
     "$QPI_SDK_TOPDIR/tools/build-rootfs.sh" clean
@@ -265,6 +275,7 @@ buildhelp() {
     echo "    buildoverlays          编译设备树 overlays"
     echo "    buildrootfs            应用 overlay/ 到 rootfs 工作副本"
     echo "    buildall               完整打包 update.img"
+    echo "    buildpack              只打包 (不编内核, 秒级出 update.img)"
     echo ""
     echo "  ── 内核配置 ──"
     echo "    buildmenuconfig        内核 menuconfig"
@@ -299,6 +310,7 @@ else
         overlays|buildoverlays) buildoverlays "$@" ;;
         rootfs|buildrootfs) buildrootfs "$@" ;;
         all|buildall) buildall "$@" ;;
+        pack|buildpack) buildpack "$@" ;;
         menuconfig|buildmenuconfig) buildmenuconfig "$@" ;;
         defconfig|builddefconfig) builddefconfig "$@" ;;
         savedefconfig|buildsavedefconfig) buildsavedefconfig "$@" ;;

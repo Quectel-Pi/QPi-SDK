@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 
+/*
+ * USB3 OTG1 function selection:
+ *   1: Fixed host mode for external USB devices, such as the RG200U module
+ *   0: Type-C DRD mode managed by an external CC logic controller
+ */
+#ifndef RK3576_USB_DRD1_TYPE_A
+#define RK3576_USB_DRD1_TYPE_A	0
+#endif
+
 / {
 	vcc5v0_usb: vcc5v0-usb {
 		compatible = "regulator-fixed";
@@ -28,6 +37,10 @@
 		regulator-name = "vbus5v0_typec_evb";
 		regulator-min-microvolt = <5000000>;
 		regulator-max-microvolt = <5000000>;
+#if RK3576_USB_DRD1_TYPE_A
+		regulator-always-on;
+		regulator-boot-on;
+#endif
 		enable-active-high;
 		gpio = <&gpio4 RK_PB2 GPIO_ACTIVE_HIGH>;
 		vin-supply = <&vcc5v0_usb>;
@@ -78,19 +91,27 @@
 };
 
 &u2phy1_otg {
-    status = "okay";
+	status = "okay";
+#if RK3576_USB_DRD1_TYPE_A
+	phy-supply = <&vbus5v0_typec_evb>;
+#else
 	vbus-supply = <&vbus5v0_typec_evb>;
+#endif
 };
 
 &usb_drd1_dwc3 {
-    status = "okay";
+	status = "okay";
+#if RK3576_USB_DRD1_TYPE_A
+	dr_mode = "host";
+#else
 	dr_mode = "otg";
 	usb-role-switch;
 	port {
-        usb_drd1_role_switch: endpoint {
-            remote-endpoint = <&pericom_role_ep1>;
-        };
+		usb_drd1_role_switch: endpoint {
+			remote-endpoint = <&pericom_role_ep1>;
+		};
 	};
+#endif
 };
 
 &i2c7 {
@@ -165,7 +186,7 @@
 	clock-frequency = <1000000>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&i2c2m0_xfer>;
-
+#if !RK3576_USB_DRD1_TYPE_A
 	usbc1: pericom_30216c@1d {
 		compatible = "pericom,30216c";
 		reg = <0x1d>;
@@ -173,7 +194,7 @@
 		interrupts = <RK_PB3 IRQ_TYPE_LEVEL_LOW>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&usbc1_int>;
-        swcc-gpios = <&gpio4 RK_PB0 GPIO_ACTIVE_HIGH>;
+		swcc-gpios = <&gpio4 RK_PB0 GPIO_ACTIVE_HIGH>;
 		status = "disabled";
 
 		port {
@@ -183,15 +204,16 @@
 		};
 
 		usb_con1: connector {
-            compatible = "usb-c-connector";
-            label = "USB-C";
-            data-role = "dual";
+			compatible = "usb-c-connector";
+			label = "USB-C";
+			data-role = "dual";
             power-role = "dual";
 			port {
-                pericom_role_ep: endpoint {};
-            };
-        };
-    };
+				pericom_role_ep: endpoint {};
+			};
+		};
+	};
+#endif
 };
 
 &usbdp_phy {
@@ -223,8 +245,11 @@
 		usb_otg1_pwren: usb-otg1-pwren {
 			rockchip,pins = <4 RK_PB2 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
+#if !RK3576_USB_DRD1_TYPE_A
 		usbc1_int: usbc1-int {
-			rockchip,pins = <2 RK_PB3 RK_FUNC_GPIO &pcfg_pull_up>,<4 RK_PB0 RK_FUNC_GPIO &pcfg_pull_none>;
+			rockchip,pins = <2 RK_PB3 RK_FUNC_GPIO &pcfg_pull_up>,
+					<4 RK_PB0 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
+#endif
 	};
 };

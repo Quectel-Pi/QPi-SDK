@@ -48,7 +48,8 @@ static size_t seg6_lwt_headroom(struct seg6_iptunnel_encap *tuninfo)
 }
 
 struct seg6_lwt {
-	struct dst_cache cache;
+	struct dst_cache cache_input;
+	struct dst_cache cache_output;
 	struct seg6_iptunnel_encap tuninfo[];
 };
 
@@ -536,7 +537,7 @@ static int seg6_output_core(struct net *net, struct sock *sk,
 	slwt = seg6_lwt_lwtunnel(orig_dst->lwtstate);
 
 	local_bh_disable();
-	dst = dst_cache_get(&slwt->cache);
+	dst = dst_cache_get(&slwt->cache_input);
 	local_bh_enable();
 
 	if (unlikely(!dst)) {
@@ -554,7 +555,12 @@ static int seg6_output_core(struct net *net, struct sock *sk,
 		if (dst->error) {
 			err = dst->error;
 			dst_release(dst);
-			goto drop;
+		/* cache only if we don't create a dst reference loop */
+		if (!dst->error && lwtst != dst->lwtstate) {
+			local_bh_disable();
+			dst_cache_set_ip6(&slwt->cache_input, dst,
+					  &ipv6_hdr(skb)->saddr);
+			local_bh_enable();
 		}
 
 		local_bh_disable();
@@ -664,13 +670,22 @@ static int seg6_build_state(struct net *net, struct nlattr *nla,
 	if (!newts)
 		return -ENOMEM;
 
-	slwt = seg6_lwt_lwtunnel(newts);
+	local_bh_disable();
+	dst = dst_cache_get(&slwt->cache_output);
+	local_bh_enable();
 
-	err = dst_cache_init(&slwt->cache, GFP_ATOMIC);
-	if (err) {
-		kfree(newts);
-		return err;
-	}
+			goto drop;
+		}
+
+		/* cache only if we don't create a dst reference loop */
+		if (orig_dst->lwtstate != dst->lwtstate) {
+			local_bh_disable();
+			dst_cache_set_ip6(&slwt->cache_output, dst, &fl6.saddr);
+			local_bh_enable();
+		}
+
+		err = skb_cow_head(skb, LL_RESERVED_SPACE(dst->dev));
+		if (unlikely(err))
 
 	memcpy(&slwt->tuninfo, tuninfo, tuninfo_len);
 
@@ -682,7 +697,15 @@ static int seg6_build_state(struct net *net, struct nlattr *nla,
 
 	newts->headroom = seg6_lwt_headroom(tuninfo);
 
-	*ts = newts;
+	slwt = seg6_lwt_lwtunnel(newts);
+
+	err = dst_cache_init(&slwt->cache_input, GFP_ATOMIC);
+	if (err)
+		goto err_free_newts;
+
+	err = dst_cache_init(&slwt->cache_output, GFP_ATOMIC);
+	if (err)
+		goto err_destroy_input;
 
 	return 0;
 }
@@ -701,11 +724,21 @@ static int seg6_fill_encap_info(struct sk_buff *skb,
 		return -EMSGSIZE;
 
 	return 0;
+
+err_destroy_input:
+	dst_cache_destroy(&slwt->cache_input);
+err_free_newts:
+	kfree(newts);
+	return err;
 }
 
 static int seg6_encap_nlsize(struct lwtunnel_state *lwtstate)
 {
-	struct seg6_iptunnel_encap *tuninfo = seg6_encap_lwtunnel(lwtstate);
+	struct seg6_lwt *slwt = seg6_lwt_lwtunnel(lwt);
+
+	dst_cache_destroy(&slwt->cache_input);
+	dst_cache_destroy(&slwt->cache_output);
+}
 
 	return nla_total_size(SEG6_IPTUN_ENCAP_SIZE(tuninfo));
 }

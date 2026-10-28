@@ -572,13 +572,14 @@ void aicwf_nl_hook_deinit(u8_l band, u8_l ssid)
 
 void aicwf_nl_init(void)
 {
+	struct netlink_kernel_cfg cfg = {
+		.input = aicwf_nl_recv_msg,
+	};
+
 	if (nl_sock) {
 		AICWFDBG(LOGSTEER, MANAGER_STR"netlink already init.\n");
 		return;
 	}
-	struct netlink_kernel_cfg cfg = {
-		.input = aicwf_nl_recv_msg,
-	};
 
 	nl_sock = netlink_kernel_create(&init_net, NL_AIC_PROTOCOL, &cfg);
 	if (!nl_sock)

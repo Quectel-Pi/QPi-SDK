@@ -15,6 +15,7 @@
 #define PHY_ID_YT8511		0x0000010a
 #define PHY_ID_YT8512		0x00000118
 #define PHY_ID_YT8512B		0x00000128
+#define PHY_ID_YT8521		0x0000011a
 #define PHY_ID_YT8522		0x4f51e928
 #define PHY_ID_YT8531S		0x4f51e91a
 #define PHY_ID_YT8531		0x4f51e91b
@@ -740,7 +741,7 @@ static int yt8521_config_init(struct phy_device *phydev)
 #endif
 
 	phydev->irq = PHY_POLL;
-	/* NOTE: this function should not be called more than one for each chip. */
+	/* Keep this sequence idempotent so it can be restored after a HW reset. */
 	hw_strap_mode = ytphy_read_ext(phydev, 0xa001) & 0x7;
 
 	ytphy_write_ext(phydev, 0xa000, 0);
@@ -1203,6 +1204,13 @@ static struct phy_driver motorcomm_phy_drvs[] = {
 		.suspend	= genphy_suspend,
 		.resume		= genphy_resume,
 	}, {
+		PHY_ID_MATCH_EXACT(PHY_ID_YT8521),
+		.name		= "YT8521 Gigabit Ethernet",
+		.get_features	= genphy_read_abilities,
+		.config_init	= yt8521_config_init,
+		.suspend	= genphy_suspend,
+		.resume		= genphy_resume,
+	}, {
 		PHY_ID_MATCH_EXACT(PHY_ID_YT8522),
 		.name           = "YT8522 100M Ethernet",
 		.features       = PHY_BASIC_FEATURES,
@@ -1253,6 +1261,7 @@ static const struct mdio_device_id __maybe_unused motorcomm_tbl[] = {
 	{ PHY_ID_MATCH_EXACT(PHY_ID_YT8511) },
 	{ PHY_ID_MATCH_EXACT(PHY_ID_YT8512) },
 	{ PHY_ID_MATCH_EXACT(PHY_ID_YT8512B) },
+	{ PHY_ID_MATCH_EXACT(PHY_ID_YT8521) },
 	{ PHY_ID_MATCH_EXACT(PHY_ID_YT8522) },
 	{ PHY_ID_MATCH_EXACT(PHY_ID_YT8531S) },
 	{ PHY_ID_MATCH_EXACT(PHY_ID_YT8531) },

@@ -182,6 +182,10 @@ struct ffa_device *ffa_device_register(const uuid_t *uuid, int vm_id,
 	if (id < 0)
 		return NULL;
 
+	id = ida_alloc_min(&ffa_bus_id, 1, GFP_KERNEL);
+	if (id < 0)
+		return NULL;
+
 	ffa_dev = kzalloc(sizeof(*ffa_dev), GFP_KERNEL);
 	if (!ffa_dev) {
 		ida_free(&ffa_bus_id, id);

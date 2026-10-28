@@ -15,7 +15,7 @@
 #define LOGWAKELOCK		0x0080
 #define LOGRXPOLL		0x0100
 #define LOGIRQ			0x0200
-
+#define LOGFW			0x0400
 
 extern int aicwf_dbg_level;
 void rwnx_data_dump(char* tag, void* data, unsigned long len);

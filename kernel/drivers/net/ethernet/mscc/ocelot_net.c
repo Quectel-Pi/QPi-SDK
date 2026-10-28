@@ -566,17 +566,25 @@ static netdev_tx_t ocelot_port_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct ocelot_port *ocelot_port = &priv->port;
 	struct ocelot *ocelot = ocelot_port->ocelot;
 	int port = priv->port.index;
+	bool use_fdma;
 	u32 rew_op = 0;
 
-	if (!static_branch_unlikely(&ocelot_fdma_enabled) &&
-	    !ocelot_can_inject(ocelot, 0))
-		return NETDEV_TX_BUSY;
+	use_fdma = static_branch_unlikely(&ocelot_fdma_enabled);
+	if (!use_fdma) {
+		ocelot_lock_inj_grp(ocelot, 0);
+		if (!ocelot_can_inject(ocelot, 0)) {
+			ocelot_unlock_inj_grp(ocelot, 0);
+			return NETDEV_TX_BUSY;
+		}
+	}
 
 	/* Check if timestamping is needed */
 	if (ocelot->ptp && (skb_shinfo(skb)->tx_flags & SKBTX_HW_TSTAMP)) {
 		struct sk_buff *clone = NULL;
 
 		if (ocelot_port_txtstamp_request(ocelot, port, skb, &clone)) {
+			if (!use_fdma)
+				ocelot_unlock_inj_grp(ocelot, 0);
 			kfree_skb(skb);
 			return NETDEV_TX_OK;
 		}
@@ -587,11 +595,11 @@ static netdev_tx_t ocelot_port_xmit(struct sk_buff *skb, struct net_device *dev)
 		rew_op = ocelot_ptp_rew_op(skb);
 	}
 
-	if (static_branch_unlikely(&ocelot_fdma_enabled)) {
+	if (use_fdma) {
 		ocelot_fdma_inject_frame(ocelot, port, rew_op, skb, dev);
 	} else {
 		ocelot_port_inject_frame(ocelot, port, 0, rew_op, skb);
-
+		ocelot_unlock_inj_grp(ocelot, 0);
 		consume_skb(skb);
 	}
 

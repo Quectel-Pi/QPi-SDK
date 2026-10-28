@@ -394,12 +394,12 @@ static int hwtstamp_set(struct net_device *netdev, struct ifreq *ifr)
 	int ret;
 	int ch;
 
-	if (copy_from_user(&cfg, ifr->ifr_data, sizeof(cfg)))
-		return -EFAULT;
+	if (!netif_running(netdev))
+		return -EINVAL;
 
 	ret = ixp46x_ptp_find(&port->timesync_regs, &port->phc_index);
 	if (ret)
-		return ret;
+		return -EOPNOTSUPP;
 
 	ch = PORT2CHANNEL(port);
 	regs = port->timesync_regs;

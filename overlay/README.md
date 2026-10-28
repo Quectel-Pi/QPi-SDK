@@ -39,7 +39,13 @@ overlay/
 ```
 
 内核已内建 5 个 overlay（随内核编译自动生成）：
-`i2c3/i2c7/pwm2/spi1/uart1` disable
+`i2c3/i2c7/spi1/uart1` disable，以及 `can0-enable`。
+SDK 另从本目录编译 `pwm2-disable`，共发布 6 个 overlay。
+
+> 注：上游 2026-10 起把 pwm2-disable 改名为 can0-enable，内建列表里不再有 pwm2。
+> 为不丢失该能力，本目录保留了一份
+> `rk3576-quectel-pi-m2-pwm2-disable.dts`（SDK 自有，同步上游不受影响），
+> 生成的 dtbo 文件名与以前一致。
 
 **写一个新 overlay**：
 

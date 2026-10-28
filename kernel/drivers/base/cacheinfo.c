@@ -280,7 +280,6 @@ static int cache_shared_cpu_map_setup(unsigned int cpu)
 				continue;/* skip if itself or no cacheinfo */
 			for (sib_index = 0; sib_index < cache_leaves(i); sib_index++) {
 				sib_leaf = per_cpu_cacheinfo_idx(i, sib_index);
-
 				/*
 				 * Comparing cache IDs only makes sense if the leaves
 				 * belong to the same cache level of same type. Skip
@@ -321,7 +320,6 @@ static void cache_shared_cpu_map_remove(unsigned int cpu)
 
 			for (sib_index = 0; sib_index < cache_leaves(sibling); sib_index++) {
 				sib_leaf = per_cpu_cacheinfo_idx(sibling, sib_index);
-
 				/*
 				 * Comparing cache IDs only makes sense if the leaves
 				 * belong to the same cache level of same type. Skip

@@ -1095,9 +1095,23 @@ static bool hdptx_phy_clk_pll_calc(unsigned int data_rate,
 	unsigned int fout = data_rate / 2;
 	unsigned int fvco;
 	u32 mdiv, sdiv, n = 8;
+	u32 sdiv_start, sdiv_end;
 	unsigned long k = 0, lc, k_sub, lc_sub;
+	bool low_rate = data_rate < 742500;
 
-	for (sdiv = 16; sdiv >= 1; sdiv--) {
+	/*
+	 * The Fvco range is from 2GHz to 4GHz. In low TMDS frequency
+	 * scenarios (below 74.25MHz), Fvco is preferred to be close
+	 * to 2GHz. In the PLL calculation formula, the smaller the SDIV,
+	 * the smaller the Fvco. Therefore, in low TMDS frequency scenarios,
+	 * the SDIV value is iterated from small to large.
+	 */
+	sdiv_start = low_rate ? 1 : 16;
+	sdiv_end = low_rate ? 16 : 1;
+
+	for (sdiv = sdiv_start;
+	     low_rate ? (sdiv <= sdiv_end) : (sdiv >= sdiv_end);
+	     low_rate ? sdiv++ : sdiv--) {
 		if (sdiv % 2 && sdiv != 1)
 			continue;
 
@@ -1134,7 +1148,7 @@ static bool hdptx_phy_clk_pll_calc(unsigned int data_rate,
 		break;
 	}
 
-	if (sdiv < 1)
+	if (low_rate ? (sdiv > sdiv_end) : (sdiv < sdiv_end))
 		return false;
 
 	if (cfg) {
@@ -1452,6 +1466,11 @@ static int hdptx_ropll_tmds_mode_config(struct rockchip_hdptx_phy *hdptx, u32 ra
 	hdptx_write(hdptx, LANE_REG0406, 0x1c);
 	hdptx_write(hdptx, LANE_REG0506, 0x1c);
 	hdptx_write(hdptx, LANE_REG0606, 0x1c);
+	/* de-emphasis：bit[4]=1 使能，bit[3:0]=4 等级，TMDS 路径调参 */
+	hdptx_write(hdptx, LANE_REG0304, 0x14);
+	hdptx_write(hdptx, LANE_REG0404, 0x14);
+	hdptx_write(hdptx, LANE_REG0504, 0x14);
+	hdptx_write(hdptx, LANE_REG0604, 0x14);
 
 	if (hdptx->earc_en)
 		hdptx_earc_config(hdptx);

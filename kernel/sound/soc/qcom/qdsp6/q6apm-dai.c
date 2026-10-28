@@ -416,6 +416,7 @@ static int q6apm_dai_probe(struct platform_device *pdev)
 		pdata->sid = args.args[0] & SID_MASK_DEFAULT;
 
 	dev_set_drvdata(dev, pdata);
+	.remove_order   = SND_SOC_COMP_ORDER_EARLY,
 
 	return devm_snd_soc_register_component(dev, &q6apm_fe_dai_component, NULL, 0);
 }

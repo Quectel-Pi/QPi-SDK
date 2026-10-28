@@ -906,6 +906,11 @@ void rtas_os_term(char *str)
 
 	snprintf(rtas_os_term_buf, 2048, "OS panic: %s", str);
 
+	do {
+		status = rtas_call(ibm_os_term_token, 1, 1, NULL,
+				   __pa(rtas_os_term_buf));
+	} while (rtas_busy_delay(status));
+
 	/*
 	 * Keep calling as long as RTAS returns a "try again" status,
 	 * but don't use rtas_busy_delay(), which potentially
@@ -1281,6 +1286,13 @@ void __init rtas_initialize(void)
 	rtas.size = size;
 	no_entry = of_property_read_u32(rtas.dev, "linux,rtas-entry", &entry);
 	rtas.entry = no_entry ? rtas.base : entry;
+
+	/*
+	 * Discover these now to avoid device tree lookups in the
+	 * panic path.
+	 */
+	if (of_property_read_bool(rtas.dev, "ibm,extended-os-term"))
+		ibm_os_term_token = rtas_token("ibm,os-term");
 
 	/*
 	 * Discover these now to avoid device tree lookups in the

@@ -48,7 +48,7 @@
 
 #define IMX219_DEFAULT_LINK_FREQ	344000000
 
-#define IMX219_DEFAULT_MODE_INDEX	2
+#define IMX219_DEFAULT_MODE_INDEX	1
 
 #define IMX219_NAME			"imx219"
 
@@ -1592,7 +1592,7 @@ static int imx219_probe(struct i2c_client *client)
 	if (ret)
 		goto error_power_off;
 
-	/* Set default mode to the XML-validated 1640x1232 mode. */
+	/* Set default mode to the XML-validated 1920x1080@30fps mode. */
 	imx219->mode = &supported_modes[IMX219_DEFAULT_MODE_INDEX];
 
 	/* sensor doesn't enter LP-11 state upon power up until and unless

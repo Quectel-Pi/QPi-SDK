@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * M2 Waveshare 4.3-DSI-TOUCH-A profile (480x800, ST7701S).
+ * Include after dsi-panel-waveshare-8inch-c-m2.dtsi through the auto DTSI.
+ * Commands: Raspberry Pi linux rpi-6.18.y panel-waveshare-dsi-v2.c.
+ * Timing: Omni3576 SDK luckfox-omni3576-dsi-panels.dtsi PANEL_4_3_A.
+ */
+
+&m2_dsi_panel {
+	m2_ws43_profile: profile-4-3 {
+		/* Shared by U-Boot logo rotation and DRM panel orientation. */
+		rotation = <90>;
+
+		/* IOVCC -> AVDD -> reset; allow 120 ms before DCS commands. */
+		init-delay-ms = <120>;
+		reset-delay-ms = <0>;
+		prepare-delay-ms = <0>;
+		enable-delay-ms = <20>;
+		disable-delay-ms = <20>;
+		unprepare-delay-ms = <80>;
+
+		width-mm = <56>;
+		height-mm = <93>;
+		bpc = <8>;
+		/* RK3576 needs a continuous DSI clock to avoid image wraparound. */
+		dsi,flags = <(MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_HSE |
+			      MIPI_DSI_MODE_LPM)>;
+		dsi,format = <MIPI_DSI_FMT_RGB888>;
+		dsi,lanes = <2>;
+
+		/* Rockchip format: packet type, delay in ms, length, payload. */
+		panel-init-sequence = [
+			39 00 06 ff 77 01 00 00 13
+			15 00 02 ef 08
+			39 00 06 ff 77 01 00 00 10
+			39 00 03 c0 63 00
+			39 00 03 c1 0d 02
+			39 00 03 c2 17 08
+			15 00 02 cc 10
+			39 00 11 b0 40 c9 94 0e 10 05 0b 09 08 26 04 52 10 69 6b 69
+			39 00 11 b1 40 d2 98 0c 92 07 09 08 07 25 02 0e 0c 6e 78 55
+			39 00 06 ff 77 01 00 00 11
+			15 00 02 b0 5d
+			15 00 02 b1 4e
+			15 00 02 b2 87
+			15 00 02 b3 80
+			15 00 02 b5 4e
+			15 00 02 b7 85
+			15 00 02 b8 21
+			39 00 03 b9 10 1f
+			15 00 02 bb 03
+			15 00 02 bc 00
+			15 00 02 c1 78
+			15 00 02 c2 78
+			15 00 02 d0 88
+			39 00 04 e0 00 3a 02
+			39 00 0c e1 04 a0 00 a0 05 a0 00 a0 00 40 40
+			39 00 0e e2 30 00 40 40 32 a0 00 a0 00 a0 00 a0 00
+			39 00 05 e3 00 00 33 33
+			39 00 03 e4 44 44
+			39 00 11 e5 09 2e a0 a0 0b 30 a0 a0 05 2a a0 a0 07 2c a0 a0
+			39 00 05 e6 00 00 33 33
+			39 00 03 e7 44 44
+			39 00 11 e8 08 2d a0 a0 0a 2f a0 a0 04 29 a0 a0 06 2b a0 a0
+			39 00 08 eb 00 00 4e 4e 00 00 00
+			39 00 03 ec 08 01
+			39 00 11 ed b0 2b 98 a4 56 7f ff ff ff ff f7 65 4a 89 b2 0b
+			39 00 07 ef 08 08 08 45 3f 54
+			39 00 06 ff 77 01 00 00 00
+			05 78 01 11
+			05 14 01 29
+		];
+
+		panel-exit-sequence = [
+			05 14 01 28
+			05 78 01 10
+		];
+
+		display-timings {
+			native-mode = <&m2_waveshare_4_3inch_a_timing>;
+
+			m2_waveshare_4_3inch_a_timing: timing0 {
+				clock-frequency = <30000000>;
+				hactive = <480>;
+				vactive = <800>;
+				hfront-porch = <42>;
+				hsync-len = <12>;
+				hback-porch = <42>;
+				vfront-porch = <60>;
+				vsync-len = <8>;
+				vback-porch = <10>;
+				/* Required by the U-Boot display timing parser. */
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <0>;
+			};
+		};
+
+	};
+};

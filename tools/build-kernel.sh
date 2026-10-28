@@ -19,6 +19,7 @@
 # 环境变量:
 #   TOOLCHAIN_DIR             # 指定工具链目录 (默认自动检测)
 #   JOBS                      # 并行编译数 (默认 nproc)
+#   QPI_UBOOT_IMAGE           # 显式指定配套 M2 U-Boot；默认 tools/boot/uboot-m2.img
 # ============================================================================
 set -euo pipefail
 
@@ -57,9 +58,10 @@ DEFCONFIG="rockchip_linux_defconfig"           # RK_KERNEL_CFG
 #   因此默认 fragment 必须与官方逐项一致, 需要调试配置请显式用
 #   FORCE_DEFCONFIG=1 之外的方式单独验证。
 KERNEL_FRAGMENTS_CHIP="rk3576.config"
-KERNEL_FRAGMENTS="cma.config quectel-pwm-fan.config quectel-container.config quectel-exfat.config quectel-joystick.config"
+KERNEL_FRAGMENTS="cma.config quectel-pwm-fan.config quectel-container.config quectel-exfat.config quectel-joystick.config quectel-m2-overlay.config"
 KERNEL_FRAGMENTS_RT="rockchip_rt.config"
 KERNEL_FRAGMENTS_GPU="rockchip_panfrost.config"
+# 官方配置之后追加 SDK 本地 overlay 定制，不引入调试结构布局差异。
 KERNEL_FRAGMENTS_SDK="quectel-overlays.config"
 # 完整 merge 集合 (顺序与官方一致: 后 merge 的生效)
 KERNEL_FRAGMENTS_ALL="$KERNEL_FRAGMENTS_CHIP $KERNEL_FRAGMENTS $KERNEL_FRAGMENTS_RT $KERNEL_FRAGMENTS_GPU $KERNEL_FRAGMENTS_SDK"
@@ -75,6 +77,27 @@ log_info() { echo -e "${CYAN}[INFO]${NC} $1"; }
 log_ok()   { echo -e "${GREEN}[OK]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_err()  { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# ----------------------------------------------------------------------------
+# 片段过滤: 只返回 kernel/arch/arm64/configs/ 下真实存在的片段
+#   发布 SDK 必须提供完整配置片段，缺失时中止，不能默默丢掉功能。
+# ----------------------------------------------------------------------------
+resolve_kernel_fragments() {
+    local cfgdir="$KERNEL_DIR/arch/arm64/configs" f
+    local out="" skipped=""
+    for f in $KERNEL_FRAGMENTS_ALL; do
+        if [ -f "$cfgdir/$f" ]; then
+            out="$out $f"
+        else
+            skipped="$skipped $f"
+        fi
+    done
+    if [ -n "$skipped" ]; then
+        log_err "缺少必需配置片段:$skipped" >&2
+        return 1
+    fi
+    echo "$out"
+}
 
 # ----------------------------------------------------------------------------
 # 工具链自动检测
@@ -97,6 +120,44 @@ find_toolchain() {
         return 1
     fi
     echo "$tc"
+}
+
+# 内核 DTB 同时供 U-Boot 显示驱动使用，不能只校验 Linux 内核。
+resolve_uboot_image() {
+    local image
+    if [ -n "${QPI_UBOOT_IMAGE:-}" ]; then
+        image="$QPI_UBOOT_IMAGE"
+    elif [ -f "$BOOT_DIR/uboot-m2.img" ]; then
+        image="$BOOT_DIR/uboot-m2.img"
+    else
+        image="$BASE_IMAGE_DIR/uboot.img"
+    fi
+    [ -f "$image" ] || { log_err "缺少配套 U-Boot: $image" >&2; return 1; }
+    realpath "$image"
+}
+
+check_uboot_compatibility() {
+    local image="$1" dtb="$2" identifiers
+    command -v strings >/dev/null 2>&1 || { log_err "缺少 strings (binutils)"; return 1; }
+    identifiers="$(strings "$image")"
+    # 这是必要条件检查，不等于硬件验收或完整的二进制认证。
+    if ! grep -Fq 'rk3576-quectel-pi-m2' <<<"$identifiers"; then
+        log_err "U-Boot 未包含 M2 板型标识: $image"
+        return 1
+    fi
+    if [ "$image" = "$BOOT_DIR/uboot-m2.img" ]; then
+        (cd "$BOOT_DIR" && sha256sum -c uboot-m2.img.sha256) || return 1
+    fi
+    if [ -f "$dtb" ] && grep -aq 'waveshare,m2-auto-panel' "$dtb"; then
+        local compatible
+        for compatible in waveshare,m2-auto-panel waveshare,m2-auto-backlight; do
+            if ! grep -Fq "$compatible" <<<"$identifiers"; then
+                log_err "拒绝打包: DTB 启用自动识屏，但 U-Boot 不支持 $compatible"
+                log_err "请使用 tools/boot/uboot-m2.img 或显式指定经验证的 QPI_UBOOT_IMAGE"
+                return 1
+            fi
+        done
+    fi
 }
 
 check_env() {
@@ -151,8 +212,10 @@ ensure_package_file() {
 # ----------------------------------------------------------------------------
 build_kernel() {
     local tc="$1"
+    local frags
+    frags="$(resolve_kernel_fragments)" || return 1
     log_info "[1/4] 编译内核 ($DTS_NAME.img, -j$JOBS)"
-    log_info "      defconfig: $DEFCONFIG + $KERNEL_FRAGMENTS"
+    log_info "      defconfig: $DEFCONFIG +$frags"
 
     export ARCH=arm64
     export CROSS_COMPILE="$tc/bin/aarch64-none-linux-gnu-"
@@ -166,7 +229,7 @@ build_kernel() {
         log_info "检测到现有 .config, 保留定制配置"
         log_info "      (如需恢复默认: FORCE_DEFCONFIG=1 ./tools/build-kernel.sh 或 make defconfig)"
     else
-        make "$DEFCONFIG" $KERNEL_FRAGMENTS_ALL
+        make "$DEFCONFIG" $frags
     fi
     make -j"$JOBS" "$DTS_NAME.img"
 
@@ -231,7 +294,27 @@ make_fit_boot() {
 # [3/4] 组装 Image 目录 (替换 boot 分区)
 #   对齐官方 mk-updateimg.sh: ln -rsf 底包 → 替换 boot.img
 # ----------------------------------------------------------------------------
+write_rootfs_file() {
+    local image="$1" source="$2" destination="$3" verify
+    verify="$(mktemp)"
+    # debugfs 的 write 不覆盖已有文件，且部分错误仍返回 0；必须删除旧文件并回读校验。
+    debugfs -w -R "rm $destination" "$image" </dev/null >/dev/null 2>&1 || true
+    debugfs -w -R "write $source $destination" "$image" </dev/null >/dev/null 2>&1
+    debugfs -R "dump $destination $verify" "$image" </dev/null >/dev/null 2>&1
+    if ! cmp -s "$source" "$verify"; then
+        rm -f "$verify"
+        log_err "rootfs 写入校验失败: $destination"
+        return 1
+    fi
+    rm -f "$verify"
+}
+
 assemble_image_dir() {
+    # 在删除旧产物之前先校验选中的启动固件。
+    local uboot_image
+    uboot_image="$(resolve_uboot_image)" || return 1
+    check_uboot_compatibility "$uboot_image" \
+        "$KERNEL_DIR/arch/arm64/boot/dts/rockchip/$DTS_NAME.dtb" || return 1
     log_info "[3/5] 组装 Image 目录 (替换 boot 分区)"
 
     rm -rf "$IMAGE_DIR" "$RESULT_DIR"
@@ -242,9 +325,20 @@ assemble_image_dir() {
     ln -rsf "$BASE_IMAGE_DIR"/* .
     rm -f update.img update.raw.img boot.img
 
-    # 替换为刚编译的 FIT boot.img
-    cp -f "$KERNEL_DIR/boot.img" boot.img
-    log_ok "Image 目录就绪: boot.img 已替换 ($(du -h boot.img | cut -f1))"
+    # 只覆盖工作目录链接，不写穿底包 uboot.img。
+    rm -f uboot.img
+    cp "$uboot_image" uboot.img
+    log_ok "已选择配套 M2 U-Boot: $uboot_image"
+
+    # 替换为刚编译的 FIT boot.img; 没有则沿用底包 boot.img (供 pack 纯打包使用)
+    if [ -f "$KERNEL_DIR/boot.img" ]; then
+        cp -f "$KERNEL_DIR/boot.img" boot.img
+        log_ok "Image 目录就绪: boot.img 已替换 ($(du -h boot.img | cut -f1))"
+    else
+        [ -f "$BASE_IMAGE_DIR/boot.img" ] || { log_err "底包也缺少 boot.img"; return 1; }
+        ln -rsf "$BASE_IMAGE_DIR/boot.img" boot.img
+        log_warn "未找到 $KERNEL_DIR/boot.img, 沿用底包 boot.img ($(du -h boot.img 2>/dev/null | cut -f1))"
+    fi
 
     # ------------------------------------------------------------------
     # [新增] 应用层 overlay 文件 (overlay/ 下非 .dts/.dtbo/README 的文件)
@@ -270,15 +364,26 @@ assemble_image_dir() {
             return 1
         fi
         # build-rootfs.sh 产物 build/rootfs-overlay.img 已含应用层文件, 替换回 Image 目录
-        cp -f "$WORK_DIR/rootfs-overlay.img" rootfs.img
+        rm -f rootfs.img
+        cp --reflink=auto "$WORK_DIR/rootfs-overlay.img" rootfs.img
         log_ok "应用层 overlay 已写入 rootfs (底包未污染)"
     else
         log_info "跳过应用层 overlay (overlay/ 下无应用文件, 仅有 .dts/.dtbo/README)"
     fi
 
-    # 写入 overlays 到 rootfs /boot/overlays/ (工作副本, 不污染底包)
+    # 自编内核必须配套自编 AIC 模块；不写入 prebuilds 或 demo。
+    local modules=() module
+    if [ -f "$KERNEL_DIR/boot.img" ]; then
+        for module in aic8800_bsp aic8800_fdrv aic8800_btlpm; do
+            local ko="$KERNEL_DIR/drivers/net/wireless/aic8800/$module/$module.ko"
+            [ -f "$ko" ] || { log_err "缺少配套 WiFi/BT 模块: $ko，请先编译内核"; return 1; }
+            modules+=("$ko")
+        done
+    fi
+
+    # 写入 overlays 和配套模块到 rootfs 工作副本，底包只读。
     local ov_src="$WORK_DIR/overlays"
-    if [ -d "$ov_src" ] && ls "$ov_src"/*.dtbo >/dev/null 2>&1; then
+    if [ "${#modules[@]}" -gt 0 ] || { [ -d "$ov_src" ] && compgen -G "$ov_src/*.dtbo" >/dev/null; }; then
         command -v debugfs >/dev/null 2>&1 || { log_err "需要 debugfs 才能写入 overlays"; return 1; }
         # 复制 rootfs 工作副本 (已含应用层 overlay)
         cp --reflink=auto -f rootfs.img "$WORK_DIR/rootfs-overlay.img" 2>/dev/null || cp -f rootfs.img "$WORK_DIR/rootfs-overlay.img"
@@ -286,13 +391,18 @@ assemble_image_dir() {
         debugfs -w -R "mkdir /boot" "$WORK_DIR/rootfs-overlay.img" < /dev/null > /dev/null 2>&1 || true
         debugfs -w -R "mkdir /boot/overlays" "$WORK_DIR/rootfs-overlay.img" < /dev/null > /dev/null 2>&1 || true
         for dtbo in "$ov_src"/*.dtbo; do
-            debugfs -w -R "write $dtbo /boot/overlays/$(basename "$dtbo")" "$WORK_DIR/rootfs-overlay.img" < /dev/null > /dev/null 2>&1 \
-                && log_info "  overlay 已写入 rootfs: /boot/overlays/$(basename "$dtbo")" \
-                || log_warn "  overlay 写入失败: $(basename "$dtbo")"
+            [ -f "$dtbo" ] || continue
+            write_rootfs_file "$WORK_DIR/rootfs-overlay.img" "$dtbo" "/boot/overlays/$(basename "$dtbo")"
+            log_info "  overlay 已写入并校验: $(basename "$dtbo")"
+        done
+        debugfs -w -R "mkdir /usr/lib/modules" "$WORK_DIR/rootfs-overlay.img" </dev/null >/dev/null 2>&1 || true
+        for module in "${modules[@]}"; do
+            write_rootfs_file "$WORK_DIR/rootfs-overlay.img" "$module" "/usr/lib/modules/$(basename "$module")"
+            log_info "  配套模块已写入并校验: $(basename "$module")"
         done
         local rc=0
         e2fsck -f -y "$WORK_DIR/rootfs-overlay.img" > /dev/null 2>&1 || rc=$?
-        [ "$rc" -lt 4 ] || log_warn "e2fsck 发现未修复错误 ($rc)"
+        [ "$rc" -lt 4 ] || { log_err "e2fsck 发现未修复错误 ($rc)"; return 1; }
         rm -f rootfs.img
         cp -f "$WORK_DIR/rootfs-overlay.img" rootfs.img
         log_ok "overlays 已写入 rootfs /boot/overlays/ (底包未污染)"
@@ -319,6 +429,7 @@ pack_update_img() {
 
     [ -f "$RESULT_DIR/update.img" ] || { log_err "打包失败: update.img 未生成"; return 1; }
     cp -f boot.img "$RESULT_DIR/boot.img"
+    cp -f uboot.img "$RESULT_DIR/uboot.img"
 
     log_ok "打包完成!"
     echo
@@ -369,13 +480,16 @@ build_overlays() {
         done
     fi
 
-    # 2) 内核内建 overlay 编译产物 (Makefile 声明过的 *.dtbo)
+    # 2) 只复制当前 Makefile 声明的 M2 overlay，避免打包历史残留产物。
     if [ -d "$KERNEL_OV_DIR" ]; then
-        for dtbo in "$KERNEL_OV_DIR"/*.dtbo; do
-            [ -f "$dtbo" ] || continue
+        local name
+        while IFS= read -r name; do
+            [ -n "$name" ] || continue
+            local dtbo="$KERNEL_OV_DIR/$name"
+            [ -f "$dtbo" ] || { log_err "缺少 $name，请先编译内核"; return 1; }
             cp -f "$dtbo" "$OUT_DIR/"
             n=$((n+1))
-        done
+        done < <(grep -oE 'rk3576-quectel-pi-m2-[a-z0-9_-]+\.dtbo' "$KERNEL_OV_DIR/Makefile" | sort -u)
     fi
 
     if [ "$n" -eq 0 ]; then
@@ -393,7 +507,9 @@ cmd_menuconfig() {
 
     cd "$KERNEL_DIR"
     # 首次进入自动加载默认配置 (与官方 M2 一致的完整 fragment 集合)
-    [ -f .config ] || make "$DEFCONFIG" $KERNEL_FRAGMENTS_ALL
+    local frags
+    frags="$(resolve_kernel_fragments)" || return 1
+    [ -f .config ] || make "$DEFCONFIG" $frags
     make menuconfig
 
     log_ok "menuconfig 配置已保存到 kernel/.config"
@@ -443,7 +559,12 @@ main() {
     case "$mode" in
         check)
             local tc="$(find_toolchain)" || exit 1
+            local uboot_image
+            uboot_image="$(resolve_uboot_image)" || exit 1
+            check_uboot_compatibility "$uboot_image" \
+                "$KERNEL_DIR/arch/arm64/boot/dts/rockchip/$DTS_NAME.dtb" || exit 1
             log_ok "工具链: $tc"
+            log_ok "配套 U-Boot: $uboot_image"
             log_ok "环境检查通过 (内核源码/底包/打包工具/FIT工具 均就绪)"
             ;;
         menuconfig)
@@ -467,11 +588,20 @@ main() {
             assemble_image_dir
             pack_update_img
             ;;
+        pack)
+            # 只打包: 不编内核/overlays, 用现有 boot.img + 底包直接生成 update.img
+            # kernel 子命令产生的是传统 boot.img，必须转为 Debian FIT 格式。
+            if [ -f "$KERNEL_DIR/boot.img" ]; then
+                make_fit_boot
+            fi
+            assemble_image_dir
+            pack_update_img
+            ;;
         clean)
             cmd_clean
             ;;
         *)
-            log_err "未知命令: $mode (支持: all | check | menuconfig | kernel | boot | overlays | clean)"
+            log_err "未知命令: $mode (支持: all | check | menuconfig | kernel | boot | overlays | pack | clean)"
             exit 1
             ;;
     esac

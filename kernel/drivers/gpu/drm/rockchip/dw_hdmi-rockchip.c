@@ -4870,6 +4870,7 @@ static void dw_hdmi_rockchip_unbind(struct device *dev, struct device *master,
 		dw_hdmi_qp_unbind(hdmi->hdmi_qp);
 	else
 		dw_hdmi_unbind(hdmi->hdmi);
+	drm_encoder_cleanup(&hdmi->encoder);
 	clk_disable_unprepare(hdmi->aud_clk);
 	clk_disable_unprepare(hdmi->phyref_clk);
 	clk_disable_unprepare(hdmi->hclk_vop);

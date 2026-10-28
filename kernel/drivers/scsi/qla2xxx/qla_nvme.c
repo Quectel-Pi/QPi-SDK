@@ -170,6 +170,12 @@ static void qla_nvme_release_fcp_cmd_kref(struct kref *kref)
 	spin_unlock_irqrestore(&priv->cmd_lock, flags);
 
 	fd->done(fd);
+	qla2xxx_rel_qpair_sp(sp->qpair, sp);
+}
+
+static void qla_nvme_release_ls_cmd_kref(struct kref *kref)
+{
+	struct srb *sp = container_of(kref, struct srb, cmd_kref);
 out:
 	qla2xxx_rel_qpair_sp(sp->qpair, sp);
 }

@@ -245,6 +245,15 @@ int st21nfca_hci_se_io(struct nfc_hci_dev *hdev, u32 se_idx,
 		return -ENODEV;
 	}
 }
+		/* Need to free cb_context here as at the moment we can't
+		 * clearly indicate to the caller if the callback function
+		 * would be called (and free it) or not. In both cases a
+		 * negative value may be returned to the caller.
+		 */
+		kfree(cb_context);
+		return -ENODEV;
+	}
+}
 EXPORT_SYMBOL(st21nfca_hci_se_io);
 
 static void st21nfca_se_wt_work(struct work_struct *work)

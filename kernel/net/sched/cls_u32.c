@@ -726,6 +726,22 @@ static void u32_bind_filter(struct tcf_proto *tp, struct tc_u_knode *n,
 	}
 }
 
+static void u32_unbind_filter(struct tcf_proto *tp, struct tc_u_knode *n,
+			      struct nlattr **tb)
+{
+	if (tb[TCA_U32_CLASSID])
+		tcf_unbind_filter(tp, &n->res);
+}
+
+static void u32_bind_filter(struct tcf_proto *tp, struct tc_u_knode *n,
+			    unsigned long base, struct nlattr **tb)
+{
+	if (tb[TCA_U32_CLASSID]) {
+		n->res.classid = nla_get_u32(tb[TCA_U32_CLASSID]);
+		tcf_bind_filter(tp, &n->res, base);
+	}
+}
+
 static int u32_set_parms(struct net *net, struct tcf_proto *tp,
 			 struct tc_u_knode *n, struct nlattr **tb,
 			 struct nlattr *est, u32 flags, u32 fl_flags,
@@ -921,8 +937,15 @@ static int u32_change(struct net *net, struct sk_buff *in_skb,
 
 		u32_bind_filter(tp, new, base, tb);
 
+		u32_bind_filter(tp, new, base, tb);
+
 		err = u32_replace_hw_knode(tp, new, flags, extack);
 		if (err) {
+			u32_unbind_filter(tp, new, tb);
+
+			__u32_destroy_key(new);
+			return err;
+		}
 			u32_unbind_filter(tp, new, tb);
 
 			if (tb[TCA_U32_LINK]) {

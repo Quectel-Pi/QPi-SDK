@@ -1790,8 +1790,6 @@ void hugetlb_clear_page_hwpoison(struct page *hpage)
 }
 
 /*
- * Called from hugetlb code with hugetlb_lock held.
- *
  * Return values:
  *   0             - free hugepage
  *   1             - in-use hugepage
@@ -1799,15 +1797,17 @@ void hugetlb_clear_page_hwpoison(struct page *hpage)
  *   -EBUSY        - the hugepage is busy (try to retry)
  *   -EHWPOISON    - the hugepage is already hwpoisoned
  */
-int __get_huge_page_for_hwpoison(unsigned long pfn, int flags)
+static int get_huge_page_for_hwpoison(unsigned long pfn, int flags)
 {
 	struct page *page = pfn_to_page(pfn);
-	struct page *head = compound_head(page);
+	struct page *head;
 	int ret = 2;	/* fallback to normal page handling */
 	bool count_increased = false;
 
+	spin_lock_irq(&hugetlb_lock);
+	head = compound_head(page);
 	if (!PageHeadHuge(head))
-		goto out;
+		goto out_unlock;
 
 	if (flags & MF_COUNT_INCREASED) {
 		ret = 1;
@@ -1821,16 +1821,18 @@ int __get_huge_page_for_hwpoison(unsigned long pfn, int flags)
 	} else {
 		ret = -EBUSY;
 		if (!(flags & MF_NO_RETRY))
-			goto out;
+			goto out_unlock;
 	}
 
 	if (hugetlb_set_page_hwpoison(head, page)) {
 		ret = -EHWPOISON;
-		goto out;
+		goto out_unlock;
 	}
 
+	spin_unlock_irq(&hugetlb_lock);
 	return ret;
-out:
+out_unlock:
+	spin_unlock_irq(&hugetlb_lock);
 	if (count_increased)
 		put_page(head);
 	return ret;
@@ -2333,10 +2335,9 @@ int unpoison_memory(unsigned long pfn)
 	static DEFINE_RATELIMIT_STATE(unpoison_rs, DEFAULT_RATELIMIT_INTERVAL,
 					DEFAULT_RATELIMIT_BURST);
 
-	if (!pfn_valid(pfn))
-		return -ENXIO;
-
-	p = pfn_to_page(pfn);
+	p = pfn_to_online_page(pfn);
+	if (!p)
+		return -EIO;
 	page = compound_head(p);
 
 	mutex_lock(&mf_mutex);

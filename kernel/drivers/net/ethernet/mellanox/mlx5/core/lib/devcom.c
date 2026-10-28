@@ -118,6 +118,11 @@ struct mlx5_devcom *mlx5_devcom_register_device(struct mlx5_core_dev *dev)
 	if (!devcom) {
 		if (new_priv)
 			kfree(priv);
+		return ERR_PTR(-ENOMEM);
+	}
+
+		if (new_priv)
+			kfree(priv);
 		devcom = ERR_PTR(-ENOMEM);
 		goto out;
 	}

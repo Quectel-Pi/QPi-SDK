@@ -2028,6 +2028,9 @@ void udf_write_aext(struct inode *inode, struct extent_position *epos,
 	}
 
 	if (epos->bh) {
+
+		if (alen > epos->bh->b_size)
+			return -1;
 		if (!UDF_QUERY_FLAG(inode->i_sb, UDF_FLAG_STRICT) ||
 		    UDF_SB(inode->i_sb)->s_udfrev >= 0x0201) {
 			struct allocExtDesc *aed =
@@ -2115,6 +2118,9 @@ int udf_current_aext(struct inode *inode, struct extent_position *epos,
 		ptr = epos->bh->b_data + epos->offset;
 		if (check_add_overflow(sizeof(struct allocExtDesc),
 				le32_to_cpu(header->lengthAllocDescs), &alen))
+			return -1;
+
+		if (alen > epos->bh->b_size)
 			return -1;
 	}
 

@@ -86,6 +86,7 @@ MODULE_PARM_DESC(phyaddr, "Physical device address");
 #define STMMAC_XDP_CONSUMED	BIT(0)
 #define STMMAC_XDP_TX		BIT(1)
 #define STMMAC_XDP_REDIRECT	BIT(2)
+#define STMMAC_XSK_CONSUMED	BIT(3)
 
 static int flow_ctrl = FLOW_AUTO;
 module_param(flow_ctrl, int, 0644);
@@ -4824,6 +4825,7 @@ static int stmmac_xdp_get_tx_queue(struct stmmac_priv *priv,
 static int stmmac_xdp_xmit_back(struct stmmac_priv *priv,
 				struct xdp_buff *xdp)
 {
+	bool zc = !!(xdp->rxq->mem.type == MEM_TYPE_XSK_BUFF_POOL);
 	struct xdp_frame *xdpf = xdp_convert_buff_to_frame(xdp);
 	int cpu = smp_processor_id();
 	struct netdev_queue *nq;
@@ -4840,9 +4842,18 @@ static int stmmac_xdp_xmit_back(struct stmmac_priv *priv,
 	/* Avoids TX time-out as we are sharing with slow path */
 	txq_trans_cond_update(nq);
 
-	res = stmmac_xdp_xmit_xdpf(priv, queue, xdpf, false);
-	if (res == STMMAC_XDP_TX)
+	/* For zero copy XDP_TX action, dma_map is true */
+	res = stmmac_xdp_xmit_xdpf(priv, queue, xdpf, zc);
+	if (res == STMMAC_XDP_TX) {
 		stmmac_flush_tx_descriptors(priv, queue);
+	} else if (res == STMMAC_XDP_CONSUMED && zc) {
+		/* xdp has been freed by xdp_convert_buff_to_frame(),
+		 * no need to call xsk_buff_free() again, so return
+		 * STMMAC_XSK_CONSUMED.
+		 */
+		res = STMMAC_XSK_CONSUMED;
+		xdp_return_frame(xdpf);
+	}
 
 	__netif_tx_unlock(nq);
 
@@ -5169,6 +5180,8 @@ read_again:
 			break;
 		case STMMAC_XDP_CONSUMED:
 			xsk_buff_free(buf->xdp);
+			fallthrough;
+		case STMMAC_XSK_CONSUMED:
 			priv->dev->stats.rx_dropped++;
 			break;
 		case STMMAC_XDP_TX:
@@ -7563,10 +7576,16 @@ int stmmac_resume(struct device *dev)
 {
 	struct net_device *ndev = dev_get_drvdata(dev);
 	struct stmmac_priv *priv = netdev_priv(ndev);
+	bool reinit_phy;
+	u32 delay_ms = 0;
 	int ret;
 
 	if (!netif_running(ndev))
 		return 0;
+
+	reinit_phy = device_property_read_bool(dev,
+					  "snps,reinit-phy-on-resume");
+	device_property_read_u32(dev, "snps,phy-resume-delay-ms", &delay_ms);
 
 	/* Power Down bit, into the PM register, is cleared
 	 * automatically as soon as a magic packet or a Wake-up frame
@@ -7581,9 +7600,23 @@ int stmmac_resume(struct device *dev)
 		priv->irq_wake = 0;
 	} else {
 		pinctrl_pm_select_default_state(priv->device);
+		if (delay_ms)
+			msleep(delay_ms);
 		/* reset the phy so that it's ready */
-		if (priv->mii)
-			stmmac_mdio_reset(priv->mii);
+		if (priv->mii) {
+			ret = stmmac_mdio_reset(priv->mii);
+			if (ret)
+				return ret;
+		}
+		/* A GPIO reset loses vendor and EEE configuration. */
+		if (reinit_phy && ndev->phydev) {
+			ret = phy_init_hw(ndev->phydev);
+			if (ret) {
+				netdev_err(ndev, "failed to reinitialize PHY after resume: %d\n",
+					   ret);
+				return ret;
+			}
+		}
 		if (priv->plat->integrated_phy_power)
 			priv->plat->integrated_phy_power(priv->plat->bsp_priv,
 							 true);
@@ -7604,6 +7637,13 @@ int stmmac_resume(struct device *dev)
 		phylink_resume(priv->phylink);
 		if (device_may_wakeup(priv->device))
 			phylink_speed_up(priv->phylink);
+	}
+	if (reinit_phy && ndev->phydev &&
+	    ndev->phydev->autoneg == AUTONEG_ENABLE) {
+		ret = phy_restart_aneg(ndev->phydev);
+		if (ret)
+			netdev_warn(ndev, "failed to restart PHY autonegotiation: %d\n",
+				    ret);
 	}
 	rtnl_unlock();
 

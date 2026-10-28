@@ -1722,6 +1722,15 @@ static int remove_session_caps_cb(struct inode *inode, int mds, void *arg)
 	if (invalidate)
 		ceph_queue_invalidate(inode);
 	while (iputs--)
+		iputs = ceph_purge_inode_cap(inode, cap, &invalidate);
+	}
+	spin_unlock(&ci->i_ceph_lock);
+
+	if (cap)
+		wake_up_all(&ci->i_cap_wq);
+	if (invalidate)
+		ceph_queue_invalidate(inode);
+	while (iputs--)
 		iput(inode);
 	return 0;
 }
@@ -3940,7 +3949,7 @@ static int reconnect_caps_cb(struct inode *inode, int mds, void *arg)
 	struct dentry *dentry;
 	struct ceph_cap *cap;
 	char *path;
-	int pathlen = 0, err;
+	int pathlen = 0, err = 0;
 	u64 pathbase;
 	u64 snap_follows;
 
@@ -3964,6 +3973,16 @@ static int reconnect_caps_cb(struct inode *inode, int mds, void *arg)
 	if (!cap) {
 		spin_unlock(&ci->i_ceph_lock);
 		err = 0;
+		goto out_err;
+	}
+	dout(" adding %p ino %llx.%llx cap %p %lld %s\n",
+	     inode, ceph_vinop(inode), cap, cap->cap_id,
+	     ceph_cap_string(cap->issued));
+
+	spin_lock(&ci->i_ceph_lock);
+	cap = __get_cap_for_mds(ci, mds);
+	if (!cap) {
+		spin_unlock(&ci->i_ceph_lock);
 		goto out_err;
 	}
 	dout(" adding %p ino %llx.%llx cap %p %lld %s\n",

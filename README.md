@@ -22,8 +22,10 @@ ai_sdk/
 │   ├── base_image/       #   固件底包 (rootfs.img/boot.img/parameter.txt 等)
 │   └── sysroot/          #   M2 Debian rootfs.img 解出的应用编译 sysroot
 ├── tools/                # ★ 工具与脚本
-│   ├── build-kernel.sh   #   内核编译打包 (kernel/boot/overlays/all/check/clean)
+│   ├── build-kernel.sh   #   内核编译打包 (kernel/boot/overlays/all/pack/check/clean)
 │   ├── build-rootfs.sh   #   应用层 overlay 打包 (apply/remove/extract/repack)
+│   ├── gen-package-file.sh   # 按 parameter.txt 生成固件打包清单 package-file
+│   ├── sync-upstream.sh  #   同步上游核源码改动 (内核更新)
 │   ├── environment-setup.sh  # 交叉编译环境
 │   ├── cmake/            #   CMake toolchain
 │   ├── boot/ pack_tools/ #   FIT/固件打包工具
@@ -48,7 +50,8 @@ buildkernel             # 编译内核
 buildboot               # 生成 FIT boot.img
 buildoverlays           # 编译 overlay/*.dts
 buildrootfs             # 应用 overlay/ 到 rootfs 工作副本
-buildall                # 完整生成 update.img
+buildall                # 完整生成 update.img (含内核编译)
+buildpack               # 只打包 update.img (不编内核, 秒级~分钟级)
 buildmenuconfig         # 内核 menuconfig
 buildclean              # 清理构建产物
 ```
@@ -64,6 +67,7 @@ M2 Debian 应用开发默认使用 `toolchains/m2-debian-rootfs-toolchain/`：�
 ./tools/build-kernel.sh kernel      # 编译内核 + 内建 overlays
 ./tools/build-kernel.sh boot        # 生成 FIT boot.img
 ./tools/build-kernel.sh all         # 完整: 内核 + boot.img + overlays + update.img
+./tools/build-kernel.sh pack        # 只打包: 不编内核/overlays, 用现有 boot.img 出 update.img
 ./tools/build-kernel.sh check       # 环境检查
 ./tools/build-kernel.sh clean       # 清理
 
@@ -80,6 +84,16 @@ build/overlays/*.dtbo               # 设备树 overlays (进 rootfs /boot/overl
 ```
 
 **ko 驱动**：编译的内核模块（`.ko`）放到 `overlay/` 对应路径（如 `overlay/lib/modules/...`），打包时随 rootfs 安装。
+
+**`all` 与 `pack` 的区别**（首次编译内核很慢，之后是增量）：
+
+| 命令 | 做的事 | 耗时 |
+| --- | --- | --- |
+| `all` / `buildall` | 编译内核 → FIT boot.img → overlays → 组装 → 打包 | 首次全量约 25+ 分钟，之后增量几分钟 |
+| `pack` / `buildpack` | 组装 + 打包，**不编译内核/overlays** | 约 1 分钟（受 5.5GB 镜像读写限制） |
+
+只想把现有 `boot.img` + 底包重新打成固件时用 `pack`。它会优先用 `kernel/boot.img`，
+没有则沿用底包的 `boot.img`。
 
 ## 功能 2：应用层自定义开发
 
@@ -175,6 +189,40 @@ clean:
 ```
 
 
+
+## 上游源码同步
+
+`kernel/` 提取自完整源码仓库的 `kernel-6.1/`，当前同步点记录在 `tools/upstream/base.txt`。
+上游有新提交时**不要直接 rsync 覆盖**，用同步脚本（只同步上游跟踪的源文件，本地定制做三方合并）：
+
+```bash
+./tools/sync-upstream.sh report          # 只读预检: 待同步提交/冲突风险/新配置片段
+./tools/sync-upstream.sh apply --dry-run # 只读预演: 预检 + 变更清单, 不写盘
+./tools/sync-upstream.sh apply           # 执行同步(冲突/未备案改动会在写盘前中止)
+./tools/sync-upstream.sh snapshot        # 改过 kernel/ 后重新采集本地定制
+```
+
+同步成功后旧 `.config` 自动备份，下次构建重新生成配置；必需片段缺失时停止，
+不静默丢掉新特性。配置入口已按上游统一，不使用 `rockchip-debug.config`。
+完整固件打包自动安装配套 AIC8800 模块并回读校验，不能仅凭 vermagic 判断兼容。
+自动识屏设备树必须搭配支持它的 U-Boot：打包优先使用 SDK 自带的
+[配套启动固件及说明](tools/boot/README.md)，不修改底包；旧 U-Boot 会被检查拒绝。
+升级必须同时更新 U-Boot 和 boot，不能仅烧录 boot 分区。
+详见 [同步记录与发布回归要求](docs/upstream-sync.md)。
+
+**本地资源不提交**：`prebuilds/` 和 `demo/` 整目录被忽略，不随 SDK 提交。
+同步脚本不执行暂存、提交或推送；构建产物也不应进入提交。
+
+## 打包清单 package-file
+
+`afptool` 打包固件时用 `prebuilds/base_image/package-file` 决定“哪个文件落到哪个分区”。
+若该文件缺失，`build-kernel.sh` 会自动按 `parameter.txt` 补齐；也可手动执行：
+
+```bash
+./tools/gen-package-file.sh           # 生成
+./tools/gen-package-file.sh --print   # 只看内容
+./tools/gen-package-file.sh --force   # 强制重写
+```
 
 ## 详细文档
 

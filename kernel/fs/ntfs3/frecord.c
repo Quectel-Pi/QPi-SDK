@@ -576,6 +576,13 @@ static int ni_repack(struct ntfs_inode *ni)
 			break;
 		}
 
+		roff = le16_to_cpu(attr->nres.run_off);
+
+		if (roff > le32_to_cpu(attr->size)) {
+			err = -EINVAL;
+			break;
+		}
+
 		err = run_unpack(&run, sbi, ni->mi.rno, svcn, evcn, svcn,
 				 Add2Ptr(attr, roff),
 				 le32_to_cpu(attr->size) - roff);
@@ -2373,6 +2380,11 @@ remove_wof:
 
 		asize = le32_to_cpu(attr->size);
 		roff = le16_to_cpu(attr->nres.run_off);
+
+		if (roff > asize) {
+			err = -EINVAL;
+			goto out;
+		}
 
 		if (roff > asize) {
 			err = -EINVAL;

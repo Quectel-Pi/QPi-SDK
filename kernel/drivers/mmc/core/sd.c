@@ -870,9 +870,11 @@ try_again:
 	 * Note that, according to the spec, the S18A bit is not valid unless
 	 * the CCS bit is set as well. We deliberately deviate from the spec in
 	 * regards to this, which allows UHS-I to be supported for SDSC cards.
+	 * EXPERIMENT: force CMD11/1.8V switch even if card does not set S18A,
+	 * to verify vqmmc (vccio_sd_s0) can output 1.8V on this board.
 	 */
 	if (!mmc_host_is_spi(host) && (ocr & SD_OCR_S18R) &&
-	    rocr && (*rocr & SD_ROCR_S18A)) {
+	    rocr) {
 		err = mmc_set_uhs_voltage(host, pocr);
 		if (err == -EAGAIN) {
 			retries--;
@@ -1503,7 +1505,10 @@ retry:
 	}
 
 	/* Initialization sequence for UHS-I cards */
-	if (rocr & SD_ROCR_S18A && mmc_host_uhs(host)) {
+	if (mmc_host_uhs(host)) {
+		/* EXPERIMENT: force UHS path to test vqmmc 1.8V switch
+		 * even when card does not advertise S18A (non-UHS card)
+		 */
 		err = mmc_sd_init_uhs_card(card);
 		if (err)
 			goto free_card;

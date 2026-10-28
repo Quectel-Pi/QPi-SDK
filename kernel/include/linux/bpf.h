@@ -228,6 +228,7 @@ struct bpf_map {
 	u32 btf_vmlinux_value_type_id;
 	struct btf *btf;
 #ifdef CONFIG_MEMCG_KMEM
+	enum bpf_attach_type expected_attach_type;
 	struct obj_cgroup *objcg;
 #endif
 	char name[BPF_OBJ_NAME_LEN];
@@ -252,6 +253,7 @@ struct bpf_map {
 	struct {
 		spinlock_t lock;
 		enum bpf_prog_type type;
+		enum bpf_attach_type expected_attach_type;
 		bool jited;
 		bool xdp_has_frags;
 	} owner;

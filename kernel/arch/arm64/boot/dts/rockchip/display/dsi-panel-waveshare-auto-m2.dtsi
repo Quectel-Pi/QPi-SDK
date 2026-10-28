@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Shared M2 wiring and both panel profiles, compiled into one DTB.
+ * U-Boot and Linux select the profile: Goodix 0x14 = 8-inch C,
+ * 0x5d = 4.3-inch A. Including a profile does not activate that screen.
+ */
+#include "dsi-panel-waveshare-8inch-c-m2.dtsi"
+#include "dsi-panel-waveshare-4.3inch-a-m2.dtsi"
+
+/* Enable the boot logo after U-Boot selects the matching panel profile. */
+&route_dsi {
+	status = "okay";
+};
+
+&m2_dsi_panel {
+	compatible = "waveshare,m2-auto-panel";
+	powerio-supply = <&m2_lcm_3v3>;
+	waveshare,4.3-profile = <&m2_ws43_profile>;
+};
+
+&m2_ws_backlight {
+	/* One backlight device, two MCU protocols selected by touch address. */
+	compatible = "waveshare,m2-auto-backlight";
+	power-supply = <&m2_lcm_3v3>;
+};
+
+&m2_gt911 {
+	waveshare,controller = <&m2_ws_backlight>;
+};
+
+&i2c0 {
+	m2_gt911_43: gt911@5d {
+		status = "okay";
+		compatible = "goodix,gt911";
+		reg = <0x5d>;
+		AVDD28-supply = <&m2_lcm_3v3>;
+		VDDIO-supply = <&m2_lcm_3v3>;
+		waveshare,controller = <&m2_ws_backlight>;
+		touchscreen-size-x = <480>;
+		touchscreen-size-y = <800>;
+	};
+};
+

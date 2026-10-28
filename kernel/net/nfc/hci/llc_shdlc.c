@@ -58,6 +58,7 @@ struct llc_shdlc {
 	struct sk_buff_head ack_pending_q;
 
 	struct work_struct sm_work;
+	bool shutting_down;
 
 	int tx_headroom;
 	int tx_tailroom;
@@ -566,7 +567,8 @@ static void llc_shdlc_connect_timeout(struct timer_list *t)
 {
 	struct llc_shdlc *shdlc = from_timer(shdlc, t, connect_timer);
 
-	schedule_work(&shdlc->sm_work);
+	if (!READ_ONCE(shdlc->shutting_down))
+		schedule_work(&shdlc->sm_work);
 }
 
 static void llc_shdlc_t1_timeout(struct timer_list *t)
@@ -575,7 +577,8 @@ static void llc_shdlc_t1_timeout(struct timer_list *t)
 
 	pr_debug("SoftIRQ: need to send ack\n");
 
-	schedule_work(&shdlc->sm_work);
+	if (!READ_ONCE(shdlc->shutting_down))
+		schedule_work(&shdlc->sm_work);
 }
 
 static void llc_shdlc_t2_timeout(struct timer_list *t)
@@ -584,7 +587,8 @@ static void llc_shdlc_t2_timeout(struct timer_list *t)
 
 	pr_debug("SoftIRQ: need to retransmit\n");
 
-	schedule_work(&shdlc->sm_work);
+	if (!READ_ONCE(shdlc->shutting_down))
+		schedule_work(&shdlc->sm_work);
 }
 
 static void llc_shdlc_sm_work(struct work_struct *work)
@@ -593,6 +597,8 @@ static void llc_shdlc_sm_work(struct work_struct *work)
 	int r;
 
 	mutex_lock(&shdlc->state_mutex);
+	if (shdlc->shutting_down)
+		goto out;
 
 	switch (shdlc->state) {
 	case SHDLC_DISCONNECTED:
@@ -662,6 +668,7 @@ static void llc_shdlc_sm_work(struct work_struct *work)
 	default:
 		break;
 	}
+out:
 	mutex_unlock(&shdlc->state_mutex);
 }
 
@@ -761,6 +768,16 @@ static void *llc_shdlc_init(struct nfc_hci_dev *hdev, xmit_to_drv_t xmit_to_drv,
 static void llc_shdlc_deinit(struct nfc_llc *llc)
 {
 	struct llc_shdlc *shdlc = nfc_llc_get_data(llc);
+
+	WRITE_ONCE(shdlc->shutting_down, true);
+	cancel_work_sync(&shdlc->sm_work);
+	del_timer_sync(&shdlc->connect_timer);
+	del_timer_sync(&shdlc->t1_timer);
+	del_timer_sync(&shdlc->t2_timer);
+	shdlc->t1_active = false;
+	shdlc->t2_active = false;
+
+	cancel_work_sync(&shdlc->sm_work);
 
 	skb_queue_purge(&shdlc->rcv_q);
 	skb_queue_purge(&shdlc->send_q);

@@ -125,6 +125,13 @@ static inline struct vfsmount *cifs_dfs_d_automount(struct path *path)
 #endif
 
 /* Functions related to symlinks */
+static inline struct vfsmount *cifs_dfs_d_automount(struct path *path)
+{
+	return ERR_PTR(-EREMOTE);
+}
+#endif
+
+/* Functions related to symlinks */
 extern const char *cifs_get_link(struct dentry *, struct inode *,
 			struct delayed_call *);
 extern int cifs_symlink(struct user_namespace *mnt_userns, struct inode *inode,

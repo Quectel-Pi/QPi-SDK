@@ -431,7 +431,6 @@ static void sixpack_receive_buf(struct tty_struct *tty,
 	const unsigned char *cp, const char *fp, int count)
 {
 	struct sixpack *sp;
-	int count1;
 
 	if (!count)
 		return;
@@ -441,16 +440,16 @@ static void sixpack_receive_buf(struct tty_struct *tty,
 		return;
 
 	/* Read the characters out of the buffer */
-	count1 = count;
-	while (count) {
-		count--;
+	while (count--) {
 		if (fp && *fp++) {
 			if (!test_and_set_bit(SIXPF_ERROR, &sp->flags))
 				sp->dev->stats.rx_errors++;
+			cp++;
 			continue;
 		}
+		sixpack_decode(sp, cp, 1);
+		cp++;
 	}
-	sixpack_decode(sp, cp, count1);
 
 	sp_put(sp);
 	tty_unthrottle(tty);

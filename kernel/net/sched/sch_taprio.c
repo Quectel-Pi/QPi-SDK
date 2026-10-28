@@ -734,11 +734,15 @@ static enum hrtimer_restart advance_sched(struct hrtimer *timer)
 	close_time = min_t(ktime_t, close_time, oper->cycle_close_time);
 
 	if (should_change_schedules(admin, oper, close_time)) {
-		/* Set things so the next time this runs, the new
-		 * schedule runs.
-		 */
-		close_time = sched_base_time(admin);
+	end_time = min_t(ktime_t, end_time, oper->cycle_end_time);
+
+	if (should_change_schedules(admin, oper, end_time)) {
 		switch_schedules(q, &admin, &oper);
+		/* After changing schedules, the next entry is the first one
+		 * in the new schedule, with a pre-calculated end_time.
+		 */
+		next = list_first_entry(&oper->entries, struct sched_entry, list);
+		end_time = next->end_time;
 	}
 
 	next->close_time = close_time;

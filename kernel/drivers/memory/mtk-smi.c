@@ -563,6 +563,7 @@ static int mtk_smi_larb_probe(struct platform_device *pdev)
 err_pm_disable:
 	pm_runtime_disable(dev);
 	device_link_remove(dev, larb->smi_common_dev);
+	put_device(larb->smi_common_dev);
 	return ret;
 }
 
@@ -573,6 +574,7 @@ static int mtk_smi_larb_remove(struct platform_device *pdev)
 	device_link_remove(&pdev->dev, larb->smi_common_dev);
 	pm_runtime_disable(&pdev->dev);
 	component_del(&pdev->dev, &mtk_smi_larb_component_ops);
+	put_device(larb->smi_common_dev);
 	return 0;
 }
 
@@ -793,8 +795,10 @@ static int mtk_smi_common_remove(struct platform_device *pdev)
 {
 	struct mtk_smi *common = dev_get_drvdata(&pdev->dev);
 
-	if (common->plat->type == MTK_SMI_GEN2_SUB_COMM)
+	if (common->plat->type == MTK_SMI_GEN2_SUB_COMM) {
 		device_link_remove(&pdev->dev, common->smi_common_dev);
+		put_device(common->smi_common_dev);
+	}
 	pm_runtime_disable(&pdev->dev);
 	return 0;
 }

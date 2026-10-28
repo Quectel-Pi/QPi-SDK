@@ -298,6 +298,9 @@ cp2615_i2c_probe(struct usb_interface *usbif, const struct usb_device_id *id)
 	if (!adap)
 		return -ENOMEM;
 
+	if (!usbdev->serial)
+		return -EINVAL;
+
 	strncpy(adap->name, usbdev->serial, sizeof(adap->name) - 1);
 	adap->owner = THIS_MODULE;
 	adap->dev.parent = &usbif->dev;

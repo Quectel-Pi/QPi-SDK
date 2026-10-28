@@ -239,6 +239,20 @@ properties:
     minItems: 3
     maxItems: 3
 
+  snps,phy-resume-delay-ms:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      Delay after restoring the MAC pinctrl state and before resetting the PHY
+      during system resume. This can be used to stagger shared-board MDIO
+      resources used by multiple MAC instances.
+
+  snps,reinit-phy-on-resume:
+    $ref: /schemas/types.yaml#/definitions/flag
+    description:
+      Re-run PHY initialization after the resume-time external reset, then
+      restart auto-negotiation. Use this when the external reset loses PHY
+      vendor configuration that is required for reliable link recovery.
+
   snps,aal:
     $ref: /schemas/types.yaml#/definitions/flag
     description:

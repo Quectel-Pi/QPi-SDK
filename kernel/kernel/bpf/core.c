@@ -2127,6 +2127,7 @@ bool bpf_prog_map_compatible(struct bpf_map *map,
 		 * compatibility.
 		 */
 		map->owner.type  = prog_type;
+		map->owner.expected_attach_type = fp->expected_attach_type;
 		map->owner.jited = fp->jited;
 		map->owner.xdp_has_frags = fp->aux->xdp_has_frags;
 		ret = true;
@@ -2134,6 +2135,9 @@ bool bpf_prog_map_compatible(struct bpf_map *map,
 		ret = map->owner.type  == prog_type &&
 		      map->owner.jited == fp->jited &&
 		      map->owner.xdp_has_frags == fp->aux->xdp_has_frags;
+		if (ret && map->map_type == BPF_MAP_TYPE_PROG_ARRAY &&
+		    map->owner.expected_attach_type != fp->expected_attach_type)
+			ret = false;
 	}
 	spin_unlock(&map->owner.lock);
 
@@ -2148,7 +2152,6 @@ static int bpf_check_tail_call(const struct bpf_prog *fp)
 	mutex_lock(&aux->used_maps_mutex);
 	for (i = 0; i < aux->used_map_cnt; i++) {
 		struct bpf_map *map = aux->used_maps[i];
-
 		if (!map_type_contains_progs(map))
 			continue;
 

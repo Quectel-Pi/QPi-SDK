@@ -56,7 +56,7 @@
 	 * GPIO4_C1 单独保留 HDMI HPD 输入功能；
 	 * HDMI_TX_SCL / HDMI_TX_SDA 已在 rk3576-pinctrl.dtsi 中独立定义，这里直接引用即可。
 	 */
-	pinctrl-0 = <&switch_he_gpio &hdmi_tx_hpdin_m0 &hdmi_tx_scl &hdmi_tx_sda>;
+	pinctrl-0 = <&switch_he_gpio &hdmi_tx_hpdin_m0 &hdmi_tx_scl &hdmi_tx_sda &hdmi_tx_on_h>;
 	/*
 	 * HDMI_EDP_CTL / HDMI_DISP_SEL:
 	 * GPIO4_C0 默认输出高选择 HDMI，输出低选择 eDP。
@@ -66,6 +66,8 @@
 	/* GPIO4_C0 已用于 HDMI/eDP 显示通道选择，不启用 HDMI CEC。 */
 	/* HDMI/M.2 供电由 vcc_hdmi_m2 常开电源管理，不在 HDMI 驱动内重复占用。 */
 	rockchip,sda-falling-delay-ns = <360>;
+	ddc-i2c-scl-high-time-ns = <10000>;
+	ddc-i2c-scl-low-time-ns = <10000>;
 };
 
 &i2c7 {
@@ -112,6 +114,11 @@
 			rockchip,pins =
 				/* HDMI 热插拔检测脚 HPD，保留 GPIO4_C1 的 HDMI HPD 复用功能 */
 				<4 RK_PC1 9 &pcfg_pull_none>;
+		};
+
+		hdmi_tx_on_h: hdmi-tx-on-h {
+			/* HDMI_TX_ON_H：GPIO4_C6，高电平使能 HDMI 外部匹配电路 */
+			rockchip,pins = <4 RK_PC6 RK_FUNC_GPIO &pcfg_output_high>;
 		};
 	};
 };

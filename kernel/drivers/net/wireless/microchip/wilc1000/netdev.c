@@ -960,7 +960,7 @@ struct wilc_vif *wilc_netdev_ifc_init(struct wilc *wl, const char *name,
 
 	if (ret) {
 		ret = -EFAULT;
-		goto error;
+		goto unregister_netdev;
 	}
 
 	ndev->needs_free_netdev = true;
@@ -975,6 +975,11 @@ struct wilc_vif *wilc_netdev_ifc_init(struct wilc *wl, const char *name,
 
 	return vif;
 
+unregister_netdev:
+	if (rtnl_locked)
+		cfg80211_unregister_netdevice(ndev);
+	else
+		unregister_netdev(ndev);
 error:
 	if (rtnl_locked)
 		cfg80211_unregister_netdevice(ndev);

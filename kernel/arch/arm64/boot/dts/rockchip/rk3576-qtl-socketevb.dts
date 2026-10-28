@@ -2,6 +2,8 @@
 
 /dts-v1/;
 
+#define RK3576_USB_DRD1_TYPE_A	0
+
 #include "rk3576.dtsi"
 #include "rk3576-evb1.dtsi"
 #include "rk3576-linux.dtsi"

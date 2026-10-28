@@ -630,7 +630,7 @@ static int rk3576_canfd_start(struct net_device *ndev)
 
 	/* Loopback Mode */
 	if (rcan->can.ctrlmode & CAN_CTRLMODE_LOOPBACK) {
-		val |= MODE_LBACK;
+		val |= MODE_LBACK | MODE_RXSTX;
 		rk3576_canfd_write(rcan, CANFD_ERROR_MASK, ACK_ERROR_MASK);
 	} else if (rcan->can.ctrlmode & CAN_CTRLMODE_LISTENONLY) {
 		val |= MODE_SILENT;

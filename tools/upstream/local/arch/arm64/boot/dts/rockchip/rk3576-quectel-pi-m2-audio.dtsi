@@ -1,0 +1,177 @@
+/*
+ * Quectel PI M2 audio configuration.
+ * M2-specific audio codec and DAI link setup goes here.
+ */
+
+/ {
+	es8389_sound: es8389-sound {
+		status = "okay";
+		compatible = "rockchip,multicodecs-card";
+		rockchip,card-name = "rockchip-es8389";
+		rockchip,mic-source-switch;
+
+		hp-det-gpio = <&gpio2 RK_PD6 GPIO_ACTIVE_HIGH>;
+		io-channels = <&saradc 3>;
+		io-channel-names = "adc-detect";
+		keyup-threshold-microvolt = <1800000>;
+		poll-interval = <100>;
+		spk-con-gpio = <&gpio4 RK_PB2 GPIO_ACTIVE_HIGH>;
+		//hp-con-gpio = <&gpio3 RK_PD6 GPIO_ACTIVE_HIGH>;
+		rockchip,pre-power-on-delay-ms = <30>;
+		rockchip,post-power-down-delay-ms = <40>;
+		rockchip,format = "i2s";
+		rockchip,mclk-fs = <256>;
+		rockchip,cpu = <&sai1>;
+		rockchip,codec = <&es8389>;
+		rockchip,audio-routing =
+			"Headphone", "HPOL",
+			"Headphone", "HPOR",
+			"Speaker", "HPOL",
+			"Speaker", "HPOR";
+		pinctrl-names = "default";
+		pinctrl-0 = <&hp_det &speak_pa_en_active>;
+		play-pause-key {
+			label = "playpause";
+			linux,code = <KEY_PLAYPAUSE>;
+			press-threshold-microvolt = <2000>;
+		};
+	};
+
+	pdmics: dummy-codec {
+		status = "disabled";
+		compatible = "rockchip,dummy-codec";
+		#sound-dai-cells = <0>;
+	};
+
+	pdm_mic_array: pdm-mic-array {
+		status = "disabled";
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "rockchip,pdm-mic-array";
+		simple-audio-card,cpu {
+			sound-dai = <&pdm1>;
+		};
+		simple-audio-card,codec {
+			sound-dai = <&pdmics>;
+		};
+	};
+
+	bt_sco: bt-sco {
+		compatible = "delta,dfbmcs320";
+		#sound-dai-cells = <0>;
+		status = "okay";
+	};
+
+	bt_sound: bt-sound {
+		compatible = "simple-audio-card";
+		simple-audio-card,format = "dsp_b";
+		simple-audio-card,bitclock-inversion;
+		simple-audio-card,mclk-fs = <256>;
+		simple-audio-card,name = "rockchip,bt";
+		simple-audio-card,cpu {
+			sound-dai = <&sai2>;
+		};
+		simple-audio-card,codec {
+			sound-dai = <&bt_sco>;
+		};
+	};
+
+	codec_vdd3v3: codec_vdd3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "codec_vdd3v3";
+        enable-active-high;
+        regulator-always-on;
+		pinctrl-names = "default";
+		pinctrl-0 = <&codec_vdd3v3_active>;
+        gpio = <&gpio0 RK_PC6 GPIO_ACTIVE_HIGH>;
+        status = "okay";
+	};
+
+};
+
+&i2c2 {
+	status = "okay";
+	clock-frequency = <400000>;
+	es8389: es8389@10 {
+		status = "okay";
+		#sound-dai-cells = <0>;
+		compatible = "everest,es8389";
+		reg = <0x10>;
+		clocks = <&mclkout_sai1>;
+		clock-names = "mclk";
+		assigned-clocks = <&mclkout_sai1>;
+		assigned-clock-rates = <12288000>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&sai1m0_mclk>;
+	};
+};
+
+&es8389_sound {
+	hp-det-gpio = <&gpio2 RK_PD6 GPIO_ACTIVE_HIGH>;
+	io-channels = <&saradc 4>;
+	io-channel-names = "adc-detect";
+	keyup-threshold-microvolt = <595000>;
+	poll-interval = <100>;
+    play-pause-key {
+            label = "playpause";
+            linux,code = <KEY_PLAYPAUSE>;
+            press-threshold-microvolt = <33000>;
+    };
+               
+    vol-up-key {
+            label = "vol_up";
+            linux,code = <KEY_VOLUMEUP>;
+            press-threshold-microvolt = <110000>;
+    };
+     vol-down-key {
+             label = "vol_down";
+             linux,code = <KEY_VOLUMEDOWN>;
+             press-threshold-microvolt = <195000>;
+    };	
+};
+
+&pinctrl {
+	headphone {
+		hp_det: hp-det {
+			rockchip,pins = <2 RK_PD6 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
+
+	codec_vdd3v3 {
+        codec_vdd3v3_active: codec_vdd3v3_active {
+        rockchip,pins = <0 RK_PC6 RK_FUNC_GPIO &pcfg_pull_up>;
+        };
+    };
+    speak_pa_en {
+        speak_pa_en_active: speak_pa_en_active {
+        rockchip,pins = <4 RK_PB2 RK_FUNC_GPIO &pcfg_pull_up>;
+        };
+    };
+};
+
+&sai1 {
+	status = "okay";
+	pinctrl-names = "default";
+	rockchip,sai-tx-route = <2 1 0 3>;
+	pinctrl-0 = <&sai1m0_lrck
+		     &sai1m0_sclk
+		     &sai1m0_sdi0
+		     &sai1m0_sdo2>;
+};
+
+&sai2 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&sai2m0_lrck
+		     &sai2m0_sclk
+		     &sai2m0_sdi
+		     &sai2m0_sdo>;
+};
+
+&hdmi_sound {
+	status = "disabled";
+};
+
+&sai6 {
+	status = "okay";
+	rockchip,sai-tx-route = <0 1 2 3>;
+};

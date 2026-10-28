@@ -717,7 +717,6 @@ static int rockchip_lvds_bind(struct device *dev, struct device *master,
 			      "failed to initialize encoder: %d\n", ret);
 		return ret;
 	}
-
 	drm_encoder_helper_add(encoder, &rockchip_lvds_encoder_helper_funcs);
 
 	if (lvds->panel) {

@@ -206,11 +206,14 @@ static int pcf8563_rtc_read_time(struct device *dev, struct rtc_time *tm)
 	if (err)
 		return err;
 
-	if (buf[PCF8563_REG_SC] & PCF8563_SC_LV) {
-		dev_err(&client->dev,
+	/*
+	 * The VL flag is latched on every VDD power cycle even when the
+	 * backup battery keeps the clock running, so warn instead of
+	 * rejecting the read and let the time be restored at boot.
+	 */
+	if (buf[PCF8563_REG_SC] & PCF8563_SC_LV)
+		dev_warn(&client->dev,
 			"low voltage detected, date/time is not reliable.\n");
-		return -EINVAL;
-	}
 
 	dev_dbg(&client->dev,
 		"%s: raw data is st1=%02x, st2=%02x, sec=%02x, min=%02x, hr=%02x, "

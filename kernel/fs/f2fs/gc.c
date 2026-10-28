@@ -1910,6 +1910,16 @@ retry:
 				prefree_segments(sbi)) {
 		ret = f2fs_write_checkpoint(sbi, &cpc);
 		if (ret)
+	__get_secs_required(sbi, NULL, &upper_secs, NULL);
+
+	/*
+	 * Write checkpoint to reclaim prefree segments.
+	 * We need more three extra sections for writer's data/node/dentry.
+	 */
+	if (free_sections(sbi) <= upper_secs + NR_GC_CHECKPOINT_SECS &&
+				prefree_segments(sbi)) {
+		ret = f2fs_write_checkpoint(sbi, &cpc);
+		if (ret)
 			goto stop;
 	}
 go_gc_more:

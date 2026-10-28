@@ -1682,6 +1682,8 @@ static int acpi_ec_add(struct acpi_device *device)
 
 	ret = acpi_ec_setup(ec, device);
 	if (ret)
+		ec_remove_handlers(ec);
+
 		goto err;
 
 	if (ec == boot_ec)

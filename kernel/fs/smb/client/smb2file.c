@@ -48,6 +48,9 @@ static struct smb2_symlink_err_rsp *symlink_data(const struct kvec *iov)
 				 __func__, le32_to_cpu(p->ErrorId));
 
 			len = ALIGN(le32_to_cpu(p->ErrorDataLength), 8);
+			if (len > end - ((u8 *)p + sizeof(*p)))
+				return ERR_PTR(-EINVAL);
+
 			p = (struct smb2_error_context_rsp *)((u8 *)&p->ErrorContextData + len);
 		} while (p < end);
 	} else if (le32_to_cpu(err->ByteCount) >= sizeof(*sym) &&
@@ -123,6 +126,9 @@ int smb2_open_file(const unsigned int xid, struct cifs_open_parms *oparms, __u32
 
 		if (unlikely(!err_iov.iov_base || err_buftype == CIFS_NO_BUFFER))
 			goto out;
+		free_rsp_buf(err_buftype, err_iov.iov_base);
+		memset(&err_iov, 0, sizeof(err_iov));
+		err_buftype = CIFS_NO_BUFFER;
 		if (hdr->Status == STATUS_STOPPED_ON_SYMLINK) {
 			rc = smb2_parse_symlink_response(oparms->cifs_sb, &err_iov,
 							 &data->symlink_target);

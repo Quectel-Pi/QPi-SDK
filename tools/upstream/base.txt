@@ -1,0 +1,6 @@
+# QPi-SDK 内核对应的上游提交
+# 上游仓库: /home/q/work/linux/RK3576_Linux6.1_BL01_v1.2.0  (可用 UPSTREAM_SRC 覆盖)
+# 子目录:   kernel-6.1  →  SDK 的 kernel/
+#
+# 该值由 ./tools/sync-upstream.sh apply 自动更新，不要手改。
+commit=b1eaf88c5b1c554fabce8e5daa4cbc8fc9faa6f3

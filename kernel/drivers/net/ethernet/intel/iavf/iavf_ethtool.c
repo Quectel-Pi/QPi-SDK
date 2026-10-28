@@ -1855,7 +1855,11 @@ static int iavf_set_channels(struct net_device *netdev,
 	if ((adapter->vf_res->vf_cap_flags & VIRTCHNL_VF_OFFLOAD_ADQ) &&
 	    adapter->num_tc) {
 		dev_info(&adapter->pdev->dev, "Cannot set channels since ADq is enabled.\n");
-		return -EINVAL;
+	}
+	if (i == IAVF_RESET_WAIT_COMPLETE_COUNT) {
+		adapter->flags &= ~IAVF_FLAG_REINIT_ITR_NEEDED;
+		adapter->num_req_queues = 0;
+		return -EOPNOTSUPP;
 	}
 
 	/* All of these should have already been checked by ethtool before this

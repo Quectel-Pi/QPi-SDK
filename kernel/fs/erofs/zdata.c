@@ -372,6 +372,12 @@ int __init z_erofs_init_zip_subsystem(void)
 
 enum z_erofs_pclustermode {
 	Z_EROFS_PCLUSTER_INFLIGHT,
+
+enum z_erofs_pclustermode {
+	Z_EROFS_PCLUSTER_INFLIGHT,
+	/*
+	 * a weak form of Z_EROFS_PCLUSTER_FOLLOWED, the difference is that it
+	 * could be dispatched into bypass queue later due to uptodated managed
 	/*
 	 * a weak form of Z_EROFS_PCLUSTER_FOLLOWED, the difference is that it
 	 * could be dispatched into bypass queue later due to uptodated managed
@@ -623,6 +629,13 @@ static int z_erofs_register_pcluster(struct z_erofs_decompress_frontend *fe)
 
 	if (!(map->m_flags & EROFS_MAP_ENCODED) ||
 	    (!ztailpacking && !(map->m_pa >> PAGE_SHIFT))) {
+		return;
+	}
+
+	/* type 2, it belongs to an ongoing chain */
+	f->mode = Z_EROFS_PCLUSTER_INFLIGHT;
+}
+
 		DBG_BUGON(1);
 		return -EFSCORRUPTED;
 	}
@@ -1277,6 +1290,7 @@ static void z_erofs_decompress_kickoff(struct z_erofs_decompressqueue *io,
 				       int bios)
 {
 	struct erofs_sb_info *const sbi = EROFS_SB(io->sb);
+	int gfp_flag;
 
 	/* wake up the caller thread for sync decompression */
 	if (io->sync) {
@@ -1295,7 +1309,9 @@ static void z_erofs_decompress_kickoff(struct z_erofs_decompressqueue *io,
 			sbi->opt.sync_decompress = EROFS_SYNC_DECOMPRESS_FORCE_ON;
 		return;
 	}
+	gfp_flag = memalloc_noio_save();
 	z_erofs_decompressqueue_work(&io->u.work);
+	memalloc_noio_restore(gfp_flag);
 }
 
 static struct page *pickup_page_for_submission(struct z_erofs_pcluster *pcl,

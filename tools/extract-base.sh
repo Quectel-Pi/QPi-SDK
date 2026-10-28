@@ -46,4 +46,11 @@ done
 
 echo
 echo "底包已生成: $BASE_IMAGE_DIR"
+
+# package-file 兜底: 某些 update.img 解包后不带该文件, 缺了 afptool -pack 会失败
+if [ ! -f "$BASE_IMAGE_DIR/package-file" ] && [ -x "$TOOLS_DIR/gen-package-file.sh" ]; then
+    echo "[INFO] 解包结果缺少 package-file, 按 parameter.txt 自动生成 ..."
+    "$TOOLS_DIR/gen-package-file.sh" --dir "$BASE_IMAGE_DIR" || true
+fi
+
 echo "注意: rootfs.img 约 6GB, 已按 .gitignore 排除, 不入 git 仓库"

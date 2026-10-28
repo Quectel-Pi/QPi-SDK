@@ -42,6 +42,10 @@ CONFIG_FORCE_DPD_CALIB = n
 CONFIG_LOFT_CALIB = y
 endif
 
+ifeq ($(CONFIG_OOB), y)
+CONFIG_GPIO_SET = y
+endif
+
 ccflags-$(CONFIG_GPIO_WAKEUP) += -DCONFIG_GPIO_WAKEUP
 ccflags-$(CONFIG_M2D_OTA_AUTO_SUPPORT) += -DCONFIG_M2D_OTA_AUTO_SUPPORT
 ccflags-$(CONFIG_M2D_OTA_LZMA_SUPPORT) += -DCONFIG_M2D_OTA_LZMA_SUPPORT
@@ -65,12 +69,13 @@ ccflags-$(CONFIG_RADAR_OR_IR_DETECT) += -DCONFIG_RADAR_OR_IR_DETECT
 ccflags-$(CONFIG_FOR_IPCAM) += -DCONFIG_FOR_IPCAM
 ccflags-$(CONFIG_BAND_STEERING) += -DCONFIG_BAND_STEERING
 ccflags-$(CONFIG_PRBREQ_REPORT) += -DCONFIG_PRBREQ_REPORT
-
+ccflags-$(CONFIG_GPIO_SET) += -DCONFIG_GPIO_SET
 
 obj-m := $(MODULE_NAME).o
 $(MODULE_NAME)-y := \
 	aic8800dc_compat.o \
 	aic8800d80_compat.o \
+	aic8800d80n_compat.o \
 	aic8800d80x2_compat.o \
 	aic_bsp_main.o \
 	aic_bsp_driver.o \

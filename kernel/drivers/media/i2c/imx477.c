@@ -72,6 +72,7 @@ struct imx477 {
 	struct v4l2_ctrl *exposure;
 	struct v4l2_ctrl *analogue_gain;
 	struct v4l2_ctrl *vblank;
+	struct v4l2_ctrl *hblank;
 	struct v4l2_ctrl *link_freq;
 	struct v4l2_ctrl *pixel_rate;
 	const struct imx477_mode *cur_mode;
@@ -245,7 +246,8 @@ static int imx477_set_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct imx477 *imx477 = container_of(ctrl->handler, struct imx477,
 					      ctrl_handler);
-	u32 vts = imx477->cur_mode->vts + imx477->vblank->val;
+	/* V4L2 convention: vts = height + vblank (not mode->vts + vblank) */
+	u32 vts = imx477->cur_mode->height + imx477->vblank->val;
 	int ret = 0;
 
 	if (!imx477->streaming)
@@ -289,7 +291,7 @@ static int imx477_start_stream(struct imx477 *imx477)
 	if (ret)
 		return ret;
 
-	ret = imx477_set_vts(imx477, mode->vts + imx477->vblank->val);
+	ret = imx477_set_vts(imx477, mode->height + imx477->vblank->val);
 	if (ret)
 		return ret;
 	ret = imx477_set_exposure(imx477, imx477->exposure->val);
@@ -535,6 +537,8 @@ static int imx477_probe(struct i2c_client *client,
 	struct imx477 *imx477;
 	struct v4l2_subdev *sd;
 	u32 index;
+	s64 h_blank, v_blank;
+	char facing[2] = { 0 };
 	int ret;
 
 	imx477 = devm_kzalloc(dev, sizeof(*imx477), GFP_KERNEL);
@@ -554,6 +558,18 @@ static int imx477_probe(struct i2c_client *client,
 		return dev_err_probe(dev, -EINVAL, "missing module information\n");
 	imx477->module_index = index;
 
+	/*
+	 * rkaiq parse_module_info() only accepts a single-letter facing
+	 * ("b"/"f") in the media entity name, e.g. m01_b_imx477 5-001a.
+	 * Convert the DTS "rockchip,camera-module-facing" string ("back"/
+	 * "front") the same way imx219.c does, otherwise rkaiq_3A_server
+	 * fails with "parse sensor entity name ... error".
+	 */
+	if (!strcmp(imx477->module_facing, "back"))
+		facing[0] = 'b';
+	else
+		facing[0] = 'f';
+
 	imx477->xvclk = devm_clk_get(dev, "xvclk");
 	if (IS_ERR(imx477->xvclk))
 		return dev_err_probe(dev, PTR_ERR(imx477->xvclk), "failed to get xvclk\n");
@@ -571,7 +587,7 @@ static int imx477_probe(struct i2c_client *client,
 		return dev_err_probe(dev, ret, "failed to get supplies\n");
 
 	mutex_init(&imx477->mutex);
-	v4l2_ctrl_handler_init(&imx477->ctrl_handler, 5);
+	v4l2_ctrl_handler_init(&imx477->ctrl_handler, 6);
 	imx477->ctrl_handler.lock = &imx477->mutex;
 	v4l2_i2c_subdev_init(&imx477->subdev, client, &imx477_subdev_ops);
 	sd = &imx477->subdev;
@@ -583,8 +599,26 @@ static int imx477_probe(struct i2c_client *client,
 	imx477->pixel_rate = v4l2_ctrl_new_std(&imx477->ctrl_handler, NULL,
 		V4L2_CID_PIXEL_RATE, IMX477_PIXEL_RATE, IMX477_PIXEL_RATE, 1,
 		IMX477_PIXEL_RATE);
+	/*
+	 * VBLANK: min/default = this mode's inherent (vts - height), so the
+	 * control can never push VTS below mode->vts. AIQ derives the frame
+	 * length from default_value (line_periods_per_field = default + height).
+	 */
+	v_blank = imx477->cur_mode->vts - imx477->cur_mode->height;
 	imx477->vblank = v4l2_ctrl_new_std(&imx477->ctrl_handler, &imx477_ctrl_ops,
-		V4L2_CID_VBLANK, 0, IMX477_VTS_MAX - imx477->cur_mode->vts, 1, 0);
+		V4L2_CID_VBLANK, v_blank,
+		IMX477_VTS_MAX - imx477->cur_mode->height, 1, v_blank);
+	/*
+	 * HBLANK: AIQ's SensorHw_getBlank() starts by querying V4L2_CID_HBLANK
+	 * and has no fallback, so a missing control aborts 3A init entirely
+	 * (AE never runs, image stays black). hts is fixed for all modes we
+	 * expose, so make it a read-only constant (same as imx415.c).
+	 */
+	h_blank = imx477->cur_mode->hts - imx477->cur_mode->width;
+	imx477->hblank = v4l2_ctrl_new_std(&imx477->ctrl_handler, NULL,
+		V4L2_CID_HBLANK, h_blank, h_blank, 1, h_blank);
+	if (imx477->hblank)
+		imx477->hblank->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 	imx477->exposure = v4l2_ctrl_new_std(&imx477->ctrl_handler, &imx477_ctrl_ops,
 		V4L2_CID_EXPOSURE, IMX477_EXPOSURE_MIN,
 		imx477->cur_mode->vts - IMX477_EXPOSURE_MARGIN, 1,
@@ -612,7 +646,7 @@ static int imx477_probe(struct i2c_client *client,
 		goto err_entity;
 
 	snprintf(sd->name, sizeof(sd->name), "m%02d_%s_%s %s", imx477->module_index,
-		 imx477->module_facing, IMX477_NAME, dev_name(dev));
+		 facing, IMX477_NAME, dev_name(dev));
 	ret = v4l2_async_register_subdev_sensor(sd);
 	if (ret)
 		goto err_entity;

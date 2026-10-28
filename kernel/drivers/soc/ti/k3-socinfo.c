@@ -73,7 +73,7 @@ static int k3_chipinfo_probe(struct platform_device *pdev)
 	u32 mfg;
 	int ret;
 
-	regmap = device_node_to_regmap(node);
+	regmap = devm_regmap_init_mmio(dev, base, &k3_chipinfo_regmap_cfg);
 	if (IS_ERR(regmap))
 		return PTR_ERR(regmap);
 

@@ -4,10 +4,15 @@ BOARD=M2
 SOC=RK3576
 ROOTFS=Debian arm64
 KERNEL=Linux 6.1.118
-FIRMWARE_VERSION=QSM610ZAPWFRD1A01_BD01BP01K0M01_QDP_LP6.1.118.01.002
+# 底包版本以实际 rootfs /etc/quectel-release 为准，下载资源可独立升级。
+FIRMWARE_VERSION=QSM610ZAPWFRD1A01_BD01BP01K0M01_QDP_LP6.1.118.01.114
+UPSTREAM_KERNEL_COMMIT=b1eaf88c5b1c554fabce8e5daa4cbc8fc9faa6f3
+UBOOT_IMAGE=tools/boot/uboot-m2.img
+UBOOT_BUILD="Oct 26 2026 - 11:24:06 +0800"
+UBOOT_SHA256=014ee0f8adfa35297c12a0e9d684ed8de43bb8d49987a5e588ae00321b595e55
 KERNEL_DTS=rk3576-quectel-pi-m2-linux
 DEFCONFIG=rockchip_linux_defconfig
-FRAGMENTS="cma.config quectel-pwm-fan.config quectel-overlays.config"
+FRAGMENTS="rk3576.config cma.config quectel-pwm-fan.config quectel-container.config quectel-exfat.config quectel-joystick.config quectel-m2-overlay.config rockchip_rt.config rockchip_panfrost.config quectel-overlays.config"
 FIT_ITS=boot-debian.its
 BOOT_FORMAT=FIT (U-Boot, magic 0xd00dfeed)
 SECURE_BOOT=disabled
@@ -24,4 +29,4 @@ FLASH_TOOLS_WINDOWS=tools/flash/windows/upgrade_tool.exe
 FLASH_TOOLS_WINDOWS_GUI=tools/flash/windows/RKDevTool/RKDevTool_Release/RKDevTool.exe
 UPDATE_IMG_SUPPORTED=yes
 
-GENERATED_DATE=2026-08-27
+GENERATED_DATE=2026-10-28

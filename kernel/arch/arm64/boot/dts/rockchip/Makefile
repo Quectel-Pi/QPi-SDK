@@ -299,9 +299,9 @@ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3576-quectel-pi-smarc-linux.dtb
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3576-quectel-pi-m2-linux.dtb
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3576-quectel-pi-m2-i2c3-disable.dtbo
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3576-quectel-pi-m2-i2c7-disable.dtbo
-dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3576-quectel-pi-m2-pwm2-disable.dtbo
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3576-quectel-pi-m2-spi1-disable.dtbo
 dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3576-quectel-pi-m2-uart1-disable.dtbo
+dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3576-quectel-pi-m2-can0-enable.dtbo
 # SMARC GPIO MUX DTBOs (预留)
 # dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3576-quectel-pi-smarc-usb0_sel-release.dtbo
 # dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3576-quectel-pi-smarc-mipi_lvds-release.dtbo

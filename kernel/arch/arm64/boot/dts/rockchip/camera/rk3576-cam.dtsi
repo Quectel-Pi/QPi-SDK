@@ -48,6 +48,20 @@
 				<3 RK_PD6 RK_FUNC_GPIO &pcfg_pull_none>,
 				<3 RK_PD4 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
+
+		cam3_reset_active: cam3-reset-active {
+			rockchip,pins =
+				<3 RK_PD6 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+		cam3_reset_sleep: cam3-reset-sleep {
+			rockchip,pins =
+				<3 RK_PD6 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		cam3_pwr_active: cam3-pwr-active {
+			rockchip,pins =
+				<2 RK_PD6 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
 	};
 };
 
@@ -395,6 +409,42 @@
 
 /*----------cam2 start----------*/
 
+&i2c2 {
+	gc08a3: gc08a3@31 {
+		compatible = "galaxycore,gc08a3";
+		status = "okay";
+		reg = <0x31>;
+
+		power-domains = <&power RK3576_PD_VI>;
+		avdd-supply = <&vcc_camera>;
+		dovdd-supply = <&vcc_camera>;
+		dvdd-supply = <&vcc_camera>;
+
+		clocks = <&cru CLK_MIPI_CAMERAOUT_M2>;
+		assigned-clocks = <&cru CLK_MIPI_CAMERAOUT_M2>;
+		assigned-clock-rates = <24000000>;
+		clock-names = "xvclk";
+		pinctrl-names = "default","rockchip,camera_default","rockchip,camera_sleep";
+		pinctrl-0 = <&cam_clk2m0_clk2>;
+		pinctrl-1 = <&cam3_reset_active &cam3_pwr_active>;
+		pinctrl-2 = <&cam3_reset_sleep>;
+		power-gpios = <&gpio2 RK_PD6 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&gpio3 RK_PD6 GPIO_ACTIVE_HIGH>;
+
+		rockchip,camera-module-index = <2>;
+		rockchip,camera-module-facing = "front";
+		rockchip,camera-module-name = "GC08A3";
+		rockchip,camera-module-lens-name = "default";
+		port {
+			gc08a3_out2: endpoint {
+				remote-endpoint = <&mipi_in_ucam5>;
+				data-lanes = <1 2 3 4>;
+				link-frequencies = /bits/ 64 <350000000>;
+			};
+		};
+	};
+};
+
 &i2c5 {
 	status = "okay";
 	pinctrl-0 = <&i2c5m3_xfer>;
@@ -481,7 +531,7 @@
 };
 
 &csi2_dphy3 {
-	status = "disabled";
+	status = "okay";
 
 	ports {
 		#address-cells = <1>;
@@ -494,7 +544,7 @@
 
 			mipi_in_ucam5: endpoint@1 {
 				reg = <1>;
-				remote-endpoint = <&s5k3l6b_out2>;
+				remote-endpoint = <&gc08a3_out2>;
 				data-lanes = <1 2 3 4>;
 			};
 
@@ -519,7 +569,7 @@
 };
 
 &mipi3_csi2 {
-	status = "disabled";
+	status = "okay";
 
 	ports {
 		#address-cells = <1>;
@@ -550,7 +600,8 @@
 };
 
 &rkcif_mipi_lvds3 {
-	status = "disabled";
+	status = "okay";
+	no-detect-group-sync;
 
 	port {
 		cif_mipi_in2: endpoint {
@@ -560,7 +611,7 @@
 };
 
 &rkcif_mipi_lvds3_sditf {
-	status = "disabled";
+	status = "okay";
 
 	port {
 		mipi3_lvds_sditf: endpoint {
@@ -570,7 +621,7 @@
 };
 
 &rkisp_vir2 {
-	status = "disabled";
+	status = "okay";
 
 	port {
 		#address-cells = <1>;
@@ -584,11 +635,11 @@
 };
 
 &rkisp_vir2_sditf {
-	status = "disabled";
+	status = "okay";
 };
 
 &rkvpss_vir2 {
-	status = "disabled";
+	status = "okay";
 };
 
 /*----------cam2 end------------*/

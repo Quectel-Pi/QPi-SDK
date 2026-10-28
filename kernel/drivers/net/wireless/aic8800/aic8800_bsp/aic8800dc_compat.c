@@ -2060,10 +2060,6 @@ void system_config_8800dc(struct aic_sdio_dev *rwnx_hw)
         if (p_syscfg_msk_tbl[cnt][0] == 0x00000000) {
             break;
         } else if (p_syscfg_msk_tbl[cnt][0] == 0x70001000) {
-            AICWFDBG(LOGINFO, "[ZHS] p_syscfg_msk_tbl: 0x%x : 0x%x : 0x%x\n",
-                p_syscfg_msk_tbl[cnt][0],
-                p_syscfg_msk_tbl[cnt][1],
-                p_syscfg_msk_tbl[cnt][2]);
             if (chip_mcu_id == 0) {
                 p_syscfg_msk_tbl[cnt][1] |= ((0x1 << 8) | (0x1 << 15)); // mask
                 p_syscfg_msk_tbl[cnt][2] |= ((0x1 << 8) | (0x1 << 15));

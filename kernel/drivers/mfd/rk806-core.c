@@ -7,6 +7,7 @@
  * Author: Xu Shengfei <xsf@rock-chips.com>
  */
 
+#include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/mfd/core.h>
 #include <linux/mfd/rk806.h>
@@ -14,6 +15,7 @@
 #include <linux/of_device.h>
 #include <linux/of_gpio.h>
 #include <linux/pinctrl/consumer.h>
+#include <linux/reboot.h>
 #include <linux/spi/spi.h>
 
 #define TSD_TEMP_140	0x00
@@ -402,6 +404,122 @@ EXPORT_SYMBOL_GPL(rk806_regmap_config);
 static struct kobject *rk806_kobj[2];
 static struct rk806 *rk806_master;
 static struct rk806 *rk806_slaver;
+
+/*
+ * Reboot commands that request a specific boot mode. These names must match
+ * the "mode-*" properties of the reboot-mode node (see rk3576.dtsi):
+ * mode-bootloader, mode-loader, mode-fastboot, mode-recovery, mode-ums,
+ * mode-charge, mode-quiescent, mode-winusb.
+ *
+ * Such reboots rely on the boot-mode magic written to PMU0_GRF+0x40 by
+ * syscon-reboot-mode surviving the reset, because BootROM reads that register
+ * to decide whether to enter download/recovery/... instead of booting Linux.
+ */
+static const char * const rk806_bootmode_reboot_cmds[] = {
+	"bootloader", "loader", "fastboot", "recovery",
+	"ums", "charge", "quiescent", "winusb",
+};
+
+/*
+ * Returns true if cmd asks for a specific boot mode rather than a plain
+ * restart. The reboot-mode driver matches these names with strcmp() against
+ * the "mode-*" property names, so compare exactly.
+ */
+static bool rk806_is_bootmode_reboot(const char *cmd)
+{
+	int i;
+
+	if (!cmd)
+		return false;
+
+	for (i = 0; i < ARRAY_SIZE(rk806_bootmode_reboot_cmds); i++)
+		if (!strcmp(cmd, rk806_bootmode_reboot_cmds[i]))
+			return true;
+
+	return false;
+}
+
+/*
+ * Reboot notifier for boards where PMIC is RK806:
+ * RK3576's CRU soft reset alone (priority 128 restart handler) may
+ * occasionally fail to bring DDR/power domains back cleanly on reboot.
+ *
+ * NOTE: we must NOT use a restart handler here - machine_restart() runs
+ * restart handlers with local interrupts DISABLED, where i2c/regmap
+ * transfers and pinctrl state changes cannot complete. A reboot notifier
+ * (registered on reboot_notifier_list) is called earlier in
+ * kernel_restart_prepare(), before device_shutdown(), with interrupts
+ * still enabled, so i2c and pinctrl both work.
+ *
+ * We switch DVS1 (gpio_pwrctrl1) to the pmic-reset function and assert
+ * DEV_RST: with pmic-reset-func = <2> the PMIC pulls RESETB low for 5ms,
+ * doing a full power-domain reset (reliable DDR re-init on reboot).
+ *
+ * NOTE: the PMIC power-cycle must be skipped for boot-mode reboots
+ * (e.g. "reboot loader"). Since this notifier runs at priority 192 while
+ * the reboot-mode notifier runs at the default priority 0, it would
+ * otherwise pre-empt the boot-mode magic write; and even if the magic made
+ * it in, pulling RESETB resets the power domains so PMU0_GRF is cleared
+ * (BL31 then reports reset status 0x0, a power-on reset) and BootROM boots
+ * Linux normally instead of entering the requested mode. Let the CRU soft
+ * reset handle those, exactly as before the PMIC reset was introduced.
+ */
+static int rk806_reboot_notify(struct notifier_block *this,
+			       unsigned long code, void *cmd)
+{
+	struct rk806 *rk806 = rk806_master;
+	int ret, rst_fun;
+
+	if (code != SYS_RESTART)
+		return NOTIFY_DONE;
+
+	if (!rk806)
+		return NOTIFY_DONE;
+
+	/*
+	 * Keep the boot-mode magic alive: skip the PMIC power-cycle so the
+	 * CRU soft reset path runs and the requested boot mode is preserved.
+	 */
+	if (rk806_is_bootmode_reboot(cmd)) {
+		dev_info(rk806->dev,
+			 "reboot: '%s' requests a boot mode, skip PMIC reset to preserve boot-mode magic\n",
+			 (const char *)cmd);
+		return NOTIFY_DONE;
+	}
+
+	rst_fun = rk806_field_read(rk806, RST_FUN);
+	dev_emerg(rk806->dev, "reboot: assert PMIC reset (DEV_RST, pmic-reset-func=%d)\n",
+		  rst_fun);
+
+	/* Put DVS1 (gpio_pwrctrl1) into reset function (pin_fun3) */
+	if (rk806->pins && rk806->pins->reset) {
+		ret = pinctrl_select_state(rk806->pins->p, rk806->pins->reset);
+		if (ret)
+			dev_emerg(rk806->dev,
+				  "reboot: failed to select pmic-reset state: %d\n", ret);
+		else
+			dev_emerg(rk806->dev, "reboot: pmic-reset pinctrl selected\n");
+	} else {
+		dev_emerg(rk806->dev, "reboot: no pmic-reset pinctrl state!\n");
+	}
+
+	/* DEV_RST=1: reset power-off registers; with func=2 also pull RESETB */
+	ret = rk806_field_write(rk806, DEV_RST, 1);
+	if (ret)
+		dev_emerg(rk806->dev, "reboot: failed to write DEV_RST: %d\n", ret);
+	else
+		dev_emerg(rk806->dev, "reboot: DEV_RST written, waiting 20ms\n");
+
+	/* Wait for PMIC to take over the reset */
+	mdelay(20);
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block rk806_reboot_nb = {
+	.notifier_call = rk806_reboot_notify,
+	.priority = 192,
+};
 
 static ssize_t rk806_master_store(struct device *dev,
 				  struct device_attribute *attr,
@@ -951,6 +1069,7 @@ int rk806_device_init(struct rk806 *rk806)
 			else
 				rk806_master = rk806;
 		}
+		register_reboot_notifier(&rk806_reboot_nb);
 	} else {
 		rk806_kobj[1] = kobject_create_and_add(np->name, NULL);
 		if (rk806_kobj[1]) {
@@ -997,6 +1116,7 @@ int rk806_device_exit(struct rk806 *rk806)
 			sysfs_remove_file(rk806_kobj[0], &rk806_master_attrs.attr);
 			kobject_put(rk806_kobj[0]);
 		}
+		unregister_reboot_notifier(&rk806_reboot_nb);
 	} else {
 		if (rk806_kobj[1]) {
 			sysfs_remove_file(rk806_kobj[1], &rk806_slaver_attrs.attr);

@@ -230,6 +230,8 @@ struct panel_simple {
 	struct i2c_client *ws_bl;
 	bool ws_bl_handoff;
 	bool ws_bl_present;
+	bool ws_auto;
+	bool ws_4_3;
 
 	struct gpio_desc *enable_gpio;
 	struct gpio_desc *reset_gpio;
@@ -261,7 +263,8 @@ static bool panel_simple_is_waveshare(struct panel_simple *panel)
 {
 	struct device *dev = panel->base.dev;
 
-	return dev && of_device_is_compatible(dev->of_node, "waveshare,dsi-lcd-c");
+	return dev && (of_device_is_compatible(dev->of_node, "waveshare,dsi-lcd-c") ||
+		       of_device_is_compatible(dev->of_node, "waveshare,m2-auto-panel"));
 }
 
 static bool panel_simple_waveshare_present(struct panel_simple *panel)
@@ -296,6 +299,9 @@ static int panel_simple_ws_write_prepare_seq(struct panel_simple *panel)
 {
 	size_t i;
 	int err;
+
+	if (panel->ws_4_3)
+		return 0;
 
 	for (i = 0; i < ARRAY_SIZE(panel_simple_ws_prepare_seq); i++) {
 		err = panel_simple_ws_write(panel,
@@ -332,6 +338,9 @@ static int panel_simple_ws_enable_gate(struct drm_panel *panel,
 {
 	struct panel_simple *p = to_panel_simple(panel);
 	int err;
+
+	if (p->ws_4_3)
+		return 0;
 
 	if (p->ws_bl_handoff) {
 		/* U-Boot 已打开 0xad/0xaa，kernel 阶段避免重复写导致瞬黑。 */
@@ -375,6 +384,13 @@ static void panel_simple_ws_detect_presence(struct panel_simple *panel,
 {
 	int ret;
 
+	if (panel->ws_auto) {
+		panel->ws_bl_present = ws_panel_is_present();
+		if (!panel->ws_bl_present)
+			panel_simple_ws_power_off_absent(panel, dev);
+		return;
+	}
+
 	ret = ws_panel_detect_presence();
 	if (ret < 0) {
 		panel->ws_bl_present = false;
@@ -399,15 +415,30 @@ static int panel_simple_attach_waveshare_backlight(struct panel_simple *panel,
 	struct device_node *np;
 	int err;
 
-	if (!of_device_is_compatible(dev->of_node, "waveshare,dsi-lcd-c"))
+	panel->ws_auto = of_device_is_compatible(dev->of_node, "waveshare,m2-auto-panel");
+	if (!panel->ws_auto &&
+	    !of_device_is_compatible(dev->of_node, "waveshare,dsi-lcd-c"))
 		return 0;
+	if (panel->ws_auto)
+		panel->ws_4_3 = ws_panel_get_touch_address() == WS_TOUCH_4_3INCH;
+
+	if (panel->ws_4_3) {
+		np = of_parse_phandle(dev->of_node, "waveshare,4.3-profile", 0);
+		if (!np)
+			return -EINVAL;
+		err = of_drm_get_panel_orientation(np, &panel->orientation);
+		of_node_put(np);
+		if (err)
+			return err;
+	}
 
 	np = of_parse_phandle(dev->of_node, "backlight", 0);
 	if (!np)
 		return dev_err_probe(dev, -EINVAL,
 				     "waveshare panel missing backlight phandle\n");
 
-	if (!of_device_is_compatible(np, "waveshare-bl")) {
+	if (!of_device_is_compatible(np, "waveshare-bl") &&
+	    !of_device_is_compatible(np, "waveshare,m2-auto-backlight")) {
 		of_node_put(np);
 		return dev_err_probe(dev, -EINVAL,
 				     "waveshare panel requires waveshare-bl backlight\n");
@@ -435,7 +466,8 @@ static int panel_simple_attach_waveshare_backlight(struct panel_simple *panel,
 		dev_info(dev, "waveshare backlight attached: i2c-%d addr=0x%02x\n",
 			 panel->ws_bl->adapter->nr, panel->ws_bl->addr);
 
-		panel->ws_bl_handoff = panel_simple_ws_handoff_from_uboot(dev);
+		panel->ws_bl_handoff = panel->ws_auto ? ws_panel_has_handoff() :
+			panel_simple_ws_handoff_from_uboot(dev);
 		panel_simple_ws_detect_presence(panel, dev);
 	}
 
@@ -550,8 +582,11 @@ static int panel_simple_xfer_dsi_cmd_seq(struct panel_simple *panel,
 			return -EINVAL;
 		}
 
-		if (err < 0)
+		if (err < 0) {
 			dev_err(dev, "failed to write dcs cmd: %d\n", err);
+			if (panel->ws_4_3)
+				return err;
+		}
 
 		if (cmd->header.delay)
 			panel_simple_msleep(cmd->header.delay);
@@ -743,6 +778,13 @@ int panel_simple_loader_protect(struct drm_panel *panel)
 		return 0;
 	}
 
+	if (p->ws_auto && !p->ws_bl_handoff) {
+		err = drm_panel_prepare(panel);
+		if (err)
+			return err;
+		return drm_panel_enable(panel);
+	}
+
 	err = panel_simple_regulator_enable(p);
 	if (err < 0) {
 		dev_err(panel->dev, "failed to enable supply: %d\n", err);
@@ -796,7 +838,7 @@ static int panel_simple_disable(struct drm_panel *panel)
 	if (!p->enabled)
 		return 0;
 
-	if (p->ws_bl && panel_simple_waveshare_present(p)) {
+	if (p->ws_bl && !p->ws_4_3 && panel_simple_waveshare_present(p)) {
 		dev_info(panel->dev, "waveshare disable: gate off\n");
 		err = panel_simple_ws_write(p, PANEL_SIMPLE_WS_GATE_REG, 0x00);
 		if (err < 0)
@@ -810,6 +852,9 @@ static int panel_simple_disable(struct drm_panel *panel)
 		 */
 		p->ws_bl_handoff = false;
 	}
+
+	if (p->ws_auto)
+		p->ws_bl_handoff = false;
 
 	if (p->desc->delay.disable)
 		panel_simple_msleep(p->desc->delay.disable);
@@ -827,6 +872,9 @@ static int panel_simple_unprepare(struct drm_panel *panel)
 	if (!p->prepared)
 		return 0;
 
+	if (p->ws_auto)
+		p->ws_bl_handoff = false;
+
 	if (p->desc->exit_seq) {
 		if (p->desc->cmd_type == CMD_TYPE_SPI) {
 			if (panel_simple_xfer_spi_cmd_seq(p, p->desc->exit_seq)) {
@@ -837,6 +885,13 @@ static int panel_simple_unprepare(struct drm_panel *panel)
 			if (p->dsi)
 				panel_simple_xfer_dsi_cmd_seq(p, p->desc->exit_seq);
 		}
+	}
+
+	if (p->ws_4_3) {
+		int err = ws_panel_unprepare_4_3();
+
+		if (err)
+			dev_err(panel->dev, "failed to power off 4.3-inch panel: %d\n", err);
 	}
 
 	gpiod_direction_output(p->reset_gpio, 1);
@@ -873,6 +928,20 @@ static int panel_simple_prepare(struct drm_panel *panel)
 		return err;
 	}
 
+	/* Supplies are held, and U-Boot initialized this exact detected profile. */
+	if (p->ws_auto && p->ws_bl_handoff) {
+		p->prepared = true;
+		return 0;
+	}
+
+	if (p->ws_4_3) {
+		err = ws_panel_prepare_4_3();
+		if (err) {
+			panel_simple_regulator_disable(p);
+			return err;
+		}
+	}
+
 	if (p->ws_bl)
 		dev_info(panel->dev,
 			 "waveshare prepare: enable_gpio=1 reset pulse delays p=%ums r=%ums i=%ums\n",
@@ -901,8 +970,14 @@ static int panel_simple_prepare(struct drm_panel *panel)
 				return -EINVAL;
 			}
 		} else {
-			if (p->dsi)
-				panel_simple_xfer_dsi_cmd_seq(p, p->desc->init_seq);
+			if (p->dsi) {
+				err = panel_simple_xfer_dsi_cmd_seq(p, p->desc->init_seq);
+				if (err && p->ws_4_3) {
+					ws_panel_unprepare_4_3();
+					panel_simple_regulator_disable(p);
+					return err;
+				}
+			}
 		}
 	}
 
@@ -4987,9 +5062,9 @@ static bool of_child_node_is_present(const struct device_node *node,
 }
 
 static int panel_simple_of_get_desc_data(struct device *dev,
+					 struct device_node *np,
 					 struct panel_desc *desc)
 {
-	struct device_node *np = dev->of_node;
 	u32 bus_flags;
 	const void *data;
 	int len;
@@ -5092,7 +5167,7 @@ static int panel_simple_platform_probe(struct platform_device *pdev)
 		if (!d)
 			return -ENOMEM;
 
-		err = panel_simple_of_get_desc_data(dev, d);
+		err = panel_simple_of_get_desc_data(dev, dev->of_node, d);
 		if (err) {
 			dev_err(dev, "failed to get desc data: %d\n", err);
 			return err;
@@ -5343,6 +5418,9 @@ static const struct of_device_id dsi_of_match[] = {
 	}, {
 		.compatible = "waveshare,dsi-lcd-c",
 		.data = NULL,
+	}, {
+		.compatible = "waveshare,m2-auto-panel",
+		.data = NULL,
 	},
 	#ifndef CONFIG_DRM_PANEL_SIMPLE_OF_ONLY
 	{
@@ -5380,9 +5458,24 @@ static int panel_simple_dsi_of_get_desc_data(struct device *dev,
 	u32 val;
 	int err;
 
-	err = panel_simple_of_get_desc_data(dev, &desc->desc);
+	if (of_device_is_compatible(np, "waveshare,m2-auto-panel")) {
+		err = ws_panel_get_touch_address();
+		if (err < 0)
+			return dev_err_probe(dev, err, "waiting for Waveshare identification\n");
+		if (err == WS_TOUCH_4_3INCH) {
+			np = of_parse_phandle(np, "waveshare,4.3-profile", 0);
+			if (!np)
+				return -EINVAL;
+		} else {
+			of_node_get(np);
+		}
+	} else {
+		of_node_get(np);
+	}
+
+	err = panel_simple_of_get_desc_data(dev, np, &desc->desc);
 	if (err)
-		return err;
+		goto out;
 
 	desc->desc.connector_type = DRM_MODE_CONNECTOR_DSI;
 
@@ -5393,7 +5486,9 @@ static int panel_simple_dsi_of_get_desc_data(struct device *dev,
 	if (!of_property_read_u32(np, "dsi,lanes", &val))
 		desc->lanes = val;
 
-	return 0;
+out:
+	of_node_put(np);
+	return err;
 }
 
 static int panel_simple_dsi_probe(struct mipi_dsi_device *dsi)
@@ -5559,7 +5654,7 @@ static int panel_simple_spi_probe(struct spi_device *spi)
 		if (!d)
 			return -ENOMEM;
 
-		ret = panel_simple_of_get_desc_data(dev, d);
+		ret = panel_simple_of_get_desc_data(dev, dev->of_node, d);
 		if (ret) {
 			dev_err(dev, "failed to get desc data: %d\n", ret);
 			return ret;

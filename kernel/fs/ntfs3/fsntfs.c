@@ -1972,16 +1972,19 @@ int ntfs_get_security_by_id(struct ntfs_sb_info *sbi, __le32 security_id,
 		goto out;
 	}
 
-	root_sii = indx_get_root(indx, ni, NULL, NULL);
-	if (!root_sii) {
+	root_sdh = resident_data_ex(attr, sizeof(struct INDEX_ROOT));
+	if (root_sdh->type != ATTR_ZERO ||
+	    root_sdh->rule != NTFS_COLLATION_TYPE_SECURITY_HASH ||
+	    offsetof(struct INDEX_ROOT, ihdr) + root_sdh->ihdr.used > attr->res.data_size) {
 		err = -EINVAL;
 		goto out;
 	}
 
-	/* Try to find this SECURITY descriptor in SII indexes. */
-	err = indx_find(indx, ni, root_sii, &security_id, sizeof(security_id),
-			NULL, &diff, (struct NTFS_DE **)&sii_e, fnd_sii);
-	if (err)
+	root_sii = resident_data_ex(attr, sizeof(struct INDEX_ROOT));
+	if (root_sii->type != ATTR_ZERO ||
+	    root_sii->rule != NTFS_COLLATION_TYPE_UINT ||
+	    offsetof(struct INDEX_ROOT, ihdr) + root_sii->ihdr.used > attr->res.data_size) {
+		err = -EINVAL;
 		goto out;
 
 	if (diff)

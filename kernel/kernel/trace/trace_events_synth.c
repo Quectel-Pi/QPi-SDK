@@ -44,12 +44,22 @@ enum { ERRORS };
 
 static const char *err_text[] = { ERRORS };
 
-static DEFINE_MUTEX(lastcmd_mutex);
+DEFINE_MUTEX(lastcmd_mutex);
 static char *last_cmd;
 
 static int errpos(const char *str)
 {
 	int ret = 0;
+
+	mutex_lock(&lastcmd_mutex);
+	if (!str || !last_cmd)
+		goto out;
+
+	ret = err_pos(last_cmd, str);
+ out:
+	mutex_unlock(&lastcmd_mutex);
+	return ret;
+}
 
 	mutex_lock(&lastcmd_mutex);
 	if (!str || !last_cmd)

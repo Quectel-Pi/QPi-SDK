@@ -645,6 +645,26 @@ static int dw_mci_rockchip_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	/*
+	 * EXPERIMENT: 强制使能 SD 槽 UHS-I caps（绕过 dts 中 sd-uhs-sdr104
+	 * 未生效的问题），用于验证 UHS-I 卡能否自动协商 1.8V 信号。
+	 * 注意：仅用于测试，正式方案应修 dts/u-boot dtb 加载路径。
+	 */
+	{
+		struct dw_mci *host = platform_get_drvdata(pdev);
+
+		if (host && host->slot && host->slot->mmc) {
+			host->slot->mmc->caps |= MMC_CAP_UHS_SDR12 |
+						MMC_CAP_UHS_SDR25 |
+						MMC_CAP_UHS_SDR50 |
+						MMC_CAP_UHS_SDR104 |
+						MMC_CAP_UHS_DDR50;
+			dev_info(&pdev->dev,
+				 "EXPERIMENT: force UHS caps on SD slot (caps=0x%x)\n",
+				 host->slot->mmc->caps);
+		}
+	}
+
 	if (use_rpm)
 		pm_runtime_put_autosuspend(&pdev->dev);
 

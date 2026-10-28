@@ -101,7 +101,6 @@ struct vfio_dma {
 	struct rb_root		pfn_list;	/* Ex-user pinned pfn list */
 	unsigned long		*bitmap;
 	struct mm_struct	*mm;
-	size_t			locked_vm;
 };
 
 struct vfio_batch {
@@ -1661,6 +1660,21 @@ static int vfio_dma_do_map(struct vfio_iommu *iommu,
 	if (!size || (size | iova | vaddr) & (pgsize - 1)) {
 		ret = -EINVAL;
 		goto out_unlock;
+	 * against the locked memory limit and we need to be able to do both
+	 * outside of this call path as pinning can be asynchronous via the
+	 * external interfaces for mdev devices.  RLIMIT_MEMLOCK requires a
+	 * task_struct. Save the group_leader so that all DMA tracking uses
+	 * the same task, to make debugging easier.  VM locked pages requires
+	 * an mm_struct, so grab the mm in case the task dies.
+	 */
+	get_task_struct(current->group_leader);
+	dma->task = current->group_leader;
+	dma->lock_cap = capable(CAP_IPC_LOCK);
+	dma->mm = current->mm;
+	mmgrab(dma->mm);
+
+	dma->pfn_list = RB_ROOT;
+
 	}
 
 	/* Don't allow IOVA or virtual address wrap */

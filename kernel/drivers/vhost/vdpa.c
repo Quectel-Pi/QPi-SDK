@@ -69,6 +69,12 @@ static void vhost_vdpa_iotlb_unmap(struct vhost_vdpa *v,
 				   struct vhost_iotlb *iotlb, u64 start,
 				   u64 last, u32 asid);
 
+static dev_t vhost_vdpa_major;
+
+static void vhost_vdpa_iotlb_unmap(struct vhost_vdpa *v,
+				   struct vhost_iotlb *iotlb, u64 start,
+				   u64 last, u32 asid);
+
 static inline u32 iotlb_to_asid(struct vhost_iotlb *iotlb)
 {
 	struct vhost_vdpa_as *as = container_of(iotlb, struct
@@ -735,6 +741,17 @@ static void vhost_vdpa_general_unmap(struct vhost_vdpa *v,
 		iommu_unmap(v->domain, map->start, map->size);
 	}
 }
+static void vhost_vdpa_general_unmap(struct vhost_vdpa *v,
+				     struct vhost_iotlb_map *map, u32 asid)
+{
+	struct vdpa_device *vdpa = v->vdpa;
+	const struct vdpa_config_ops *ops = vdpa->config;
+	if (ops->dma_map) {
+		ops->dma_unmap(vdpa, asid, map->start, map->size);
+	} else if (ops->set_map == NULL) {
+		iommu_unmap(v->domain, map->start, map->size);
+	}
+}
 
 static void vhost_vdpa_pa_unmap(struct vhost_vdpa *v, struct vhost_iotlb *iotlb,
 				u64 start, u64 last, u32 asid)
@@ -817,17 +834,15 @@ static int vhost_vdpa_map(struct vhost_vdpa *v, struct vhost_iotlb *iotlb,
 	u32 asid = iotlb_to_asid(iotlb);
 	int r = 0;
 
-	r = vhost_iotlb_add_range_ctx(iotlb, iova, iova + size - 1,
-				      pa, perm, opaque);
-	if (r)
-		return r;
+	vhost_vdpa_iotlb_unmap(v, iotlb, iova, iova + size - 1, asid);
 
-	if (ops->dma_map) {
-		r = ops->dma_map(vdpa, asid, iova, size, pa, perm, opaque);
-	} else if (ops->set_map) {
+	if (ops->set_map) {
 		if (!v->in_batch)
-			r = ops->set_map(vdpa, asid, iotlb);
-	} else {
+			ops->set_map(vdpa, asid, iotlb);
+	}
+	/* If we are in the middle of batch processing, delay the free
+	 * of AS until BATCH_END.
+	 */
 		r = iommu_map(v->domain, iova, pa, size,
 			      perm_to_iommu_flags(perm));
 	}
@@ -1210,7 +1225,6 @@ static void vhost_vdpa_cleanup(struct vhost_vdpa *v)
 			vhost_vdpa_remove_as(v, asid);
 	}
 
-	vhost_vdpa_free_domain(v);
 	vhost_dev_cleanup(&v->vdev);
 	kfree(v->vdev.vqs);
 }

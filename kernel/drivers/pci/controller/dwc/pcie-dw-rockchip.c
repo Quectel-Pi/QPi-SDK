@@ -13,6 +13,7 @@
 #include <linux/gpio.h>
 #include <linux/gpio/consumer.h>
 #include <linux/iopoll.h>
+#include <linux/jiffies.h>
 #include <linux/irqchip/chained_irq.h>
 #include <linux/of_address.h>
 #include <linux/of_device.h>
@@ -20,11 +21,13 @@
 #include <linux/phy/phy.h>
 #include <linux/phy/pcie.h>
 #include <linux/pm_runtime.h>
+#include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include <linux/reset.h>
 #include <linux/regulator/driver.h>
 #include <linux/regulator/machine.h>
 #include <linux/rfkill-wlan.h>
+#include <linux/suspend.h>
 #include <linux/aspm_ext.h>
 
 #include "pcie-designware.h"
@@ -136,6 +139,7 @@ struct rk_pcie {
 	u32				perst_inactive_ms;
 	u32				s2r_perst_inactive_ms;
 	u32				modem_power_delay_ms;
+	u32				modem_pwkey_pulse_ms;
 	u32				modem_reset_pulse_ms;
 	u32				wait_for_link_ms;
 	struct gpio_desc		*prsnt_gpio;
@@ -151,6 +155,8 @@ struct rk_pcie {
 	bool				is_lpbk;
 	bool				is_comp;
 	bool				finish_probe;
+	/* System suspend requested; give up the in-flight link training */
+	bool				abort_probe;
 	bool				keep_power_in_suspend;
 	struct regulator		*vpcie3v3;
 	struct irq_domain		*irq_domain;
@@ -177,6 +183,8 @@ struct rk_pcie_of_data {
 };
 
 #define to_rk_pcie(x)	dev_get_drvdata((x)->dev)
+
+static void rk_pcie_register_pm_notifier(void);
 
 static inline u32 rk_pcie_readl_apb(struct rk_pcie *rk_pcie, u32 reg)
 {
@@ -330,6 +338,19 @@ static int rk_pcie_disable_power(struct rk_pcie *rk_pcie)
 	return ret;
 }
 
+/* Sleep that gives up early once a system suspend asked us to stop probing */
+static bool rk_pcie_abortable_delay(struct rk_pcie *rk_pcie, u32 ms)
+{
+	while (ms && !READ_ONCE(rk_pcie->abort_probe)) {
+		u32 step = min(ms, 50U);
+
+		msleep(step);
+		ms -= step;
+	}
+
+	return READ_ONCE(rk_pcie->abort_probe);
+}
+
 static void rk_pcie_prepare_modem(struct rk_pcie *rk_pcie)
 {
 	struct device *dev = rk_pcie->pci->dev;
@@ -337,7 +358,14 @@ static void rk_pcie_prepare_modem(struct rk_pcie *rk_pcie)
 	if (rk_pcie->pwkey_gpio) {
 		msleep(100);
 		gpiod_set_value_cansleep(rk_pcie->pwkey_gpio, 1);
-		dev_info(dev, "5G HAT power key asserted\n");
+		if (rk_pcie->modem_pwkey_pulse_ms) {
+			msleep(rk_pcie->modem_pwkey_pulse_ms);
+			gpiod_set_value_cansleep(rk_pcie->pwkey_gpio, 0);
+			dev_info(dev, "5G HAT power key pulse %ums\n",
+				 rk_pcie->modem_pwkey_pulse_ms);
+		} else {
+			dev_info(dev, "5G HAT power key asserted\n");
+		}
 	}
 
 	if (rk_pcie->modem_rst_gpio) {
@@ -348,8 +376,12 @@ static void rk_pcie_prepare_modem(struct rk_pcie *rk_pcie)
 			 rk_pcie->modem_reset_pulse_ms);
 	}
 
+	/*
+	 * This one is the long settling delay (3s on M2). Make it abortable so a
+	 * suspend landing inside the probe window does not have to wait it out.
+	 */
 	if (rk_pcie->modem_power_delay_ms)
-		msleep(rk_pcie->modem_power_delay_ms);
+		rk_pcie_abortable_delay(rk_pcie, rk_pcie->modem_power_delay_ms);
 }
 
 static void rk_pcie_retrain(struct dw_pcie *pci)
@@ -404,9 +436,21 @@ static int rk_pcie_establish_link(struct dw_pcie *pci)
 	}
 
 	for (hw_retries = 0; hw_retries < RK_PCIE_ENUM_HW_RETRYIES; hw_retries++) {
+		/*
+		 * System suspend arrived while we are still enumerating. Bail out
+		 * before touching the power key / PERST# sequence again so the
+		 * suspend path gets a chance to settle the controller quickly.
+		 */
+		if (READ_ONCE(rk_pcie->abort_probe))
+			return -EINTR;
+
 		/* Rest the device */
 		gpiod_set_value_cansleep(rk_pcie->rst_gpio, 0);
 		rk_pcie_prepare_modem(rk_pcie);
+
+		/* Suspend showed up while we were powering the modem up */
+		if (READ_ONCE(rk_pcie->abort_probe))
+			return -EINTR;
 
 		rk_pcie_disable_ltssm(rk_pcie);
 		rk_pcie_link_status_clear(rk_pcie);
@@ -457,6 +501,9 @@ static int rk_pcie_establish_link(struct dw_pcie *pci)
 		usleep_range(1000, 1100);
 
 		for (retries = 0; retries < rk_pcie->wait_for_link_ms / 20; retries++) {
+			if (READ_ONCE(rk_pcie->abort_probe))
+				return -EINTR;
+
 			if (dw_pcie_link_up(pci)) {
 				/*
 				 * We may be here in case of L0 in Gen1. But if EP is capable
@@ -743,6 +790,9 @@ static int rk_pcie_resource_get(struct platform_device *pdev,
 
 	device_property_read_u32(&pdev->dev, "delay-ms",
 				     &rk_pcie->modem_power_delay_ms);
+
+	device_property_read_u32(&pdev->dev, "modem-pwkey-pulse-ms",
+				     &rk_pcie->modem_pwkey_pulse_ms);
 
 	if (device_property_read_u32(&pdev->dev, "modem-reset-pulse-ms",
 				     &rk_pcie->modem_reset_pulse_ms))
@@ -1762,6 +1812,7 @@ static int rk_pcie_really_probe(void *p)
 	rk_pcie->pci = pci;
 	rk_pcie->msi_vector_num = data ? data->msi_vector_num : 0;
 	rk_pcie->intx = 0xffffffff;
+	rk_pcie->abort_probe = false;
 	pci->dev = dev;
 	pci->ops = &dw_pcie_ops;
 	platform_set_drvdata(pdev, rk_pcie);
@@ -1773,15 +1824,18 @@ static int rk_pcie_really_probe(void *p)
 		goto release_driver;
 	}
 
+	pm_runtime_enable(dev);
+	pm_runtime_get_sync(pci->dev);
+
+	/* Let system suspend cancel this probe instead of refusing to suspend */
+	rk_pcie_register_pm_notifier();
+
 	/* 4. hardware io settings */
 	ret = rk_pcie_hardware_io_config(rk_pcie);
 	if (ret) {
 		dev_err_probe(dev, ret, "setting hardware io failed\n");
-		goto release_driver;
+		goto put_runtime_pm;
 	}
-
-	pm_runtime_enable(dev);
-	pm_runtime_get_sync(pci->dev);
 
 	/* 5. host registers manipulation */
 	ret = rk_pcie_host_config(rk_pcie);
@@ -1843,9 +1897,15 @@ deinit_irq_and_wq:
 unconfig_host:
 	rk_pcie_host_unconfig(rk_pcie);
 unconfig_hardware_io:
+	/*
+	 * Put the IP into reset state before releasing the genpd reference to
+	 * avoid potential memory access on background which may hang the system
+	 * because of unable to disable its genpd attached.
+	 */
+	rk_pcie_hardware_io_unconfig(rk_pcie);
+put_runtime_pm:
 	pm_runtime_put(dev);
 	pm_runtime_disable(dev);
-	rk_pcie_hardware_io_unconfig(rk_pcie);
 release_driver:
 	if (rk_pcie)
 		rk_pcie->finish_probe = true;
@@ -1933,10 +1993,15 @@ static int rk_pcie_remove(struct platform_device *pdev)
 	device_init_wakeup(dev, false);
 
 	rk_pcie_host_unconfig(rk_pcie);
+	/*
+	 * Put the IP into reset state before releasing the genpd reference to
+	 * avoid potential memory access on background which may hang the system
+	 * because of unable to disable its genpd attached.
+	 */
+	rk_pcie_hardware_io_unconfig(rk_pcie);
 
 	pm_runtime_put(dev);
 	pm_runtime_disable(dev);
-	rk_pcie_hardware_io_unconfig(rk_pcie);
 
 	return 0;
 }
@@ -1974,6 +2039,17 @@ static void rk_pcie_downstream_dev_to_d0(struct rk_pcie *rk_pcie, bool enable)
 	struct pci_bus *child, *root_bus = NULL;
 	struct pci_dev *pdev, *bridge;
 	u32 val;
+
+	/*
+	 * With CONFIG_PCIE_RK_THREADED_INIT the link training runs in
+	 * rk_pcie_really_probe() and pp->bridge->bus is only assigned by
+	 * pci_host_probe(). If system PM (or .shutdown) races with it,
+	 * bridge->bus is still NULL here and the list walk below would fault
+	 * while device_lock() is held, deadlocking every later PM/shutdown
+	 * path. Nothing to bring to D0 before the bus exists.
+	 */
+	if (!pp->bridge || !pp->bridge->bus)
+		return;
 
 	list_for_each_entry(child, &pp->bridge->bus->children, node) {
 		/* Bring downstream devices to D3 if they are not already in */
@@ -2244,6 +2320,15 @@ static int rockchip_dw_pcie_prepare(struct device *dev)
 {
 	struct rk_pcie *rk_pcie = dev_get_drvdata(dev);
 
+	/*
+	 * With CONFIG_PCIE_RK_THREADED_INIT the platform probe returns before
+	 * rk_pcie_really_probe() has finished, and drvdata may not even be set
+	 * yet. Refuse the suspend instead of letting suspend_noirq() tear down
+	 * PHY/CRU/LTSSM underneath the still running probe thread.
+	 */
+	if (!rk_pcie || !rk_pcie->finish_probe)
+		return -EBUSY;
+
 	dw_pcie_dbi_ro_wr_en(rk_pcie->pci);
 	rk_pcie_downstream_dev_to_d0(rk_pcie, false);
 	dw_pcie_dbi_ro_wr_dis(rk_pcie->pci);
@@ -2260,6 +2345,116 @@ static void rockchip_dw_pcie_complete(struct device *dev)
 	dw_pcie_dbi_ro_wr_dis(rk_pcie->pci);
 }
 #endif
+
+/*
+ * With CONFIG_PCIE_RK_THREADED_INIT the platform probe signals success and
+ * binds the driver before rk_pcie_really_probe() has finished, and the link
+ * training runs in that kthread for up to ~2 * wait-for-link-ms. Suspending
+ * inside that window is unsafe: pp->bridge->bus is still NULL, and .prepare
+ * cannot wait for the probe because it would have to hold device_lock, which
+ * the probe thread needs to release the driver on failure.
+ *
+ * So cancel the in-flight probe from a PM_SUSPEND_PREPARE notifier, i.e.
+ * before dpm_prepare() starts walking the device list, and let the suspend
+ * proceed on a settled device. If it cannot settle in time we return
+ * NOTIFY_BAD so the suspend is refused instead of racing the probe.
+ */
+#define RK_PCIE_SETTLE_TIMEOUT_MS	12000
+#define RK_PCIE_MAX_PENDING		4
+
+struct rk_pcie_pending {
+	struct rk_pcie	*list[RK_PCIE_MAX_PENDING];
+	int		nr;
+};
+
+/* Is the driver done touching the controller for this probe attempt? */
+static bool rk_pcie_probe_settled(struct rk_pcie *rk_pcie)
+{
+	if (!READ_ONCE(rk_pcie->finish_probe))
+		return false;
+
+	/* Probe succeeded: bridge is up and the driver stays bound. */
+	if (rk_pcie->pci->pp.bridge && rk_pcie->pci->pp.bridge->bus)
+		return true;
+
+	/* Probe failed and the driver has been released. */
+	return !rk_pcie->pci->dev->driver;
+}
+
+static int rk_pcie_collect_pending(struct device *dev, void *data)
+{
+	struct rk_pcie_pending *p = data;
+	struct rk_pcie *rk_pcie;
+
+	if (!dev->driver || strcmp(dev->driver->name, "rk-pcie"))
+		return 0;
+
+	rk_pcie = dev_get_drvdata(dev);
+	if (!rk_pcie || rk_pcie->finish_probe)
+		return 0;
+
+	if (p->nr < RK_PCIE_MAX_PENDING)
+		p->list[p->nr++] = rk_pcie;
+
+	return 0;
+}
+
+static int rk_pcie_pm_notifier(struct notifier_block *nb, unsigned long action,
+			       void *data)
+{
+	struct rk_pcie_pending pending = { .nr = 0 };
+	unsigned long deadline;
+	int i;
+
+	if (action != PM_SUSPEND_PREPARE)
+		return NOTIFY_DONE;
+
+	bus_for_each_dev(&platform_bus_type, NULL, &pending,
+			 rk_pcie_collect_pending);
+	if (!pending.nr)
+		return NOTIFY_DONE;
+
+	for (i = 0; i < pending.nr; i++)
+		WRITE_ONCE(pending.list[i]->abort_probe, true);
+
+	deadline = jiffies + msecs_to_jiffies(RK_PCIE_SETTLE_TIMEOUT_MS);
+	while (time_before(jiffies, deadline)) {
+		bool settled = true;
+
+		for (i = 0; i < pending.nr; i++) {
+			if (!rk_pcie_probe_settled(pending.list[i])) {
+				settled = false;
+				break;
+			}
+		}
+		if (settled)
+			return NOTIFY_DONE;
+
+		msleep(20);
+	}
+
+	dev_warn(pending.list[0]->pci->dev,
+		 "probe still running, refusing to suspend\n");
+
+	return NOTIFY_BAD;
+}
+
+static struct notifier_block rk_pcie_pm_nb = {
+	.notifier_call = rk_pcie_pm_notifier,
+};
+
+static bool rk_pcie_pm_nb_registered;
+static DEFINE_MUTEX(rk_pcie_pm_nb_lock);
+
+static void rk_pcie_register_pm_notifier(void)
+{
+	mutex_lock(&rk_pcie_pm_nb_lock);
+	if (!rk_pcie_pm_nb_registered) {
+		if (!register_pm_notifier(&rk_pcie_pm_nb))
+			rk_pcie_pm_nb_registered = true;
+	}
+	mutex_unlock(&rk_pcie_pm_nb_lock);
+}
 
 static const struct dev_pm_ops rockchip_dw_pcie_pm_ops = {
 #ifdef CONFIG_PCIEASPM

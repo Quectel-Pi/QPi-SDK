@@ -1744,14 +1744,14 @@ static struct enet_cb *bcmgenet_put_txcb(struct bcmgenet_priv *priv,
 {
 	struct enet_cb *tx_cb_ptr;
 
-	tx_cb_ptr = ring->cbs;
-	tx_cb_ptr += ring->write_ptr - ring->cb_ptr;
-
 	/* Rewinding local write pointer */
 	if (ring->write_ptr == ring->cb_ptr)
 		ring->write_ptr = ring->end_ptr;
 	else
 		ring->write_ptr--;
+
+	tx_cb_ptr = ring->cbs;
+	tx_cb_ptr += ring->write_ptr - ring->cb_ptr;
 
 	return tx_cb_ptr;
 }
@@ -3560,32 +3560,29 @@ static void bcmgenet_dump_tx_queue(struct bcmgenet_tx_ring *ring)
 static void bcmgenet_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	struct bcmgenet_priv *priv = netdev_priv(dev);
-	u32 int0_enable = 0;
-	u32 int1_enable = 0;
-	unsigned int q;
+	struct bcmgenet_tx_ring *ring;
+	struct netdev_queue *txq = netdev_get_tx_queue(dev, txqueue);
 
 	netif_dbg(priv, tx_err, dev, "bcmgenet_timeout\n");
 
-	for (q = 0; q < priv->hw_params->tx_queues; q++)
-		bcmgenet_dump_tx_queue(&priv->tx_rings[q]);
-	bcmgenet_dump_tx_queue(&priv->tx_rings[DESC_INDEX]);
+	ring = txqueue ? &priv->tx_rings[txqueue - 1] :
+			 &priv->tx_rings[DESC_INDEX];
+	bcmgenet_dump_tx_queue(ring);
+	bcmgenet_tx_reclaim(dev, ring);
 
-	bcmgenet_tx_reclaim_all(dev);
+	/* Re-enable the TX interrupt for this ring. */
+	if (ring->index == DESC_INDEX)
+		bcmgenet_intrl2_0_writel(priv, UMAC_IRQ_TXDMA_DONE,
+					 INTRL2_CPU_MASK_CLEAR);
+	else
+		bcmgenet_intrl2_1_writel(priv, 1 << ring->index,
+					 INTRL2_CPU_MASK_CLEAR);
 
-	for (q = 0; q < priv->hw_params->tx_queues; q++)
-		int1_enable |= (1 << q);
-
-	int0_enable = UMAC_IRQ_TXDMA_DONE;
-
-	/* Re-enable TX interrupts if disabled */
-	bcmgenet_intrl2_0_writel(priv, int0_enable, INTRL2_CPU_MASK_CLEAR);
-	bcmgenet_intrl2_1_writel(priv, int1_enable, INTRL2_CPU_MASK_CLEAR);
-
-	netif_trans_update(dev);
+	txq_trans_cond_update(txq);
 
 	dev->stats.tx_errors++;
 
-	netif_tx_wake_all_queues(dev);
+	netif_tx_wake_queue(txq);
 }
 
 #define MAX_MDF_FILTER	17

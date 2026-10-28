@@ -739,6 +739,9 @@ fill_table:
 	if (off + sizeof(struct NTFS_DE) > end)
 		return NULL;
 
+	if (off + sizeof(struct NTFS_DE) > end)
+		return NULL;
+
 	e = Add2Ptr(hdr, off);
 	e_size = le16_to_cpu(e->size);
 
@@ -1112,6 +1115,12 @@ ok:
 		goto out;
 	}
 
+	/* check for index header length */
+	if (offsetof(struct INDEX_BUFFER, ihdr) + ib->ihdr.used > bytes) {
+		err = -EINVAL;
+		goto out;
+	}
+
 	in->index = ib;
 	*node = in;
 
@@ -1190,7 +1199,12 @@ int indx_find(struct ntfs_index *indx, struct ntfs_inode *ni,
 			return -EINVAL;
 		}
 
-		fnd_push(fnd, node, e);
+		err = fnd_push(fnd, node, e);
+
+		if (err) {
+			put_indx_node(node);
+			return err;
+		}
 	}
 
 	*entry = e;

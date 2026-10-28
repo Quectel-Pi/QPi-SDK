@@ -942,7 +942,13 @@ static ssize_t current_value_show(struct kobject *kobj, struct kobj_attribute *a
 		p = strchrnul(value, ';');
 		*p = '\0';
 		ret = sysfs_emit(buf, "%s\n", value + 1);
-	}
+	/* validate and split from `item,value` -> `value` */
+	value = strpbrk(item, ",");
+	if (!value || value == item || !strlen(value + 1))
+		ret = -EINVAL;
+	else
+		ret = sysfs_emit(buf, "%s\n", value + 1);
+
 	kfree(item);
 
 	return ret;

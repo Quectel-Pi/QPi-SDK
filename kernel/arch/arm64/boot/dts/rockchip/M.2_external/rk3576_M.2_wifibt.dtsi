@@ -16,7 +16,7 @@
 		//reset-gpios = <&gpio0 RK_PB0 GPIO_ACTIVE_LOW>;
 		status = "okay";
 	};
-	
+
 	wireless_wlan: wireless-wlan {
 		compatible = "wlan-platdata";
 		rockchip,grf = <&sys_grf>;
@@ -44,6 +44,14 @@
 };
 
 &sdio {
+	/*
+	 * 回退到 100MHz/SDR50。
+	 * 150MHz/SDR104 会在 mmc2 上以 148.5MHz 跑 SDR104 时序，实测
+	 * "Successfully tuned phase to 0" 后立刻 error -84 (EILSEQ)，
+	 * SDIO 卡无法初始化 -> aic8800_bsp probe 失败 -> WiFi/BT 全挂。
+	 * 注意：dw_mci_rockchip_probe() 里 "EXPERIMENT: force UHS caps on SD slot"
+	 * 已强制打开 SDR104 cap，故真正起限制作用的是 max-frequency。
+	 */
 	max-frequency = <100000000>;
 	no-sd;
 	no-mmc;

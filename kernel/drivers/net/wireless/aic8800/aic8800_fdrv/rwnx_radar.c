@@ -1418,7 +1418,7 @@ static void rwnx_radar_process_pulse(struct work_struct *ws)
                 AICWFDBG(LOGINFO, "id  wid.{min, max}  pri.{min, max, num}, ppb, thd, tlrn, type");
                 for (k = 0; k < dpd->num_radar_types; k++)
                 {
-                spc = &dpd->radar_spec[k];
+                spc = (struct radar_detector_specs *)&dpd->radar_spec[k];
                 AICWFDBG(LOGINFO, "%d       %3d, %3d        %4d  %4d  %d    %2d   %2d    %d     %d", 
                 spc->type_id,
                 spc->width_min,
@@ -1505,7 +1505,11 @@ static void rwnx_radar_cac_work(struct work_struct *ws)
 					#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 14, 0)
 					   &ctxt->chan_def,
 					#endif
-					   NL80211_RADAR_CAC_FINISHED, GFP_KERNEL);
+					   NL80211_RADAR_CAC_FINISHED, GFP_KERNEL
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+					, 0
+#endif
+					);
 	rwnx_send_apm_stop_cac_req(rwnx_hw, radar->cac_vif);
 	rwnx_chanctx_unlink(radar->cac_vif);
 
@@ -1642,7 +1646,11 @@ void rwnx_radar_cancel_cac(struct rwnx_radar *radar)
 						#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 14, 0)
 						   &ctxt->chan_def,
 						#endif
-						   NL80211_RADAR_CAC_ABORTED, GFP_KERNEL);
+						   NL80211_RADAR_CAC_ABORTED, GFP_KERNEL
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+						, 0
+#endif
+						);
 		rwnx_chanctx_unlink(radar->cac_vif);
 	}
 
@@ -1731,8 +1739,8 @@ int rwnx_radar_dump_pattern_detector(char *buf, size_t len,
 			}
 			size_needed += sizeof(info);
 
-		return size_needed;
 		}
+		return size_needed;
 	}
 
 	/* */

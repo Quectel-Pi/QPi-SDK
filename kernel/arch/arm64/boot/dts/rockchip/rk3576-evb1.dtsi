@@ -139,6 +139,8 @@
 	snps,reset-active-high;
 	/* Reset time is 20ms, 100ms for rtl8211f */
 	snps,reset-delays-us = <0 20000 100000>;
+	snps,phy-resume-delay-ms = <35>;
+	snps,reinit-phy-on-resume;
 
 	pinctrl-names = "default";
 	pinctrl-0 = <&eth0m0_miim
@@ -148,7 +150,7 @@
 		     &eth0m0_rgmii_bus
 		     &ethm0_clk0_25m_out>;
 
-	tx_delay = <0x20>;
+	tx_delay = <0x1a>;
 	/* rx_delay = <0x3f>; */
 
 	phy-handle = <&rgmii_phy0>;
@@ -160,6 +162,8 @@
 		compatible = "ethernet-phy-ieee802.3-c22";
 		reg = <0x0>;
 		clocks = <&cru REFCLKO25M_GMAC0_OUT>;
+		eee-broken-100tx;
+		eee-broken-1000t;
 	};
 };
 
@@ -172,6 +176,8 @@
 	snps,reset-active-high;
 	/* Reset time is 20ms, 100ms for rtl8211f */
 	snps,reset-delays-us = <0 20000 100000>;
+	snps,phy-resume-delay-ms = <35>;
+	snps,reinit-phy-on-resume;
 
 	pinctrl-names = "default";
 	pinctrl-0 = <&eth1m0_miim
@@ -181,7 +187,7 @@
 		     &eth1m0_rgmii_bus
 		     &ethm0_clk1_25m_out>;
 
-	tx_delay = <0x20>;
+	tx_delay = <0x17>;
 	/* rx_delay = <0x3f>; */
 
 	phy-handle = <&rgmii_phy1>;
@@ -193,6 +199,8 @@
 		compatible = "ethernet-phy-ieee802.3-c22";
 		reg = <0x1>;
 		clocks = <&cru REFCLKO25M_GMAC1_OUT>;
+		eee-broken-100tx;
+		eee-broken-1000t;
 	};
 };
 

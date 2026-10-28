@@ -26,11 +26,14 @@ ai_sdk/
 |---------|------|
 | `rk3576-quectel-pi-m2-i2c3-disable.dtbo` | 禁用 I2C3 |
 | `rk3576-quectel-pi-m2-i2c7-disable.dtbo` | 禁用 I2C7 |
-| `rk3576-quectel-pi-m2-pwm2-disable.dtbo` | 禁用 PWM2 |
+| `rk3576-quectel-pi-m2-can0-enable.dtbo` | 启用 CAN0 |
 | `rk3576-quectel-pi-m2-spi1-disable.dtbo` | 禁用 SPI1 |
 | `rk3576-quectel-pi-m2-uart1-disable.dtbo` | 禁用 UART1 |
 
 ## 工作流程
+
+SDK 另从 `overlay/rk3576-quectel-pi-m2-pwm2-disable.dts` 编译 PWM2 禁用 overlay，
+不再依赖上游内建列表；共发布 6 个。打包只接收当前 Makefile 声明的内建产物。
 
 1. **写 overlay**：在 `overlay/` 新建 `<name>.dts`
 

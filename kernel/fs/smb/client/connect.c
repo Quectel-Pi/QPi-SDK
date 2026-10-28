@@ -1548,6 +1548,8 @@ static int match_server(struct TCP_Server_Info *server, struct smb3_fs_context *
 
 	lockdep_assert_held(&server->srv_lock);
 
+	lockdep_assert_held(&server->srv_lock);
+
 	if (ctx->nosharesock)
 		return 0;
 
@@ -1890,6 +1892,10 @@ static int match_session(struct cifs_ses *ses, struct smb3_fs_context *ctx)
 	case Kerberos:
 		if (!uid_eq(ctx->cred_uid, ses->cred_uid))
 			return 0;
+		if (strncmp(ses->user_name ?: "",
+			    ctx->username ?: "",
+			    CIFS_MAX_USERNAME_LEN))
+			return 0;
 		break;
 	default:
 		/* NULL username means anonymous session */
@@ -2173,7 +2179,6 @@ cifs_set_cifscreds(struct smb3_fs_context *ctx, struct cifs_ses *ses)
 	/* find first : in payload */
 	payload = upayload->data;
 	delim = strnchr(payload, upayload->datalen, ':');
-	cifs_dbg(FYI, "payload=%s\n", payload);
 	if (!delim) {
 		cifs_dbg(FYI, "Unable to find ':' in payload (datalen=%d)\n",
 			 upayload->datalen);
@@ -4389,6 +4394,7 @@ cifs_construct_tcon(struct cifs_sb_info *cifs_sb, kuid_t fsuid)
 
 out:
 	kfree(ctx->username);
+	kfree(ctx->domainname);
 	kfree_sensitive(ctx->password);
 	kfree(ctx);
 

@@ -2,8 +2,14 @@
 __pycache__/
 *.pyc
 
+# 本地资源及演示项目不随 SDK 提交
+/prebuilds/
+/demo/
+
 # 构建产物
-build/
+/build/
+docs/examples/**/build/
+projects/**/build/
 kernel/.config
 kernel/.config.old
 kernel/boot.img

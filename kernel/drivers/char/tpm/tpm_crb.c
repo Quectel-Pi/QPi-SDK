@@ -699,9 +699,18 @@ out:
 	if (!ret)
 		priv->cmd_size = cmd_size;
 
-	__crb_go_idle(dev, priv);
+	/* Should the FIFO driver handle this? */
+	sm = buf->start_method;
+	if (sm == ACPI_TPM2_MEMORY_MAPPED) {
+		rc = -ENODEV;
+		goto out;
+	}
 
-out_relinquish_locality:
+	priv = devm_kzalloc(dev, sizeof(struct crb_priv), GFP_KERNEL);
+	if (!priv) {
+		rc = -ENOMEM;
+		goto out;
+	}
 
 	__crb_relinquish_locality(dev, priv, 0);
 
@@ -801,9 +810,12 @@ static int crb_acpi_add(struct acpi_device *device)
 	chip->acpi_dev_handle = device->handle;
 	chip->flags = TPM_CHIP_FLAG_TPM2;
 
-	rc = tpm_chip_bootstrap(chip);
-	if (rc)
-		goto out;
+	rc = tpm_chip_register(chip);
+
+out:
+	acpi_put_table((struct acpi_table_header *)buf);
+	return rc;
+}
 
 #ifdef CONFIG_X86
 	/* A quirk for https://www.amd.com/en/support/kb/faq/pa-410 */

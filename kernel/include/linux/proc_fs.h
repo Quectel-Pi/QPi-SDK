@@ -24,6 +24,7 @@ enum {
 #else
 	PROC_ENTRY_PERMANENT = 1U << 0,
 #endif
+	PROC_ENTRY_proc_lseek		= 1U << 1,
 };
 
 struct proc_ops {

@@ -404,7 +404,7 @@ static void rds6_ib_ic_info(struct socket *sock, unsigned int len,
  * asserting this policy "routing".
  */
 static int rds_ib_laddr_check(struct net *net, const struct in6_addr *addr,
-			      __u32 scope_id)
+				      __u32 scope_id)
 {
 	int ret;
 	struct rdma_cm_id *cm_id;
@@ -414,6 +414,10 @@ static int rds_ib_laddr_check(struct net *net, const struct in6_addr *addr,
 	struct sockaddr_in sin;
 	struct sockaddr *sa;
 	bool isv4;
+
+	/* RDS/IB is restricted to the initial network namespace. */
+	if (!net_eq(net, &init_net))
+		return -EPROTOTYPE;
 
 	isv4 = ipv6_addr_v4mapped(addr);
 	/* Create a CMA ID and try to bind it. This catches both

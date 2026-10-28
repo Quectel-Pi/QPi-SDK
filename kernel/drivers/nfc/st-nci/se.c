@@ -681,6 +681,15 @@ int st_nci_se_io(struct nci_dev *ndev, u32 se_idx,
 		return -ENODEV;
 	}
 }
+		/* Need to free cb_context here as at the moment we can't
+		 * clearly indicate to the caller if the callback function
+		 * would be called (and free it) or not. In both cases a
+		 * negative value may be returned to the caller.
+		 */
+		kfree(cb_context);
+		return -ENODEV;
+	}
+}
 EXPORT_SYMBOL(st_nci_se_io);
 
 static void st_nci_se_wt_timeout(struct timer_list *t)
