@@ -39,14 +39,22 @@ source scripts/env.sh     # 原生入口
   `https://developer.quectel.com/doc/files/quectel_pi/Quectel_Pi_H1_WF_Debian_RD2_Latest.zip`
 - **完整性以厂商 md5 为准** (同目录 `..._Latest_md5.txt`):
   * **打包 system.img 之前自动校验**: 联网失败 -> 用本地继续; md5 一致 -> 继续;
-    md5 变了 -> 下载新的替换本地再打包; 已更新但下载失败 -> 中止
-    (`QPI_ALLOW_STALE=1` 强行用旧底包; `QPI_NO_REFRESH=1` 跳过检查)
-  * fetch 时: 本地 md5 不一致即重下; 下载完成后强制按厂商 md5 校验
+    md5 变了 -> **先问你要不要下载最新包** (默认 N = 保留本地继续打包);
+    选了更新但下载失败 -> 中止
+    (`QPI_ALLOW_STALE=1` 强行用旧底包; `QPI_NO_REFRESH=1` 跳过检查;
+    `QPI_DL_YES=1`/`QPI_DL_NO=1` 不询问直接下载/保留; `QPI_UPD_DEFAULT=Y|N` 非交互默认)
+  * fetch 时: 本地有完整包但 md5 不同 -> **先打差异再问**, 选否就继续用本地包;
+    下载完成后强制按厂商 md5 校验 (不符先自动从零重下一次, 仍不符才报错)
+  * 厂商 md5 文件过期 (md5 比 zip 旧 6h+) 会被识别: 直接提示“厂商 md5 过期”,
+    不再白重下; 绕过办法 `QPI_NO_REMOTE_MD5=1 fetch` + `unzip -t`
   * 替换时旧原版保留为 `system.img.prev`; 派生的 base_rootfs/sysroot 移到 `.prev` 并重建
 - **新产物不覆盖原版**: 生成的 system.img 只写 `build/result/system.img`;
   `prebuilds/system.img` 全程只读 (若两者设为同一路径, build-rootfs.sh 报错拒绝)
-- 约 3.2 GiB, 断点续传; 缓存 `download/`; 本地 sha256 记录 `tools/prebuilds.sha256`
-  (仅复现用, 属自我引用, 不能证明与厂商源一致)
+- 约 7 GiB (厂商换包后会变), 断点续传: `download/*.part` 旁写 `.part.meta`
+  (远端大小/ETag/Last-Modified/厂商 md5), 续传前先比对, 远端换包就明确提示
+  “续传已作废, 从零重下”; 服务端不支持 Range 时自动探测并从零下;
+  `QPI_NO_RESUME=1` 强制不续传; 缓存 `download/`;
+  本地 sha256 记录 `tools/prebuilds.sha256` (仅复现用, 属自我引用, 不能证明与厂商源一致)
 - 缺底包的症状: `buildenv` 报"缺少 prebuilds/system.img"; `buildrootfs`/`buildall` 报
   "无可用基准目录"; `buildboot` 裸报 `cp: cannot stat .../efi.bin`
 - buildenv 的 [2/4] 段: 交互终端询问后下载; 非交互默认不下载 (免数 GB 下载挂住扩展/CI),

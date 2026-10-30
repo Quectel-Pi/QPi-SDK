@@ -13,6 +13,7 @@
 #   ./tools/fetch-prebuilds.sh check        # 只检查: 缺失项逐行输出到 stdout (机器可读),
 #                                           #   人类提示走 stderr; exit 0=齐全, 1=有缺失
 #   ./tools/fetch-prebuilds.sh fetch        # 下载 + 校验 + 解压 (支持断点续传)
+#                                           #   本地/远端不一致时会询问: 是否下载最新版
 #   ./tools/fetch-prebuilds.sh md5          # 对照厂商 md5 文件检查本地包是否最新
 #   ./tools/fetch-prebuilds.sh verify       # 校验压缩包内部 CRC (发现"下载被写坏")
 #   ./tools/fetch-prebuilds.sh hash         # 打印缓存 zip 的 sha256 (核对用)
@@ -28,7 +29,13 @@
 #   QPI_SHA256_FILE     校验值文件 (默认 <SDK>/tools/prebuilds.sha256)
 #   QPI_KEEP_ZIP=0      解压成功后删除缓存 zip (默认 1=保留, 便于复用/拷给同事)
 #   QPI_FETCH_FORCE=1   已齐全也强制重新下载/解压
-#   QPI_MIN_FREE_GB     磁盘空间下限, 默认 30 (压缩包 + 解压后峰值)
+#   QPI_NO_RESUME=1     忽略已有的 .part, 从零下载 (不续传)
+#   QPI_DL_YES=1        远端有新版/本地有完整包时, 直接"下载/替换", 不再询问
+#   QPI_DL_NO=1         同上, 直接"保留本地", 不再询问
+#   QPI_UPD_DEFAULT=Y|N 非交互环境 (插件/CI/管道) 下"是否下载新版"的默认答案,
+#                       默认 N = 保留本地 (数 GB 下载绝不擅自开下)
+#   QPI_DL_ATTEMPTS     单次 fetch 内连接中断的重试上限, 默认 40
+#   QPI_MIN_FREE_GB     磁盘空间下限, 默认 40 (压缩包 + 残留 + 解压后峰值)
 #   QPI_ARIA2=1         存在 aria2c 时用多连接下载 (默认自动探测)
 #
 # 依赖: curl 或 wget (下载), unzip 或 python3 (解压), sha256sum (校验)
@@ -39,9 +46,11 @@ TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SDK_ROOT="$(cd "${TOOLS_DIR}/.." && pwd)"
 
 # ---- 官方固定下载地址 (可被 QPI_PREBUILDS_URL 覆盖) ----
-# 说明: 该 URL 指向厂商"最新"底包, 内容会随厂商更新而变化 (当前实测:
-#   3455375965 字节, ETag 6aa76387-cdf4da5d, 与 ..._RD2_A01001.zip 为同一文件)。
-#   厂商更新后 sha256 会变, 届时用 `./tools/fetch-prebuilds.sh pin` 刷新校验值。
+# 说明: 该 URL 指向厂商"最新"底包, 内容会随厂商更新而变化。厂商用软链接把
+#   ..._Latest.zip 指向最新版本 (见厂商 README.txt), 且要求换包后重新生成
+#   ..._Latest_md5.txt —— 实际漏过: 2026-10-29 换包 (3455375965 -> 7402570385
+#   字节) 时 md5 文件还是 2026-09-14 的旧值, 导致"不管下载多少次、包多完整,
+#   md5 校验必然失败"。下面的 md5_file_looks_stale 就是专门识别这种情形的。
 DEFAULT_URL="https://developer.quectel.com/doc/files/quectel_pi/Quectel_Pi_H1_WF_Debian_RD2_Latest.zip"
 URL="${QPI_PREBUILDS_URL:-${DEFAULT_URL}}"
 ZIP_NAME="$(basename "${URL%%\?*}")"
@@ -74,8 +83,12 @@ DL_DIR="${QPI_DL_DIR:-${SDK_ROOT}/download}"
 SHA_FILE="${QPI_SHA256_FILE:-${TOOLS_DIR}/prebuilds.sha256}"
 ZIP_PATH="${DL_DIR}/${ZIP_NAME}"
 PART_PATH="${ZIP_PATH}.part"
+# 续传版本记录: 记下 .part 是按哪一版远端 (SIZE/ETag/Last-Modified/厂商 md5) 下的。
+# 厂商 Latest.zip 是软链接, 换包后内容整变; 没有这条记录就无法判断手里的半截
+# 是否属于当前版本, 会把新旧两版拼成一个"大小正确、内容错乱"的文件。
+PART_META="${PART_PATH}.meta"
 UNPACK_DIR="${DL_DIR}/unpack"
-MIN_FREE_GB="${QPI_MIN_FREE_GB:-30}"
+MIN_FREE_GB="${QPI_MIN_FREE_GB:-40}"
 
 # 底包必需项 (与 buildenv/[2] 段判定一致)
 REQUIRED_FILES=(system.img efi.bin dtb.bin)
@@ -173,10 +186,8 @@ cmd_check() {
 # ---------------------------------------------------------------------------
 # 下载
 # ---------------------------------------------------------------------------
-remote_size() {
-    curl -sIL --max-time 60 "${URL}" 2>/dev/null \
-        | awk 'BEGIN{IGNORECASE=1} /^content-length:/{v=$2} END{gsub(/\r/,"",v); print v}'
-}
+# 注: 远端大小/ETag/Last-Modified 统一由 remote_meta 取 (见下), 不再单独写
+# remote_size —— 只取大小的那种写法无法判断“远端是不是换了同一个文件”。
 
 # 取厂商 md5 文件里的 32 位 md5。取不到则返回非 0 (调用方据此降级)。
 remote_md5() {
@@ -191,6 +202,135 @@ remote_md5() {
 file_md5() {
     [ -f "$1" ] || return 1
     md5sum "$1" 2>/dev/null | awk '{print $1}'
+}
+
+# ---------------------------------------------------------------------------
+# 远端元信息 (大小 / ETag / Last-Modified)
+# ---------------------------------------------------------------------------
+# 为什么需要: 厂商的 Latest.zip 是"软链接指向最新包"(见厂商 README.txt), 换包后
+# 文件内容整变。续传必须能判断"我手里这半截是不是同一版", 否则会把旧版前半段和
+# 新版后半段拼成一个大小正确、内容错乱的文件 —— 只能等下载完算 md5 才发现
+# (白下几 GB), 而且下次运行还会因为"大小正好等于远端"被当成旧版残留整包重下。
+# ETag / Last-Modified / 大小任一变化都说明远端内容已换。
+RSZ_META=""; RETAG_META=""; RLM_META=""
+remote_meta() {
+    local hdr
+    hdr="$(curl -sIL --max-time 60 "${URL}" 2>/dev/null | tr -d '\r')" || return 1
+    [ -n "${hdr}" ] || return 1
+    RSZ_META="$(printf '%s\n' "${hdr}"   | awk 'BEGIN{IGNORECASE=1} /^content-length:/{v=$2} END{print v}')"
+    RETAG_META="$(printf '%s\n' "${hdr}" | awk 'BEGIN{IGNORECASE=1} /^etag:/{sub(/^[^:]*:[ ]*/,"");v=$0} END{print v}')"
+    RLM_META="$(printf '%s\n' "${hdr}"   | awk 'BEGIN{IGNORECASE=1} /^last-modified:/{sub(/^[^:]*:[ ]*/,"");v=$0} END{print v}')"
+    [ -n "${RSZ_META}" ]
+}
+
+# 厂商 md5 文件的 Last-Modified (用于判断"厂商换包却忘了重新生成 md5")
+remote_md5_lastmod() {
+    [ -n "${MD5_URL}" ] || return 1
+    curl -sIL --max-time 30 "${MD5_URL}" 2>/dev/null | tr -d '\r' \
+        | awk 'BEGIN{IGNORECASE=1} /^last-modified:/{sub(/^[^:]*:[ ]*/,"");v=$0} END{print v}'
+}
+
+# 厂商 md5 文件是否明显比压缩包旧 (差 > 6 小时)
+# 厂商 README.txt 明确要求换包后重跑 calc_md5.py, 实际漏过 —— 于是无论下载多少
+# 次、包多完整, md5 都必然对不上。识别出这种情况才能给用户一条可走的路。
+# 返回 0 = md5 文件疑似过期, 1 = 正常/无法判断
+md5_file_looks_stale() {
+    [ -n "${RLM_META}" ] || return 1
+    local mlm tz tm
+    mlm="$(remote_md5_lastmod)" || return 1
+    [ -n "${mlm}" ] || return 1
+    tz="$(date -d "${RLM_META}" +%s 2>/dev/null)" || return 1
+    tm="$(date -d "${mlm}" +%s 2>/dev/null)" || return 1
+    [ -n "${tz}" ] && [ -n "${tm}" ] || return 1
+    [ $(( tz - tm )) -gt 21600 ]
+}
+
+# ---------------------------------------------------------------------------
+# 续传版本记录 (.part.meta)
+# ---------------------------------------------------------------------------
+part_meta_get() { awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,"");print;exit}' "${PART_META}" 2>/dev/null; }
+
+write_part_meta() {
+    {
+        echo "URL=${URL}"
+        echo "SIZE=${1:-}"
+        echo "ETAG=${2:-}"
+        echo "LAST_MODIFIED=${3:-}"
+        echo "VENDOR_MD5=${4:-}"
+        echo "OFFSET=$(stat -c%s "${PART_PATH}" 2>/dev/null || echo 0)"
+        echo "TIME=$(date -Iseconds 2>/dev/null)"
+    } > "${PART_META}" 2>/dev/null || true
+}
+
+# 丢弃 .part (+版本记录)。只有在"确认这半截没用"时才调:
+#   内容已证明是坏的 / 属于旧版本。此时保留它只白占几 GB 磁盘。
+discard_part() {
+    if [ -s "${PART_PATH}" ]; then
+        log_warn "  丢弃未完成文件 $(human "$(stat -c%s "${PART_PATH}")")"
+    fi
+    rm -f "${PART_PATH}" "${PART_META}"
+}
+
+# 备份本地完整压缩包 (不是作废: 厂商换包时旧包可能还要回退)
+stash_zip() {
+    [ -s "${ZIP_PATH}" ] || return 0
+    if mv -f "${ZIP_PATH}" "${ZIP_PATH}.stale" 2>/dev/null; then
+        log_warn "  旧包已保留: ${ZIP_PATH}.stale ($(human "$(stat -c%s "${ZIP_PATH}.stale")"))"
+    else
+        rm -f "${ZIP_PATH}"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# 用户决策: 是否下载 / 是否替换
+# ---------------------------------------------------------------------------
+# 数 GB 的下载不能"检测到新版就默默开下": 用户可能在计费流量、离网现场, 或者就是
+# 要复现旧版本的问题。凡是"远端与本地不一致"的场合都问一句, 决定权交给用户:
+#   交互终端          -> 真的问, 默认 N (= 保留本地, 不动网络)
+#   QPI_DL_YES=1      -> 不问, 直接下载 (CI / 插件要自动更新时)
+#   QPI_DL_NO=1       -> 不问, 直接保留本地
+#   非交互且都没设    -> 取 QPI_UPD_DEFAULT (默认 N)；要自动更新请显式 QPI_DL_YES=1
+# 用法: ask_download "问题" [默认 Y|N]
+# 返回: 0 = 是, 1 = 否
+ask_download() {
+    local q="$1" def="${2:-${QPI_UPD_DEFAULT:-N}}" ans hint
+    case "${def}" in [Yy]*) def=Y ;; *) def=N ;; esac
+    if [ "${QPI_DL_YES:-0}" = "1" ]; then log_info "${q} -> 是 (QPI_DL_YES=1)"; return 0; fi
+    if [ "${QPI_DL_NO:-0}"  = "1" ]; then log_info "${q} -> 否 (QPI_DL_NO=1)";  return 1; fi
+    if [ ! -t 0 ]; then
+        if [ "${def}" = "Y" ]; then log_info "${q} -> 是 (非交互默认)"; return 0; fi
+        log_warn "${q} -> 否 (非交互默认: 保留本地)"
+        log_warn "  想下载最新固件: 在交互终端重跑, 或设 QPI_DL_YES=1"
+        return 1
+    fi
+    hint="[y/N]"; [ "${def}" = "Y" ] && hint="[Y/n]"
+    printf '%b ' "${CYAN}[?]${NC} ${q} ${hint}" >&2
+    read -r ans || ans=""
+    case "${ans}" in
+        "") [ "${def}" = "Y" ] && return 0 || return 1 ;;
+        [Yy]*|是) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# 自愈: 删掉已证明有问题的 .part, 从零再下一次 (最多一次, 避免反复白耗流量)
+# 返回 0 = 重下成功; 1 = 重下失败 / 已经重下过
+retry_from_scratch() {
+    [ "${HEAL:-0}" -ge 1 ] && return 1
+    HEAL=1
+    log_warn "  自动从零重新下载一次 (排除续传拼错 / 传输被改写)..."
+    discard_part
+    download_zip
+    return $?
+}
+
+# 自愈调用点用: 打印完“不再自动重试”的建议。
+# 首次重试的失败原因已由内层 download_zip 自己报过了, 这里不重复刷屏。
+report_heal_giveup() {
+    [ "${HEAL:-0}" -ge 1 ] || return 0
+    log_err "  已从零重下过一次仍不一致, 不再自动重试 (避免反复白下 $(human "${1:-0}"))"
+    log_err "  处理: $0 verify    # 看压缩包内部 CRC 是否真坏"
+    log_err "        或稍后 $0 fetch 重试"
 }
 
 # 判断本地完整 zip 是否与厂商一致; 输出:
@@ -238,39 +378,67 @@ check_space() {
 download_zip() {
     mkdir -p "${DL_DIR}" || return 1
 
+    # 先拿远端元信息 (SIZE / ETag / Last-Modified): 下面判断“本地包是否最新”、
+    # “手里的 .part 是否属于当前这一版”都要用它。拿不到就降级 (按大小判断)。
+    if ! remote_meta; then
+        RSZ_META=""; RETAG_META=""; RLM_META=""
+    fi
+
     # 已下载完的完整包: 先用厂商 md5 判断是否仍是最新, 再决定复用还是重下
     if [ -s "${ZIP_PATH}" ] && [ -z "${QPI_FETCH_FORCE:-}" ]; then
         local status st
         status="$(local_zip_status)"; st=$?
         if [ "${st}" = "0" ]; then
             log_ok "本地压缩包与厂商 md5 一致, 复用: ${ZIP_PATH}"
-            log_info "  md5 = ${status}"
+            log_info "  md5 = ${status} ($(human "$(stat -c%s "${ZIP_PATH}")"))"
             return 0
         elif [ "${st}" = "1" ]; then
-            # 包已更新(或本地损坏): 必须重新下载, 否则后面解压/打包都基于过期数据
-            log_warn "本地压缩包与厂商 md5 不一致 -> 厂商包已更新或本地文件损坏"
+            # 两种情况会走到这里: ①厂商换了包 ②本地文件被写坏。
+            # 两种都不能“默默重下”几 GB —— 先把事实说清楚, 再让用户决定。
+            log_warn "本地压缩包与厂商 md5 不一致 -> 厂商已换包 或 本地文件损坏"
             log_warn "  ${status}"
-            log_warn "  重新下载最新包 (旧文件移到 .stale 保留备查)"
-            mv -f "${ZIP_PATH}" "${ZIP_PATH}.stale" 2>/dev/null || rm -f "${ZIP_PATH}"
-            rm -f "${PART_PATH}"
-        else
-            # 拿不到厂商 md5 (离线/该文件不存在): 退回"按大小"判断
-            local rsz; rsz="$(remote_size)"
-            local lsz; lsz="$(stat -c%s "${ZIP_PATH}")"
-            if [ -z "${rsz}" ] || [ "${lsz}" = "${rsz}" ]; then
-                log_ok "复用已下载的压缩包: ${ZIP_PATH} ($(human "${lsz}"))"
-                log_warn "  (未能获取厂商 md5, 未做权威完整性校验)"
-                return 0
+            log_info "  本地包: $(human "$(stat -c%s "${ZIP_PATH}")")  ${ZIP_PATH}"
+            [ -n "${RSZ_META}" ] && log_info "  远端包: $(human "${RSZ_META}")"
+            [ -n "${RLM_META}" ] && log_info "  远端 Last-Modified: ${RLM_META}"
+            if ! ask_download "本地已有完整固件包, 但厂商最新包的 md5 不同. 是否下载最新固件并替换本地?"; then
+                log_warn "  已保留本地包, 继续使用 (可能不是厂商最新版; 不影响编译/烧录)"
+                log_info "  想换成最新版时: QPI_DL_YES=1 $0 fetch"
+                return 2                     # 2 = 用户选择保留本地
             fi
-            log_warn "本地压缩包大小与远端不一致 (本地 $(human "${lsz}") vs 远端 $(human "${rsz}")), 按残缺处理"
-            mv -f "${ZIP_PATH}" "${PART_PATH}"
+            log_info "  下载最新包"
+            stash_zip
+            discard_part
+        else
+            # 拿不到厂商 md5 (离线/该文件不存在/厂商未提供): 退回“按大小”判断
+            local lsz; lsz="$(stat -c%s "${ZIP_PATH}")"
+            if [ -z "${RSZ_META}" ] || [ "${lsz}" = "${RSZ_META}" ]; then
+                log_ok "本地已有完整固件包: ${ZIP_PATH} ($(human "${lsz}"))"
+                if [ -n "${RSZ_META}" ]; then
+                    log_warn "  大小与远端一致, 但未能取得厂商 md5 (${MD5_URL:-未配置}), 无法确认内容是否为最新"
+                else
+                    log_warn "  远端大小未知 (网络异常?), 无法确认是否为最新"
+                fi
+                # 远端可达时, 把“是否重新下载替换”交给用户
+                if [ -n "${RSZ_META}" ] && ask_download "是否重新下载并替换这个本地包 (重新下 $(human "${RSZ_META}"))?"; then
+                    log_info "  重新下载最新包"
+                    stash_zip
+                    discard_part
+                else
+                    log_warn "  继续使用本地包 (不重新下载)"
+                    log_info "  需要重下时: QPI_FETCH_FORCE=1 $0 fetch"
+                    return 0
+                fi
+            else
+                log_warn "本地压缩包大小与远端不一致 (本地 $(human "${lsz}") vs 远端 $(human "${RSZ_META}")), 按残缺处理"
+                mv -f "${ZIP_PATH}" "${PART_PATH}"
+            fi
         fi
     fi
 
-    local rsz; rsz="$(remote_size)"
+    local rsz; rsz="${RSZ_META}"
     [ -n "${rsz}" ] && log_info "远端大小: $(human "${rsz}")"
     # 清理上次并发写入/异常残留的膨胀 .stale (大小超过远端 = 含重复数据, 无保留价值,
-    # 且 9 GB 级文件白占磁盘)。正常厂商换包时旧包 <= 新包, 不会误删有效备份。
+    # 且几 GB 级文件白占磁盘)。正常厂商换包时旧包 <= 新包, 不会误删有效备份。
     if [ -s "${PART_PATH}.stale" ] && [ -n "${rsz}" ]; then
         local stsz; stsz="$(stat -c%s "${PART_PATH}.stale")"
         if [ "${stsz}" -gt "${rsz}" ]; then
@@ -286,22 +454,54 @@ download_zip() {
     fi
     check_space || return 1
 
+    # ---- 未完成文件: 先确认“它和当前远端是同一版”, 再决定续传还是重下 ----
     if [ -s "${PART_PATH}" ]; then
         local psz
         psz="$(stat -c%s "${PART_PATH}")"
-        # 厂商 "Latest" 包更新后, 本地 .part 可能大于远端 (旧版包更大):
-        # 此时续传偏移已超过文件长度, 服务器必然回 416, 必须作废旧文件重新下载
-        if [ -n "${rsz}" ] && [ "${psz}" -ge "${rsz}" ]; then
-            log_warn "未完成文件 $(human "${psz}") 已不小于远端大小 $(human "${rsz}") (旧版底包残留)"
-            log_warn "  续传不可行 (HTTP 416), 将旧文件移到 .stale 后重新下载"
-            mv -f "${PART_PATH}" "${PART_PATH}.stale" 2>/dev/null || rm -f "${PART_PATH}"
+        if [ "${QPI_NO_RESUME:-0}" = "1" ]; then
+            log_info "QPI_NO_RESUME=1, 不续传, 从零下载 (已有 $(human "${psz}"))"
+            discard_part
+        # ① 已不小于远端: 旧版包残留(厂商换包变小) 或并发写入膨胀 -> 续传必 416
+        elif [ -n "${rsz}" ] && [ "${psz}" -ge "${rsz}" ]; then
+            log_warn "未完成文件 $(human "${psz}") 已不小于远端大小 $(human "${rsz}") (旧版底包残留/写入膨胀)"
+            log_warn "  续传不可行 (HTTP 416), 丢弃后从零下载"
+            discard_part
+        # ② 有版本记录: 与当前远端逐一比对, 变了就不能续
+        elif [ -f "${PART_META}" ]; then
+            local m_etag m_size m_md5 changed=0
+            m_etag="$(part_meta_get ETAG)"
+            m_size="$(part_meta_get SIZE)"
+            m_md5="$(part_meta_get VENDOR_MD5)"
+            if [ -n "${rsz}" ] && [ -n "${m_size}" ] && [ "${m_size}" != "${rsz}" ]; then changed=1; fi
+            if [ -n "${m_etag}" ] && [ -n "${RETAG_META}" ] && [ "${m_etag}" != "${RETAG_META}" ]; then changed=1; fi
+            if [ -n "${m_md5}" ] && [ -n "${rmd5}" ] && [ "${m_md5}" != "${rmd5}" ]; then changed=1; fi
+            if [ "${changed}" = "1" ]; then
+                log_warn "远端包已变化, 已下的 $(human "${psz}") 属于旧版本"
+                log_warn "  续传会把两个版本拼成大小正确、内容错乱的文件 (md5 必不符)"
+                log_warn "  记录: SIZE=${m_size:-?} ETAG=${m_etag:-?} MD5=${m_md5:-?}"
+                log_warn "  现在: SIZE=${rsz:-?} ETAG=${RETAG_META:-?} MD5=${rmd5:-?}"
+                log_warn "  丢弃旧数据, 从零下载最新包"
+                discard_part
+            else
+                log_info "检测到未完成文件 $(human "${psz}") (与远端同一版本), 断点续传..."
+            fi
+        # ③ 无版本记录 (旧脚本/手工留下的 .part): 无法确认是否同一版
         else
-            log_info "检测到未完成文件 $(human "${psz}"), 断点续传..."
+            log_warn "检测到未完成文件 $(human "${psz}"), 但没有版本记录 (旧版脚本/手工留下的)"
+            log_warn "  无法确认它是否属于厂商当前这一版; 若续传拼错, md5 会拦下并自动重下一次"
+            if ask_download "继续续传这个未完成文件 (省一次 $(human "${psz}") 下载)?" Y; then
+                log_info "  继续续传; 若 md5 不符会自动从零重下"
+            else
+                discard_part
+            fi
         fi
     fi
 
+    # 每次传输前把“本次下的是哪一版”写进 .part.meta (续传正确性的根据)
+    write_part_meta "${rsz}" "${RETAG_META}" "${RLM_META}" "${rmd5}"
+
     # 优先 aria2c (多连接, 有则明显更快), 其次 curl -C -, 最后 wget -c
-    # lmd5: 下载过程/校验可能重复需要本地 md5 (3.2 GiB 算一次要一两分钟), 缓存复用
+    # lmd5: 下载过程/校验可能重复需要本地 md5 (几 GiB 算一次要一两分钟), 缓存复用
     local lmd5=""
     if [ -n "${QPI_ARIA2:-}" ] && command -v aria2c >/dev/null 2>&1; then
         log_info "使用 aria2c (多连接): ${URL}"
@@ -312,7 +512,7 @@ download_zip() {
             log_err "aria2c 下载失败"; return 1; }
     elif command -v curl >/dev/null 2>&1; then
         log_info "使用 curl 下载 (支持断点续传): ${URL}"
-        log_info "  预计耗时较长 (约 3.2 GiB), 中断后重跑本命令会自动续传"
+        log_info "  预计耗时较长 (几 GiB), 中断后重跑本命令会自动续传"
         # 关键: 不要用 curl 的 --retry 处理大文件续传。
         #   -C - 只在【进程启动时】计算一次偏移; curl 内部重试会丢弃已收数据从头再来
         #   (实测遇到: "curl: (56) OpenSSL SSL_read ... unexpected eof" 后
@@ -320,7 +520,11 @@ download_zip() {
         # 正确做法: 外层 bash 循环, 每次失败都【重新启动 curl】, 让它重新读取
         #   .part 当前大小并从该偏移续传。只有连接层错误才重试。
         local attempt=0 max_attempts="${QPI_DL_ATTEMPTS:-40}"
-        local prev_size cur_size stall=0 heal=0
+        local prev_size cur_size stall=0 heal=0 range_unsupported=0
+        # 有 ETag 就带上 If-Range: 续传时服务器自己就会拒绝“跨版本拼接” (回 200 全量),
+        # 不用等几 GB 下完算 md5 才发现拼坏了。
+        local curl_hdr=()
+        [ -n "${RETAG_META}" ] && curl_hdr=(-H "If-Range: ${RETAG_META}")
         while :; do
             attempt=$((attempt+1))
             prev_size="$(stat -c%s "${PART_PATH}" 2>/dev/null || echo 0)"
@@ -329,10 +533,43 @@ download_zip() {
             download_with_progress "${PART_PATH}" "${rsz}" \
                 curl -L -C - --fail --connect-timeout 30 --max-time 0 \
                      --retry 0 --speed-limit 1024 --speed-time 30 \
+                     ${curl_hdr[@]+"${curl_hdr[@]}"} \
                      -sS -o "${PART_PATH}" "${URL}"
             local rc=$?
             cur_size="$(stat -c%s "${PART_PATH}" 2>/dev/null || echo 0)"
 
+            # rc=33 = "服务器不给续传"。两种成因必须分开处理, 不能傻等 5 次没进展:
+            #   ① 远端已换包, If-Range 不匹配 -> 服务器回 200 全量 -> .part 是旧版本
+            #   ② 代理/CDN 根本不支持 Range -> 永远续不上, 只能从零下
+            # 用 1 字节 Range 探测区分: 回 206 = 支持续传 (那就是①), 回 200 = 不支持。
+            if [ "${rc}" -eq 33 ] && [ "${cur_size}" -gt 0 ]; then
+                local probe
+                probe="$(curl -s -o /dev/null -D- -r 0-0 --max-time 30 "${URL}" 2>/dev/null \
+                         | tr -d '\r' | awk 'NR==1{print $2}')"
+                if [ "${probe}" = "206" ]; then
+                    log_warn "  服务器支持续传, 但远端内容已变化 (If-Range 不匹配)"
+                    log_warn "  手里的 $(human "${cur_size}") 是旧版本, 丢弃后从零下载最新包"
+                    discard_part
+                    remote_meta && rsz="${RSZ_META}"
+                    write_part_meta "${rsz}" "${RETAG_META}" "${RLM_META}" "${rmd5}"
+                    if [ -n "${RETAG_META}" ]; then curl_hdr=(-H "If-Range: ${RETAG_META}"); else curl_hdr=(); fi
+                    stall=0
+                    continue
+                fi
+                log_warn "  该地址不支持断点续传 (Range 探测返回 ${probe:-?}, 代理/CDN 常见)"
+                if [ "${range_unsupported}" = "0" ]; then
+                    range_unsupported=1
+                    log_warn "  续传这条路走不通, 丢弃 $(human "${cur_size}") 后从零下载一次"
+                    discard_part
+                    curl_hdr=()
+                    stall=0
+                    sleep 2
+                    continue
+                fi
+                log_err "  服务端持续不支持 Range, 无法完成下载"
+                log_err "  处理: 换网络 (绕过代理) / 换 QPI_DL_DIR 到能续传的环境重试"
+                return 1
+            fi
             if [ "${rc}" -eq 0 ]; then
                 # curl 声称成功, 但"成功"也可能被服务端坑: 断点续传时 HEAD 的
                 # Content-Length 与 GET 实际下发可能不一致 (CDN 多节点 / 厂商
@@ -370,7 +607,7 @@ download_zip() {
             if [ -n "${rsz}" ] && [ "${cur_size}" -ge "${rsz}" ]; then
                 log_warn "本地文件 $(human "${cur_size}") 已不小于远端 $(human "${rsz}") (416 或并发写入膨胀)"
                 log_warn "  删除异常文件, 重新下载 ..."
-                rm -f "${PART_PATH}"
+                discard_part
                 continue
             fi
             if [ "${cur_size}" -gt "${prev_size}" ]; then
@@ -428,8 +665,10 @@ download_zip() {
             log_warn "本地 $(human "${lsz}") 略大于 HEAD 报告 $(human "${rsz}"), 但 md5 与厂商一致 -> 接受 (HEAD Content-Length 过期)"
         else
             log_err "本地 $(human "${lsz}") 大于远端 $(human "${rsz}") 且校验未通过: 下载文件损坏 (并发写入膨胀)"
-            log_err "  已删除异常文件, 请重跑本命令重新下载: $0 fetch"
-            rm -f "${PART_PATH}"
+            local hb0="${HEAL:-0}"
+            retry_from_scratch && return 0
+            [ "${hb0}" -ge 1 ] || return 1
+            log_err "  仍异常, 停止 (已删除坏文件), 稍后重跑: $0 fetch"
             return 1
         fi
     elif [ "${lsz}" -lt "${rsz}" ]; then
@@ -442,16 +681,28 @@ download_zip() {
     # (仅大小相符无法发现"内容被写坏"; 这正是此前 system.img 解压失败的场景。)
     if [ -n "${rmd5}" ]; then
         if [ -z "${lmd5}" ]; then
-            log_info "校验厂商 md5 (3.2 GiB 需要一两分钟)..."
+            log_info "校验厂商 md5 (几 GiB 需要一两分钟)..."
             lmd5="$(file_md5 "${PART_PATH}")"
         fi
         if [ "${lmd5}" != "${rmd5}" ]; then
             log_err "md5 校验失败: 下载内容与厂商不一致"
-            log_err "  本地 md5: ${lmd5}"
+            log_err "  本地 md5: ${lmd5}  ($(human "${lsz}"))"
             log_err "  厂商 md5: ${rmd5}"
-            log_err "  该文件已作废, 删除后重新下载:"
-            log_err "    rm -f ${PART_PATH} && $0 fetch"
-            log_err "  (若是厂商刚更新了包, 上面日志会显示 '厂商包已更新')"
+            # 下面这条诊断是真实用户卡住的原因: 厂商换了 Latest.zip 但没按
+            # README.txt 的要求重跑 calc_md5.py -> md5 文件还是旧的, 于是
+            # 无论下载多少次、包多完整, 都必然"校验失败"。
+            if md5_file_looks_stale; then
+                log_err "  诊断: 厂商 md5 文件 (Last-Modified $(remote_md5_lastmod)) 比压缩包"
+                log_err "        (Last-Modified ${RLM_META}) 旧 -> 厂商换包后没重新生成 md5, 这个值已过期"
+                log_err "  绕过办法 (改以压缩包内部 CRC 为完整性依据):"
+                log_err "    QPI_NO_REMOTE_MD5=1 $0 fetch && unzip -t ${ZIP_PATH}"
+                log_err "  或等厂商更新: ${MD5_URL}"
+                return 1
+            fi
+            local hb1="${HEAL:-0}"
+            retry_from_scratch && return 0
+            [ "${hb1}" -ge 1 ] || return 1
+            report_heal_giveup "${lsz}"
             return 1
         fi
         log_ok "md5 校验通过: ${lmd5}"
@@ -460,6 +711,7 @@ download_zip() {
     fi
 
     mv -f "${PART_PATH}" "${ZIP_PATH}"
+    rm -f "${PART_META}"
     log_ok "下载完成: $(human "$(stat -c%s "${ZIP_PATH}")")"
     return 0
 }
@@ -470,10 +722,12 @@ download_zip() {
 # 行为 (按需求):
 #   联网失败            -> 使用本地底包继续打包 (不阻塞构建)
 #   联网成功且 md5 一致  -> 本地已是最新, 继续打包
-#   联网成功且 md5 变了  -> 下载最新包 -> 校验 -> 替换本地 -> 重新解压 -> 继续打包
-# 返回: 0 = 可以继续打包; 1 = 必须中止 (厂商包已更新但获取失败)
+#   联网成功且 md5 变了  -> 询问用户是否下载最新包 (默认 N=保留本地);
+#                          选“是”才 下载 -> 校验 -> 替换 -> 重新解压 -> 继续打包
+# 返回: 0 = 可以继续打包; 1 = 必须中止 (用户选了更新但获取失败)
 # 开关: QPI_NO_REFRESH=1   跳过本检查 (完全离线/不想联网时)
 #       QPI_ALLOW_STALE=1  厂商包已更新但下载失败时, 仍用旧底包继续打包 (默认中止)
+#       QPI_DL_YES=1 / QPI_DL_NO=1  不询问, 直接下载 / 直接保留 (CI 用)
 cmd_refresh() {
     if [ "${QPI_NO_REFRESH:-0}" = "1" ]; then
         log_info "QPI_NO_REFRESH=1, 跳过底包新鲜度检查 (使用本地底包)"
@@ -493,7 +747,7 @@ cmd_refresh() {
     # --- 2) 与本地比对 ---
     local changed=0 how=""
     if [ -s "${ZIP_PATH}" ]; then
-        log_info "  计算本地包 md5 (3.2 GiB 需要一两分钟)..."
+        log_info "  计算本地包 md5 (几 GiB 需要一两分钟)..."
         local lmd5; lmd5="$(file_md5 "${ZIP_PATH}")"
         if [ "${lmd5}" = "${rmd5}" ]; then
             log_ok "  本地底包已是最新 (md5 一致), 继续打包"
@@ -515,11 +769,24 @@ cmd_refresh() {
         changed=1; how="记录 md5=${rec}"
     fi
 
-    # --- 3) 厂商包已更新: 下载并替换 ---
+    # --- 3) 厂商包已更新: 问用户是否真的下载 (构建流程也不能默默占几 GB 流量) ---
     log_warn "  厂商底包已更新 (${how} / 现在 ${rmd5})"
+    log_info "  本地底包仍可用 (与厂商最新不同步)"
+    if ! ask_download "厂商底包已更新, 是否下载最新包并替换本地 (然后重新解压/继续打包)?"; then
+        log_warn "  按当前选择保留本地底包, 继续打包 (产物可能与厂商最新不一致)"
+        log_info "  想更新时: QPI_DL_YES=1 $0 fetch"
+        return 0
+    fi
     log_info "  下载最新包并替换本地..."
 
-    if ! download_zip; then
+    HEAL=0
+    download_zip; local dlrc=$?
+    if [ "${dlrc}" = "2" ]; then
+        # 用户在下载环节又选了"保留本地", 尊重该选择
+        log_warn "  保留本地底包, 继续打包 (未更换为厂商最新版)"
+        return 0
+    fi
+    if [ "${dlrc}" != "0" ]; then
         log_err "  获取最新底包失败"
         if [ "${QPI_ALLOW_STALE:-0}" = "1" ]; then
             log_warn "  QPI_ALLOW_STALE=1, 仍使用旧底包继续打包 (产物可能与厂商最新不一致)"
@@ -579,7 +846,7 @@ verify_sha256() {
                   | awk 'NF>=1 && $1 ~ /^[0-9a-fA-F]{64}$/ {print $1; exit}')"
     fi
 
-    log_info "计算 sha256 (3.2 GiB 需要一两分钟)..."
+    log_info "计算 sha256 (几 GiB 需要一两分钟)..."
     local actual; actual="$(sha256sum "${ZIP_PATH}" | awk '{print $1}')"
 
     if [ -z "${expect}" ]; then
@@ -774,21 +1041,43 @@ cmd_fetch() {
         if [ -z "${miss}" ]; then
             log_ok "固件底包已齐全, 无需下载 (${PREBUILDS_DIR})"
             missing_optional | sed 's/^/    (可选未生成) /' >&2
+            if [ -s "${ZIP_PATH}" ]; then
+                log_info "本地缓存压缩包: $(human "$(stat -c%s "${ZIP_PATH}")")  ${ZIP_PATH}"
+            fi
             # 顺带告诉你厂商是否已发布新版 (只发一个 HTTP GET, 不算哈希)
             local chg st
             chg="$(vendor_pkg_changed)"; st=$?
             if [ "${st}" = "1" ]; then
                 log_warn "厂商底包已更新 (${chg})"
-                log_info "  要换成最新包: rm -rf ${PREBUILDS_DIR} ${ZIP_PATH} && QPI_FETCH_FORCE=1 $0 fetch"
+                log_info "  本地已有可用底包, 继续用它也能编译/烧录"
+                if ask_download "是否下载厂商最新固件并替换本地底包 (会重新下载+解压覆盖 prebuilds/)?"; then
+                    QPI_FETCH_FORCE=1      # 落到下面的完整流程: 下载 -> 校验 -> 解压 -> 覆盖
+                else
+                    log_warn "  保留本地底包 (不用最新版)"
+                    log_info "  想更新时: QPI_DL_YES=1 $0 fetch"
+                    return 0
+                fi
             elif [ "${st}" = "0" ]; then
                 log_info "厂商包未变化 (md5 与记录一致)"
+            else
+                log_info "无法判断厂商是否更新 (离线 或 厂商无 md5 文件)"
             fi
-            return 0
+            [ -z "${QPI_FETCH_FORCE:-}" ] && return 0
+        else
+            log_info "缺失: $(echo "$miss" | tr '\n' ' ')"
         fi
-        log_info "缺失: $(echo "$miss" | tr '\n' ' ')"
     fi
 
-    download_zip   || return 1
+    HEAL=0
+    download_zip; local dlrc=$?
+    if [ "${dlrc}" = "2" ]; then
+        # 2 = 用户在“下载/替换”那一刻选了保留本地。本地包/底包已存在，
+        # 继续用它走后续校验+解压 (不把本地数据白白作废)。
+        log_warn "按当前选择保留本地固件包, 继续使用"
+        [ -s "${ZIP_PATH}" ] || { log_err "本地无可用压缩包, 无法继续"; return 1; }
+    elif [ "${dlrc}" != "0" ]; then
+        return 1
+    fi
     verify_sha256  || return 1
     extract_zip    || return 1
     validate_prebuilds || return 1
@@ -812,7 +1101,7 @@ cmd_clean() {
     [ -s "${ZIP_PATH}" ] && freed=$((freed + $(stat -c%s "${ZIP_PATH}")))
     [ -s "${PART_PATH}" ] && freed=$((freed + $(stat -c%s "${PART_PATH}")))
     [ -s "${PART_PATH}.stale" ] && freed=$((freed + $(stat -c%s "${PART_PATH}.stale")))
-    rm -f "${ZIP_PATH}" "${PART_PATH}" "${PART_PATH}.stale"
+    rm -f "${ZIP_PATH}" "${ZIP_PATH}.stale" "${PART_PATH}" "${PART_PATH}.stale" "${PART_META}"
     rm -rf "${UNPACK_DIR}"
     log_ok "已清理下载缓存 (释放 $(human "${freed}")), prebuilds/ 未改动"
 }
@@ -835,7 +1124,7 @@ cmd_md5() {
     }
     log_info "厂商 md5: ${rmd5}"
     if [ -s "${ZIP_PATH}" ]; then
-        log_info "计算本地包 md5 (3.2 GiB 需要一两分钟)..."
+        log_info "计算本地包 md5 (几 GiB 需要一两分钟)..."
         local lmd5; lmd5="$(file_md5 "${ZIP_PATH}")"
         if [ "${lmd5}" = "${rmd5}" ]; then
             log_ok "本地包与厂商一致 (无需重新下载)"
@@ -862,9 +1151,10 @@ cmd_verify() {
 
     local ok=1
     # 1) 厂商 md5 (权威: 证明与厂商源一致)
+    remote_meta || true                 # 顺带拿 Last-Modified, 用于“md5 文件是否过期”诊断
     local rmd5; rmd5="$(remote_md5)" || true
     if [ -n "${rmd5}" ]; then
-        log_info "校验厂商 md5 (3.2 GiB 需要一两分钟)..."
+        log_info "校验厂商 md5 (几 GiB 需要一两分钟)..."
         local lmd5; lmd5="$(file_md5 "${ZIP_PATH}")"
         if [ "${lmd5}" = "${rmd5}" ]; then
             log_ok "厂商 md5 一致: ${lmd5}"
@@ -872,6 +1162,11 @@ cmd_verify() {
             log_err "厂商 md5 不一致!"
             log_err "  本地: ${lmd5}"
             log_err "  厂商: ${rmd5}"
+            if md5_file_looks_stale; then
+                log_err "  诊断: 厂商 md5 文件 (Last-Modified $(remote_md5_lastmod)) 比压缩包"
+                log_err "        (Last-Modified ${RLM_META}) 旧 -> 厂商换包后未重新生成 md5, 这个值已过期"
+                log_info "  这种情况请看下面的 CRC 结果: CRC 通过 = 文件本身是好的"
+            fi
             ok=0
         fi
     else
@@ -883,7 +1178,7 @@ cmd_verify() {
         log_warn "未找到 unzip, 无法做 CRC 校验 (安装: ./tools/setup-deps.sh install)"
         [ "${ok}" = "1" ] && return 0 || return 1
     fi
-    log_info "测试压缩包内部 CRC (3.2 GiB, 需要几分钟)..."
+    log_info "测试压缩包内部 CRC (几 GiB, 需要几分钟)..."
     local out; out="$(unzip -t "${ZIP_PATH}" 2>&1)"
     local rc=$?
     if [ "$rc" -eq 0 ]; then
@@ -913,7 +1208,10 @@ cmd_pin() {
 }
 
 usage() {
-    sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    # 打印脚本头部的用法/环境变量说明: 跳过前 4 行标题框, 到下一个 ==== 分隔线为止
+    awk 'NR<5 {next}
+         /^# ={10,}$/ {exit}
+         {sub(/^# ?/, ""); print}' "${BASH_SOURCE[0]}"
 }
 
 case "${1:-fetch}" in

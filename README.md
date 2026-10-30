@@ -98,8 +98,12 @@ make prebuilds                          # 同上
 - 默认地址（官方固定 URL，可用 `QPI_PREBUILDS_URL` 覆盖）：
   `https://developer.quectel.com/doc/files/quectel_pi/Quectel_Pi_H1_WF_Debian_RD2_Latest.zip`
   （指向厂商"最新"底包，内容会随厂商更新）
-- 下载约 3.2 GiB，**支持断点续传**：中断后重跑同一条命令即继续；完整包会缓存在
-  `download/`（独立于 `build/`，不会被 `buildclean` 清掉），拷给同事可省一次下载。
+- 下载约 7 GiB（厂商换包后会有变化），**支持断点续传**：中断后重跑同一条命令即继续；
+  完整包会缓存在 `download/`（独立于 `build/`，不会被 `buildclean` 清掉），拷给同事可省一次下载。
+- **升级不会白白下载**：远端换包 / 本地已有完整包时，工具会先把“本地 vs 远端”的差异
+  （大小、md5、Last-Modified）打出来，再**问你要不要下载替换**；不回答默认**保留本地**。
+  非交互环境（插件/CI/管道）默认也是保留本地，要下载得显式 `QPI_DL_YES=1`。
+  几 GB 的下载绝不默默开下。
 
 ### 完整性校验：以厂商 md5 为准
 
@@ -115,13 +119,27 @@ https://developer.quectel.com/doc/files/quectel_pi/Quectel_Pi_H1_WF_Debian_RD2_L
 |------|------|
 | 联网失败 / 取不到 md5 | **使用本地底包继续打包**（不阻塞构建） |
 | 联网成功，md5 一致 | 本地已是最新，继续打包 |
-| 联网成功，md5 变了 | 下载最新包 → 校验 → **替换本地** → 重新解压 → 继续打包 |
-| 已更新但下载失败 | 中止打包（避免产出与厂商最新不一致的镜像）；`QPI_ALLOW_STALE=1` 可强行用旧底包 |
+| 联网成功，md5 变了 | **先问你要不要下载最新包**（默认 N = 保留本地继续打包）；选“是”才 下载 → 校验 → 替换 → 重新解压 → 继续打包 |
+| 选了更新但下载失败 | 中止打包（避免产出与厂商最新不一致的镜像）；`QPI_ALLOW_STALE=1` 可强行用旧底包 |
 
-开关：`QPI_NO_REFRESH=1` 跳过该检查；`QPI_ALLOW_STALE=1` 允许用旧底包继续。
+开关：`QPI_NO_REFRESH=1` 跳过该检查；`QPI_ALLOW_STALE=1` 允许用旧底包继续；
+`QPI_DL_YES=1` 不询问直接下载最新；`QPI_DL_NO=1` 不询问直接保留本地；
+`QPI_UPD_DEFAULT=Y|N` 是非交互环境下“是否更新”的默认答案（默认 N）。
 
 **② `fetch` 时也会校验**：本地包 md5 不一致即判为"厂商已更新或本地损坏"，
-旧文件留 `.stale` 并重新下载；下载完成后强制按厂商 md5 校验，不符即失败。
+先把差异打出来再**问你是否下载替换**；选“否”就继续用本地包（`fetch` 返回后照常
+校验/解压，不会删你的本地数据）。真要更新时旧文件会留 `.stale` 备份。
+
+**③ 厂商 md5 文件过期会自动识别**（真实踩过的坑）：厂商用软链接把 `..._Latest.zip`
+指向最新版本，按README 要求换包后应重算 `..._Latest_md5.txt`——但他们漏过。
+此时无论下载多少次、包多完整，md5 校验都必然失败。工具会比对两个文件的
+`Last-Modified`，发现 md5 文件比压缩包**旧 6 小时以上**就直接判定“厂商 md5 文件过期”，
+不再白白重下，并给出绕过办法：
+
+```bash
+QPI_NO_REMOTE_MD5=1 ./tools/fetch-prebuilds.sh fetch   # 改用“大小 + 内部 CRC”判定
+unzip -t download/Quectel_Pi_H1_WF_Debian_RD2_Latest.zip
+```
 
 替换底包时旧的原版镜像不会丢：`prebuilds/system.img` → `system.img.prev`，
 派生的 `base_rootfs`/`sysroot` 会移到 `.prev` 并重建（因为它们是从旧镜像派生的）。
@@ -140,6 +158,11 @@ https://developer.quectel.com/doc/files/quectel_pi/Quectel_Pi_H1_WF_Debian_RD2_L
 ./tools/fetch-prebuilds.sh pin      # 固化本地 sha256 记录
 ./tools/fetch-prebuilds.sh clean    # 清理下载缓存（不动 prebuilds/）
 ```
+
+续传相关：`download/*.part` 旁边会写一个 `.part.meta`（远端大小 / ETag / Last-Modified /
+厂商 md5），下次续传前先比对——远端换过包就明确告诉你“续传已作废，从零重下”，
+而不是把两个版本拼成大小正确的坏文件。`QPI_NO_RESUME=1` 可强制不续传；
+服务端不支持 Range（代理/CDN 常见）时脚本会自动探到并从零下，不会空转重试 40 次。
 
 ### 产物不覆盖原版
 
