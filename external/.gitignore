@@ -1,0 +1,8 @@
+# 外置驱动源码随 SDK 提供，所有模块在 /build/wifibt 编译，不在此目录构建。
+*.o
+*.ko
+*.cmd
+*.mod
+*.mod.c
+Module.symvers
+modules.order

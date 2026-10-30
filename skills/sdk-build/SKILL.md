@@ -63,5 +63,5 @@ ai_sdk/
 - **交叉编译环境**：app 工程先 `source build.sh`，CMake 工程使用 `$CMAKE_TOOLCHAIN_FILE`
 - **rootfs 不污染底包**：写入始终发生在 `build/` 工作副本，`prebuilds/base_image/rootfs.img` 只作为输入
 - **overlays**：内建 i2c3/i2c7/spi1/uart1 disable + can0-enable；SDK 的 pwm2-disable 从 `overlay/*.dts` 编译，共 6 个。
-- **模块配套**：自编内核打包时自动把本次 AIC8800 三个模块写入 rootfs 工作副本，避免沿用底包旧模块。
+- **模块配套**：使用 external/rkwifibt/drivers/aic8800_sdio 官方外置驱动，禁止用 kernel 目录的另一套默认模块替代；kernel/all 及 pack 会构建外置模块，pack 不编内核。三个模块及 57 个固件写入 rootfs 工作副本并回读校验。
 - **提交范围**：`prebuilds/` 和 `demo/` 全部忽略，不暂存、不提交；提交必须另行取得确认。

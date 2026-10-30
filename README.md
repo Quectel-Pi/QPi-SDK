@@ -51,7 +51,7 @@ buildboot               # 生成 FIT boot.img
 buildoverlays           # 编译 overlay/*.dts
 buildrootfs             # 应用 overlay/ 到 rootfs 工作副本
 buildall                # 完整生成 update.img (含内核编译)
-buildpack               # 只打包 update.img (不编内核, 秒级~分钟级)
+buildpack               # 重编外置无线模块并打包 update.img (不编内核)
 buildmenuconfig         # 内核 menuconfig
 buildclean              # 清理构建产物
 ```
@@ -67,7 +67,7 @@ M2 Debian 应用开发默认使用 `toolchains/m2-debian-rootfs-toolchain/`：�
 ./tools/build-kernel.sh kernel      # 编译内核 + 内建 overlays
 ./tools/build-kernel.sh boot        # 生成 FIT boot.img
 ./tools/build-kernel.sh all         # 完整: 内核 + boot.img + overlays + update.img
-./tools/build-kernel.sh pack        # 只打包: 不编内核/overlays, 用现有 boot.img 出 update.img
+./tools/build-kernel.sh pack        # 不编内核/overlays，重编配套外置无线模块并打包
 ./tools/build-kernel.sh check       # 环境检查
 ./tools/build-kernel.sh clean       # 清理
 
@@ -204,7 +204,8 @@ clean:
 
 同步成功后旧 `.config` 自动备份，下次构建重新生成配置；必需片段缺失时停止，
 不静默丢掉新特性。配置入口已按上游统一，不使用 `rockchip-debug.config`。
-完整固件打包自动安装配套 AIC8800 模块并回读校验，不能仅凭 vermagic 判断兼容。
+完整固件打包使用官方外置 AIC8800 SDIO 驱动及固件，不使用内核目录中另一套默认配置模块；
+模块和固件均回读校验，不能仅凭 vermagic 判断兼容。
 自动识屏设备树必须搭配支持它的 U-Boot：打包优先使用 SDK 自带的
 [配套启动固件及说明](tools/boot/README.md)，不修改底包；旧 U-Boot 会被检查拒绝。
 升级必须同时更新 U-Boot 和 boot，不能仅烧录 boot 分区。

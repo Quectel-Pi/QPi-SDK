@@ -1,0 +1,8 @@
+# 官方 M2 Debian post-wifibt.sh 的 AIC8800_SDIO 驱动及固件来源
+commit=b1eaf88c5b1c554fabce8e5daa4cbc8fc9faa6f3
+driver=external/rkwifibt/drivers/aic8800_sdio
+firmware=external/rkwifibt/firmware/aic/sdio
+platform=CONFIG_PLATFORM_ROCKCHIP
+# 默认 /lib/firmware；实际遵从当前内核 CONFIG_AIC_FW_PATH。
+# M2 当前为 /vendor/etc/firmware，底包通过 vendor/system 符号链接指向 /usr/lib/firmware。
+firmware_install=/usr/lib/firmware

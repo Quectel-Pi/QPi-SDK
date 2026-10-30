@@ -26,6 +26,8 @@ set -euo pipefail
 TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$TOOLS_DIR/.." && pwd)"
 KERNEL_DIR="$ROOT_DIR/kernel"
+WIFIBT_SOURCE="$ROOT_DIR/external/rkwifibt/drivers/aic8800_sdio"
+WIFIBT_FIRMWARE="$ROOT_DIR/external/rkwifibt/firmware/aic/sdio"
 BASE_IMAGE_DIR="$ROOT_DIR/prebuilds/base_image"
 PACK_TOOL_DIR="$TOOLS_DIR/pack_tools"
 BOOT_DIR="$TOOLS_DIR/boot"
@@ -169,7 +171,28 @@ check_env() {
     [ -x "$PACK_TOOL_DIR/rkImageMaker" ] || { log_err "缺少 $PACK_TOOL_DIR/rkImageMaker"; return 1; }
     [ -f "$BOOT_DIR/$FIT_ITS" ] || { log_err "缺少 $BOOT_DIR/$FIT_ITS"; return 1; }
     [ -x "$BOOT_DIR/mkimage" ] || { log_err "缺少 $BOOT_DIR/mkimage (U-Boot FIT 打包工具)"; return 1; }
+    [ -f "$WIFIBT_SOURCE/Makefile" ] || { log_err "缺少官方外置 AIC8800 SDIO 源码: $WIFIBT_SOURCE"; return 1; }
+    [ -d "$WIFIBT_FIRMWARE/aic8800D80" ] || { log_err "缺少配套 SDIO 固件: $WIFIBT_FIRMWARE"; return 1; }
     return 0
+}
+
+build_wifibt() {
+    local tc="$1" driver="$WORK_DIR/wifibt/driver" module
+    [ -f "$KERNEL_DIR/Module.symvers" ] && [ -f "$KERNEL_DIR/.config" ] \
+        || { log_err "请先编译内核，再构建外置无线模块"; return 1; }
+    # 与官方 post-wifibt.sh 的 AIC8800_SDIO 分支一致：M=external/...，
+    # 使用当前内核配置，不拿 kernel/drivers/... 的 Android 默认配置替代。
+    # 每次刷新整份源码，避免源文件删除、时间戳或旧参数导致残留模块被误打包。
+    rm -rf "$driver"
+    mkdir -p "$driver"
+    cp -a "$WIFIBT_SOURCE/." "$driver/"
+    log_info "编译官方 M2 外置 WiFi/BT 驱动 (AIC8800_SDIO)"
+    make -C "$KERNEL_DIR" -j"$JOBS" M="$driver" \
+        ARCH=arm64 CROSS_COMPILE="$tc/bin/aarch64-none-linux-gnu-" modules
+    for module in aic8800_bsp aic8800_fdrv aic8800_btlpm; do
+        [ -s "$driver/$module/$module.ko" ] \
+            || { log_err "外置模块未生成: $module"; return 1; }
+    done
 }
 
 # ----------------------------------------------------------------------------
@@ -261,6 +284,7 @@ build_kernel() {
     else
         log_warn "内核 Makefile 未声明任何 .dtbo overlay"
     fi
+    build_wifibt "$tc"
 }
 
 # ----------------------------------------------------------------------------
@@ -371,11 +395,11 @@ assemble_image_dir() {
         log_info "跳过应用层 overlay (overlay/ 下无应用文件, 仅有 .dts/.dtbo/README)"
     fi
 
-    # 自编内核必须配套自编 AIC 模块；不写入 prebuilds 或 demo。
+    # 官方 Debian 用 external/rkwifibt 的 SDIO 分支，不是内核目录中的 Android 默认模块。
     local modules=() module
     if [ -f "$KERNEL_DIR/boot.img" ]; then
         for module in aic8800_bsp aic8800_fdrv aic8800_btlpm; do
-            local ko="$KERNEL_DIR/drivers/net/wireless/aic8800/$module/$module.ko"
+            local ko="$WORK_DIR/wifibt/driver/$module/$module.ko"
             [ -f "$ko" ] || { log_err "缺少配套 WiFi/BT 模块: $ko，请先编译内核"; return 1; }
             modules+=("$ko")
         done
@@ -400,6 +424,18 @@ assemble_image_dir() {
             write_rootfs_file "$WORK_DIR/rootfs-overlay.img" "$module" "/usr/lib/modules/$(basename "$module")"
             log_info "  配套模块已写入并校验: $(basename "$module")"
         done
+        if [ "${#modules[@]}" -gt 0 ]; then
+            # 官方 post-wifibt.sh 将 sdio/*/* 平铺到 /lib/firmware；Debian /lib -> usr/lib。
+            debugfs -w -R "mkdir /usr/lib/firmware" "$WORK_DIR/rootfs-overlay.img" </dev/null >/dev/null 2>&1 || true
+            local firmware count=0
+            for firmware in "$WIFIBT_FIRMWARE"/*/*; do
+                [ -f "$firmware" ] || continue
+                write_rootfs_file "$WORK_DIR/rootfs-overlay.img" "$firmware" "/usr/lib/firmware/$(basename "$firmware")"
+                count=$((count + 1))
+            done
+            [ "$count" -gt 0 ] || { log_err "没有可安装的配套 SDIO 固件"; return 1; }
+            log_ok "已安装并逐个回读校验 $count 个配套 SDIO 固件文件"
+        fi
         local rc=0
         e2fsck -f -y "$WORK_DIR/rootfs-overlay.img" > /dev/null 2>&1 || rc=$?
         [ "$rc" -lt 4 ] || { log_err "e2fsck 发现未修复错误 ($rc)"; return 1; }
@@ -589,9 +625,12 @@ main() {
             pack_update_img
             ;;
         pack)
-            # 只打包: 不编内核/overlays, 用现有 boot.img + 底包直接生成 update.img
+            # 不编内核/overlays；重编外置无线模块，再用现有内核产物打包。
             # kernel 子命令产生的是传统 boot.img，必须转为 Debian FIT 格式。
             if [ -f "$KERNEL_DIR/boot.img" ]; then
+                local tc
+                tc="$(find_toolchain)" || exit 1
+                build_wifibt "$tc"
                 make_fit_boot
             fi
             assemble_image_dir

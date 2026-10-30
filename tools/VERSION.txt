@@ -7,6 +7,8 @@ KERNEL=Linux 6.1.118
 # 底包版本以实际 rootfs /etc/quectel-release 为准，下载资源可独立升级。
 FIRMWARE_VERSION=QSM610ZAPWFRD1A01_BD01BP01K0M01_QDP_LP6.1.118.01.114
 UPSTREAM_KERNEL_COMMIT=b1eaf88c5b1c554fabce8e5daa4cbc8fc9faa6f3
+UPSTREAM_WIFIBT_COMMIT=b1eaf88c5b1c554fabce8e5daa4cbc8fc9faa6f3
+WIFIBT_DRIVER=external/rkwifibt/drivers/aic8800_sdio
 UBOOT_IMAGE=tools/boot/uboot-m2.img
 UBOOT_BUILD="Oct 26 2026 - 11:24:06 +0800"
 UBOOT_SHA256=014ee0f8adfa35297c12a0e9d684ed8de43bb8d49987a5e588ae00321b595e55
