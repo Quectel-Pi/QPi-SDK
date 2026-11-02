@@ -30,6 +30,14 @@ QPI_SDK_TOPDIR="$(cd "$(dirname "${BASH_SOURCE[0]}" )" && pwd)"
 export QPI_SDK_TOPDIR
 export TOPDIR="$QPI_SDK_TOPDIR"
 
+# 需要 root 的清理操作 (build/rootfs-staging 属主为 root, 见 buildclean)。
+# 容器内: 镜像预置免密 sudo; 宿主手动运行: 正常提示输入密码; 已是 root: 留空。
+if [ "$(id -u)" -eq 0 ]; then
+    SUDO="${SUDO:-}"
+else
+    SUDO="${SUDO:-sudo}"
+fi
+
 # ---------------------------------------------------------------------------
 # simple-h1 原生环境 (工具链 PATH / CROSS_COMPILE / ARCH / 目录变量)
 # ---------------------------------------------------------------------------
@@ -494,7 +502,9 @@ buildsavedefconfig() {
 
 buildclean() {
     echo "清理构建产物 (build/)..."
-    rm -rf "${BUILD_DIR}"
+    # rootfs-staging 由 tools/build-rootfs.sh 用 sudo rsync 提取, 属主为 root,
+    # 普通用户 rm 会 Permission denied (rm -rf 跳过错误继续, 最后仍打印"清理完成")。
+    ${SUDO} rm -rf "${BUILD_DIR}"
     mkdir -p "${BUILD_DIR}"
     echo "清理完成 (下次 buildall 会重新生成)"
 }

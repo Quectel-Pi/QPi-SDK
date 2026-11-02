@@ -526,7 +526,8 @@ cmd_clean() {
         fi
         [ -d "${mnt}" ] && rmdir "${mnt}" 2>/dev/null
     done
-    rm -rf "${STAGING}"
+    # STAGING 由 sudo rsync 从 rootfs.img 提取, 属主为 root, 必须用 sudo 删除。
+    ${SUDO} rm -rf "${STAGING}"
     log_ok "清理完成"
 }
 
