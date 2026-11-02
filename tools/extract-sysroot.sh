@@ -241,6 +241,11 @@ chk "dev/ 为空" "[ -z \"\$(ls -A '$OUT/dev')\" ]"
 
 emit_progress 0 0 97 "正在交叉编译自检"
 log_info "[5/5] 交叉编译冒烟测试 ..."
+# 官方运行时底包没有完整 GCC；先补齐应用工具链，再做编译验证。
+QPI_SYSROOT="$OUT" bash "$ROOT_DIR/tools/setup-app-toolchain.sh" || {
+    log_err "sysroot 已提取，但应用工具链初始化失败；修复网络/QEMU 后重新运行工具链安装脚本，无需重新解压"
+    exit 1
+}
 CC=""
 NEED_B=0
 if [ -x "$ROOT_DIR/toolchains/m2-debian-rootfs-toolchain/bin/aarch64-linux-gnu-gcc" ]; then

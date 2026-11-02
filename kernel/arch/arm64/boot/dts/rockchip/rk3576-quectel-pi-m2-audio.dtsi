@@ -116,7 +116,7 @@
             linux,code = <KEY_PLAYPAUSE>;
             press-threshold-microvolt = <33000>;
     };
-               
+
     vol-up-key {
             label = "vol_up";
             linux,code = <KEY_VOLUMEUP>;
@@ -126,7 +126,7 @@
              label = "vol_down";
              linux,code = <KEY_VOLUMEDOWN>;
              press-threshold-microvolt = <195000>;
-    };	
+    };
 };
 
 &pinctrl {
@@ -168,7 +168,7 @@
 };
 
 &hdmi_sound {
-	status = "disabled";
+	status = "okay";
 };
 
 &sai6 {

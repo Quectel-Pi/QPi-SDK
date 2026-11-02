@@ -15,7 +15,7 @@ int main(void)
     struct utsname info;
 
     /* 打印在向导中填写的消息 */
-    printf("{{MESSAGE}}\n");
+    printf("Hello from hello_demo\n");
 
     /* 读取并打印系统信息 */
     if (uname(&info) == 0) {
@@ -23,7 +23,7 @@ int main(void)
         printf("Machine : %s\n", info.machine);
     }
 
-    printf("Project : {{PROJECT_NAME}}\n");
+    printf("Project : hello_demo\n");
     printf("Done!\n");
     return 0;
 }

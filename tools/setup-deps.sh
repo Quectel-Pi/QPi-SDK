@@ -41,6 +41,8 @@ REQUIRED_TOOLS=(
   "python:python-is-python3"               # mkimg -> bmpconvert 转换开机 logo (env python)
   "cmake:cmake"                            # CMake 工程应用
   "file:file"                              # 镜像类型识别
+    "dpkg-deb:dpkg"                          # 应用工具链 arm64 包解包 (不安装到宿主)
+    "gpgv:gpgv"                              # 校验 Debian 软件源签名
   "git:git"                                # 仓库 / 资源获取
 )
 

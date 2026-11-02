@@ -6301,12 +6301,8 @@ int rwnx_cfg80211_init(struct rwnx_plat *rwnx_plat, void **platform_data)
 #ifdef CONFIG_USE_CUSTOMER_MAC
     ret = rwnx_get_custom_mac_addr(mac_addr_efuse);
 	if (ret){
-        /* vendor storage 无有效 MAC，回退读取芯片 eFuse 出厂 MAC */
-        AICWFDBG(LOGERROR, "%s read mac from vendor fail, fallback to chip efuse mac\r\n", __func__);
-        memset(mac_addr_efuse, 0, ETH_ALEN);
-        ret = rwnx_send_get_macaddr_req(rwnx_hw, (struct mm_get_mac_addr_cfm *)mac_addr_efuse);
-        if (ret)
-            goto err_lmac_reqs;
+	AICWFDBG(LOGERROR, "%s read mac fail use default mac\r\n", __func__);
+	memcpy(init_conf.mac_addr, dflt_mac, ETH_ALEN);
     }
 #else
 	ret = rwnx_send_get_macaddr_req(rwnx_hw, (struct mm_get_mac_addr_cfm *)mac_addr_efuse);

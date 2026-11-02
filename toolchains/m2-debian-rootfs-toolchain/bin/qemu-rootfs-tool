@@ -13,6 +13,7 @@ fi
 
 if [ ! -x "$SYSROOT/usr/bin/$TOOL_NAME" ]; then
     echo "[$TOOL_NAME] tool not found in sysroot: $SYSROOT/usr/bin/$TOOL_NAME" >&2
+    echo "请在 SDK 根目录运行: QPI_SYSROOT=\"$SYSROOT\" bash tools/setup-app-toolchain.sh" >&2
     exit 127
 fi
 

@@ -127,11 +127,39 @@ newapp() {
     fi
 
     mkdir -p "$dst_dir"
-    cp "$tpl_dir/main.c" "$tpl_dir/Makefile" "$dst_dir/" 2>/dev/null
+    local f
+    for f in main.c Makefile CMakeLists.txt; do
+        [ -f "$tpl_dir/$f" ] && cp "$tpl_dir/$f" "$dst_dir/"
+    done
 
-    # 替换模板占位符
-    sed -i "s/{{PROJECT_NAME}}/$name/g" "$dst_dir/main.c" "$dst_dir/Makefile"
-    sed -i "s/{{MESSAGE}}/Hello from $name/g" "$dst_dir/main.c"
+    # 替换模板占位符: PROJECT_NAME/MESSAGE 用应用名, 其余用 template.json 默认值
+    python3 - "$tpl_dir/template.json" "$dst_dir" "$name" <<'PY'
+import json, os, sys
+tpl_json, dst, name = sys.argv[1:4]
+vals = {}
+if os.path.isfile(tpl_json):
+    for k, v in json.load(open(tpl_json, encoding="utf-8")).get("variables", {}).items():
+        d = v.get("default")
+        if d is None and v.get("options"):
+            o = v["options"][0]
+            d = o.get("value", o.get("label")) if isinstance(o, dict) else o
+        vals[k] = "" if d is None else str(d)
+vals["PROJECT_NAME"] = name
+vals["MESSAGE"] = "Hello from " + name
+for f in ("main.c", "Makefile", "CMakeLists.txt"):
+    p = os.path.join(dst, f)
+    if not os.path.isfile(p):
+        continue
+    s = open(p, encoding="utf-8").read()
+    for k, v in vals.items():
+        s = s.replace("{{%s}}" % k, v)
+    open(p, "w", encoding="utf-8").write(s)
+PY
+
+    if grep -rq '{{[A-Z_0-9]*}}' "$dst_dir"; then
+        echo "WARN: 仍有未替换占位符:"
+        grep -rn '{{[A-Z_0-9]*}}' "$dst_dir"
+    fi
 
     echo "已创建应用: $dst_dir"
     echo "编译: buildapp $dst_dir"
@@ -142,6 +170,25 @@ buildapp() {
     local dir="${1:-.}"
     local app_dir
     app_dir="$(cd "$dir" 2>/dev/null && pwd)" || { echo "ERROR: 目录不存在: $dir"; return 1; }
+
+    # 模板目录含占位符，不能直接编译。
+    if [[ "$app_dir" == "$QPI_TEMPLATES_DIR"/* ]]; then
+        echo "ERROR: 这是模板目录，不能直接编译: $app_dir"
+        echo "请先创建应用: newapp <应用名> <模板名>"
+        echo "例如: newapp demo_gpio gpio && buildapp $QPI_EXAMPLES_DIR/demo_gpio"
+        return 1
+    fi
+
+    if [ -f "$app_dir/CMakeLists.txt" ] && grep -q '{{PROJECT_NAME}}' "$app_dir/CMakeLists.txt"; then
+        echo "ERROR: 检测到未替换占位符 {{PROJECT_NAME}}: $app_dir/CMakeLists.txt"
+        echo "请先用 newapp 从模板创建应用后再编译。"
+        return 1
+    fi
+    if [ -f "$app_dir/Makefile" ] && grep -q '{{PROJECT_NAME}}' "$app_dir/Makefile"; then
+        echo "ERROR: 检测到未替换占位符 {{PROJECT_NAME}}: $app_dir/Makefile"
+        echo "请先用 newapp 从模板创建应用后再编译。"
+        return 1
+    fi
 
     if [ -f "$app_dir/CMakeLists.txt" ]; then
         (cd "$app_dir" && cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$CMAKE_TOOLCHAIN_FILE" && cmake --build build) || return 1
@@ -197,6 +244,7 @@ buildenv() {
     fi
 
     echo "== [4/4] 环境校验 =="
+    bash "$QPI_SDK_TOPDIR/tools/setup-app-toolchain.sh" || return 1
     "$QPI_SDK_TOPDIR/tools/build-kernel.sh" check || return 1
     "$QPI_SDK_TOPDIR/tools/build-rootfs.sh" check || return 1
     echo "[OK] 构建环境配置完成"

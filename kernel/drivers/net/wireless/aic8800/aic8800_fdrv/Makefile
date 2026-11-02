@@ -19,7 +19,7 @@ CONFIG_START_FROM_BOOTROM = y
 CONFIG_PMIC_SETTING ?=y
 
 # Select 8800DC/DW DCDC_VRF mode, check your board
-CONFIG_VRF_DCDC_MODE = n
+CONFIG_VRF_DCDC_MODE = y
 
 
 # ROM patch enabled option
@@ -99,7 +99,7 @@ BR_NAME = br0
 CONFIG_FDRV_NO_REG_SDIO=n
 CONFIG_SCHED_SCAN = n
 CONFIG_OOB ?= n
-CONFIG_USE_CUSTOMER_MAC = y
+CONFIG_USE_CUSTOMER_MAC = n
 CONFIG_PREALLOC_TXQ ?= y
 CONFIG_DPD = y
 CONFIG_FORCE_DPD_CALIB = y
@@ -124,9 +124,9 @@ CONFIG_DYNAMIC_PWR = n
 CONFIG_DISABLE_BWDROP_X2 = n
 
 #CONFIG FOR LOW POWER MODE
-CONFIG_SDIO_PWRCTRL ?= y
-CONFIG_GPIO_WAKEUP ?= y
-CONFIG_AUTO_POWERSAVE = y
+CONFIG_SDIO_PWRCTRL ?= n
+CONFIG_GPIO_WAKEUP ?= n
+CONFIG_AUTO_POWERSAVE = n
 
 # Enable wifi-hal Latency Mode
 CONFIG_AICWF_LATENCY_MODE = n
@@ -367,14 +367,14 @@ CONFIG_PLATFORM_ROCKCHIP2 ?= n
 CONFIG_PLATFORM_ALLWINNER ?= n
 CONFIG_PLATFORM_INGENIC_T20 ?= n
 CONFIG_PLATFORM_AMLOGIC ?= n
-CONFIG_PLATFORM_UBUNTU ?= y
+CONFIG_PLATFORM_UBUNTU ?= n
 
 ifeq ($(CONFIG_PLATFORM_ROCKCHIP), y)
 ARCH := arm64
 KDIR ?= /home/yaya/E/Rockchip/3566/firefly/Android11.0/Firefly-RK356X_Android11.0_git_20210824/RK356X_Android11.0/kernel
 CROSS_COMPILE := /home/yaya/E/Rockchip/3566/firefly/Android11.0/Firefly-RK356X_Android11.0_git_20210824/RK356X_Android11.0/prebuilts/gcc/linux-x86/aarch64/gcc-linaro-6.3.1-2017.05-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-
 ccflags-$(CONFIG_PLATFORM_ROCKCHIP) += -DCONFIG_PLATFORM_ROCKCHIP
-ccflags-y += -DANDROID_PLATFORM
+#ccflags-y += -DANDROID_PLATFORM
 endif
 
 ifeq ($(CONFIG_PLATFORM_ROCKCHIP2), y)
@@ -383,7 +383,7 @@ KDIR ?= /home/yaya/E/Rockchip/3566/firefly/Android11.0/Firefly-RK356X_Android11.
 CROSS_COMPILE := /home/yaya/E/Rockchip/3566/firefly/Android11.0/Firefly-RK356X_Android11.0_git_20210824/RK356X_Android11.0/prebuilts/gcc/linux-x86/aarch64/gcc-linaro-6.3.1-2017.05-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-
 
 ccflags-$(CONFIG_PLATFORM_ROCKCHIP2) += -DCONFIG_PLATFORM_ROCKCHIP2
-ccflags-y += -DANDROID_PLATFORM
+#ccflags-y += -DANDROID_PLATFORM
 endif
 
 

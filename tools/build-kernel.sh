@@ -26,7 +26,7 @@ set -euo pipefail
 TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$TOOLS_DIR/.." && pwd)"
 KERNEL_DIR="$ROOT_DIR/kernel"
-WIFIBT_SOURCE="$ROOT_DIR/external/rkwifibt/drivers/aic8800_sdio"
+WIFIBT_SOURCE="$KERNEL_DIR/drivers/net/wireless/aic8800"
 WIFIBT_FIRMWARE="$ROOT_DIR/external/rkwifibt/firmware/aic/sdio"
 BASE_IMAGE_DIR="$ROOT_DIR/prebuilds/base_image"
 PACK_TOOL_DIR="$TOOLS_DIR/pack_tools"
@@ -171,27 +171,22 @@ check_env() {
     [ -x "$PACK_TOOL_DIR/rkImageMaker" ] || { log_err "缺少 $PACK_TOOL_DIR/rkImageMaker"; return 1; }
     [ -f "$BOOT_DIR/$FIT_ITS" ] || { log_err "缺少 $BOOT_DIR/$FIT_ITS"; return 1; }
     [ -x "$BOOT_DIR/mkimage" ] || { log_err "缺少 $BOOT_DIR/mkimage (U-Boot FIT 打包工具)"; return 1; }
-    [ -f "$WIFIBT_SOURCE/Makefile" ] || { log_err "缺少官方外置 AIC8800 SDIO 源码: $WIFIBT_SOURCE"; return 1; }
+    [ -f "$WIFIBT_SOURCE/Makefile" ] || { log_err "缺少内核树 AIC8800 驱动源码: $WIFIBT_SOURCE"; return 1; }
     [ -d "$WIFIBT_FIRMWARE/aic8800D80" ] || { log_err "缺少配套 SDIO 固件: $WIFIBT_FIRMWARE"; return 1; }
     return 0
 }
 
 build_wifibt() {
-    local tc="$1" driver="$WORK_DIR/wifibt/driver" module
+    local tc="$1" driver="$WIFIBT_SOURCE" module
     [ -f "$KERNEL_DIR/Module.symvers" ] && [ -f "$KERNEL_DIR/.config" ] \
-        || { log_err "请先编译内核，再构建外置无线模块"; return 1; }
-    # 与官方 post-wifibt.sh 的 AIC8800_SDIO 分支一致：M=external/...，
-    # 使用当前内核配置，不拿 kernel/drivers/... 的 Android 默认配置替代。
-    # 每次刷新整份源码，避免源文件删除、时间戳或旧参数导致残留模块被误打包。
-    rm -rf "$driver"
-    mkdir -p "$driver"
-    cp -a "$WIFIBT_SOURCE/." "$driver/"
-    log_info "编译官方 M2 外置 WiFi/BT 驱动 (AIC8800_SDIO)"
+        || { log_err "请先配置并编译内核，再构建 AIC8800 模块"; return 1; }
+    # 唯一源码位于 kernel/drivers/net/wireless/aic8800；复用当前内核配置和符号表。
+    log_info "编译内核树中的 M2 AIC8800 WiFi/BT 驱动"
     make -C "$KERNEL_DIR" -j"$JOBS" M="$driver" \
         ARCH=arm64 CROSS_COMPILE="$tc/bin/aarch64-none-linux-gnu-" modules
     for module in aic8800_bsp aic8800_fdrv aic8800_btlpm; do
         [ -s "$driver/$module/$module.ko" ] \
-            || { log_err "外置模块未生成: $module"; return 1; }
+            || { log_err "内核树模块未生成: $module"; return 1; }
     done
 }
 
@@ -395,11 +390,11 @@ assemble_image_dir() {
         log_info "跳过应用层 overlay (overlay/ 下无应用文件, 仅有 .dts/.dtbo/README)"
     fi
 
-    # 官方 Debian 用 external/rkwifibt 的 SDIO 分支，不是内核目录中的 Android 默认模块。
+    # 使用内核树中唯一的 AIC8800 源码构建的三个模块。
     local modules=() module
     if [ -f "$KERNEL_DIR/boot.img" ]; then
         for module in aic8800_bsp aic8800_fdrv aic8800_btlpm; do
-            local ko="$WORK_DIR/wifibt/driver/$module/$module.ko"
+            local ko="$WIFIBT_SOURCE/$module/$module.ko"
             [ -f "$ko" ] || { log_err "缺少配套 WiFi/BT 模块: $ko，请先编译内核"; return 1; }
             modules+=("$ko")
         done
@@ -625,7 +620,7 @@ main() {
             pack_update_img
             ;;
         pack)
-            # 不编内核/overlays；重编外置无线模块，再用现有内核产物打包。
+            # 不编内核/overlays；从内核树重编 AIC8800 模块，再用现有内核产物打包。
             # kernel 子命令产生的是传统 boot.img，必须转为 Debian FIT 格式。
             if [ -f "$KERNEL_DIR/boot.img" ]; then
                 local tc

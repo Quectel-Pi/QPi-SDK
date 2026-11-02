@@ -51,7 +51,7 @@ buildboot               # 生成 FIT boot.img
 buildoverlays           # 编译 overlay/*.dts
 buildrootfs             # 应用 overlay/ 到 rootfs 工作副本
 buildall                # 完整生成 update.img (含内核编译)
-buildpack               # 重编外置无线模块并打包 update.img (不编内核)
+buildpack               # 重编内核树中的 AIC8800 模块并打包 update.img (不编内核)
 buildmenuconfig         # 内核 menuconfig
 buildclean              # 清理构建产物
 ```
@@ -60,6 +60,30 @@ buildclean              # 清理构建产物
 
 M2 Debian 应用开发默认使用 `toolchains/m2-debian-rootfs-toolchain/`：它通过 qemu/binfmt 运行 `prebuilds/sysroot` 内的 Debian GCC 14.2 + binutils 2.44，和 `RK_DEBIAN_TRIXIE=y` 的 rootfs.img/glibc 2.41 匹配。内核编译仍使用官方源码树同款 Linaro `aarch64-none-linux-gnu` 10.3 工具链。
 
+### 应用工具链初始化与修复
+
+官方 rootfs 是运行时底包，不保证包含 GCC/G++。`buildenv` 和 sysroot 提取流程会调用
+`tools/setup-app-toolchain.sh`，按底包 cpp-14 版本下载配套 Debian arm64 GCC/G++、
+Binutils 2.44 及缺失依赖，解包到 sysroot，补齐入口链接并验证 C/C++ 编译链接。
+下载通过 Debian archive keyring 校验，不在宿主安装 arm64 包、不修改底包镜像；
+若依赖要求升级底包已有运行库则停止，不自动改变目标 ABI。首次需要联网、宿主 APT/dpkg
+以及已启用的 qemu-aarch64 binfmt；当前支持 Debian trixie GCC 14 底包。
+
+已有 sysroot 但出现 `tool not found in sysroot` 时，无需重新下载底包：
+
+```bash
+source build.sh
+bash tools/setup-app-toolchain.sh          # 补齐工具链；已有且验证通过则跳过
+bash tools/setup-app-toolchain.sh --check  # 只检查，并编译链接 C/C++ 测试程序
+buildapp docs/examples/myapp              # 换成实际应用目录
+```
+
+若缺少宿主依赖或 QEMU，请先运行 `buildenv`，或安装依赖并启用 qemu-aarch64 binfmt。
+`--plan` 会下载并检查依赖但不修改 sysroot；自定义目录用 `QPI_SYSROOT=/绝对路径` 指定。
+默认下载源为 `https://deb.debian.org/debian`；网络受限时可用 `QPI_DEBIAN_MIRROR` 指定
+提供 trixie 的 HTTPS Debian 镜像，签名校验仍保留。
+重新提取 sysroot 会移除本地补装，提取流程会重新初始化工具链；不要手工拷贝单个 GCC 文件。
+
 ## 功能 1：内核编译打包
 
 ```bash
@@ -67,7 +91,7 @@ M2 Debian 应用开发默认使用 `toolchains/m2-debian-rootfs-toolchain/`：�
 ./tools/build-kernel.sh kernel      # 编译内核 + 内建 overlays
 ./tools/build-kernel.sh boot        # 生成 FIT boot.img
 ./tools/build-kernel.sh all         # 完整: 内核 + boot.img + overlays + update.img
-./tools/build-kernel.sh pack        # 不编内核/overlays，重编配套外置无线模块并打包
+./tools/build-kernel.sh pack        # 不编内核/overlays，重编内核树中的 AIC8800 模块并打包
 ./tools/build-kernel.sh check       # 环境检查
 ./tools/build-kernel.sh clean       # 清理
 
@@ -204,8 +228,8 @@ clean:
 
 同步成功后旧 `.config` 自动备份，下次构建重新生成配置；必需片段缺失时停止，
 不静默丢掉新特性。配置入口已按上游统一，不使用 `rockchip-debug.config`。
-完整固件打包使用官方外置 AIC8800 SDIO 驱动及固件，不使用内核目录中另一套默认配置模块；
-模块和固件均回读校验，不能仅凭 vermagic 判断兼容。
+完整固件从 kernel/drivers/net/wireless/aic8800 的唯一源码构建 AIC8800 SDIO 模块；
+external/rkwifibt 仅保留配套固件。模块和固件均回读校验，不能仅凭 vermagic 判断兼容。
 自动识屏设备树必须搭配支持它的 U-Boot：打包优先使用 SDK 自带的
 [配套启动固件及说明](tools/boot/README.md)，不修改底包；旧 U-Boot 会被检查拒绝。
 升级必须同时更新 U-Boot 和 boot，不能仅烧录 boot 分区。

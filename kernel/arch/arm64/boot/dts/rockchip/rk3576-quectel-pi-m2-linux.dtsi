@@ -473,7 +473,7 @@
 };
 
 &dp0_sound {
-	status = "okay";
+	status = "disabled";
 };
 
 /* ========== M2 BOOTKEY ==========
