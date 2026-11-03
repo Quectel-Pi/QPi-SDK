@@ -27,6 +27,7 @@
 #   PREBUILDS_DIR       解压目标目录 (默认 <SDK>/prebuilds)
 #   QPI_DL_DIR          下载缓存目录 (默认 <SDK>/download, 独立于 build/ 以免被 buildclean 清掉)
 #   QPI_SHA256_FILE     校验值文件 (默认 <SDK>/tools/prebuilds.sha256)
+#   QPI_SKIP_CRC=1      厂商 md5 不可用时也跳过压缩包内部 CRC 校验 (只按大小判定)
 #   QPI_KEEP_ZIP=0      解压成功后删除缓存 zip (默认 1=保留, 便于复用/拷给同事)
 #   QPI_FETCH_FORCE=1   已齐全也强制重新下载/解压
 #   QPI_NO_RESUME=1     忽略已有的 .part, 从零下载 (不续传)
@@ -71,6 +72,12 @@ esac
 #         Quectel_Pi_H1_WF_Debian_RD2_Latest_md5.txt  -> "d9ae78d7330c972e8008fdca359e0730"
 # 作用: 判断"远端包是否已更新"(以及本地包是否与厂商一致)。这是唯一能证明
 #       本地文件与厂商源一致的依据 —— 本地自算的 sha256 做不到这一点 (自我引用)。
+# 厂商 md5 是否过期 (0=新鲜/可判定, 1=过期) 与过期时的原始值: 都会多次用到,
+# 缓存起来避免反复发 HEAD 请求 (见 md5_file_looks_stale)。
+MD5_STALE_CACHE=""
+STALE_MD5=""
+VENDOR_MD5_VALUE=""
+VENDOR_MD5_USABLE=0
 MD5_URL="${QPI_MD5_URL:-}"
 if [ -z "${MD5_URL}" ] && [ "${QPI_NO_REMOTE_MD5:-0}" != "1" ]; then
     case "${URL%%\?*}" in
@@ -232,17 +239,87 @@ remote_md5_lastmod() {
 
 # 厂商 md5 文件是否明显比压缩包旧 (差 > 6 小时)
 # 厂商 README.txt 明确要求换包后重跑 calc_md5.py, 实际漏过 —— 于是无论下载多少
-# 次、包多完整, md5 都必然对不上。识别出这种情况才能给用户一条可走的路。
+# 次、包多完整, md5 都必然对不上。识别出这种情况之后必须【降级】而不是报错退出:
+# 那个 md5 对应的是上一个包, 拿它比对本地文件永远"不一致", 只能白重下几 GiB。
+# 结果缓存在 MD5_STALE_CACHE (本函数内部要发 1~2 次 HEAD, fetch/refresh/verify
+# 会反复问到它)。
 # 返回 0 = md5 文件疑似过期, 1 = 正常/无法判断
 md5_file_looks_stale() {
-    [ -n "${RLM_META}" ] || return 1
-    local mlm tz tm
+    case "${MD5_STALE_CACHE}" in
+        1) return 0 ;;
+        0) return 1 ;;
+    esac
+    MD5_STALE_CACHE=0
+    [ -n "${MD5_URL}" ] || return 1
+    local zip_lm="${RLM_META}" mlm tz tm
+    # RLM_META 只在 remote_meta 之后有值; 其它调用点 (refresh/md5/verify/manifest)
+    # 直接问一次远端, 免得因为没先跑 remote_meta 就判不出来。
+    if [ -z "${zip_lm}" ]; then
+        zip_lm="$(curl -sIL --max-time 30 "${URL}" 2>/dev/null | tr -d '\r' \
+            | awk 'BEGIN{IGNORECASE=1} /^last-modified:/{sub(/^[^:]*:[ ]*/,"");v=$0} END{print v}')"
+    fi
+    [ -n "${zip_lm}" ] || return 1
     mlm="$(remote_md5_lastmod)" || return 1
     [ -n "${mlm}" ] || return 1
-    tz="$(date -d "${RLM_META}" +%s 2>/dev/null)" || return 1
+    tz="$(date -d "${zip_lm}" +%s 2>/dev/null)" || return 1
     tm="$(date -d "${mlm}" +%s 2>/dev/null)" || return 1
     [ -n "${tz}" ] && [ -n "${tm}" ] || return 1
-    [ $(( tz - tm )) -gt 21600 ]
+    if [ $(( tz - tm )) -gt 21600 ]; then
+        MD5_STALE_CACHE=1
+        return 0
+    fi
+    return 1
+}
+
+# 解析厂商 md5 并判定它能不能当判据。**结果写到全局变量**, 不走 stdout:
+# 用户需要同时知道“值是多少”和“能不能用”, 而 $(resolve_vendor_md5) 这种写法在
+# 子 shell 里赋值传不出来 (STALE_MD5 会丢), 之前的“md5 过期”提示因此报不出来。
+# 产出:
+#   VENDOR_MD5_VALUE       取到的 md5 (可能不可用, 也可能为空)
+#   VENDOR_MD5_USABLE=1    可当判据 (取到了 且 md5 文件没过期)
+#   STALE_MD5              非空 = 厂商 md5 文件过期, 该值属于上一版包
+# 返回 0 = md5 可用
+resolve_vendor_md5() {
+    VENDOR_MD5_VALUE=""
+    VENDOR_MD5_USABLE=0
+    STALE_MD5=""
+    local m
+    m="$(remote_md5)" || return 1
+    [ -n "${m}" ] || return 1
+    VENDOR_MD5_VALUE="${m}"
+    if md5_file_looks_stale; then
+        STALE_MD5="${m}"
+        return 1
+    fi
+    VENDOR_MD5_USABLE=1
+    return 0
+}
+
+# 压缩包内部 CRC 校验: 厂商 md5 不可用时的替代完整性判据。
+# 为什么能替代: unzip -t 逐成员校验 zip 里存的 CRC32 —— 下载截断/写坏/续传拼错
+# 都会体现为 CRC 失败, 这是“文件内容自身”的证据, 不需要厂商给值。
+# 局限: 它只能证明文件没坏, 不能证明它就是厂商最新版 (那一层靠大小/ETag 判断)。
+# 几 GiB 要跑几分钟, 所以只在 md5 不可用时才用。
+# 返回 0 = 通过 (或无法校验, 不拿缺工具当损坏), 1 = 确认损坏
+zip_crc_ok() {
+    [ -s "$1" ] || return 1
+    if [ "${QPI_SKIP_CRC:-0}" = "1" ]; then
+        log_warn "QPI_SKIP_CRC=1, 跳过压缩包 CRC 校验 (仅按大小判定完整性)"
+        return 0
+    fi
+    if ! command -v unzip >/dev/null 2>&1; then
+        log_warn "未找到 unzip, 无法做 CRC 校验 (安装: ./tools/setup-deps.sh install)"
+        return 0
+    fi
+    log_info "校验压缩包内部 CRC (厂商 md5 不可用; 几 GiB 需要几分钟)..."
+    local out
+    if ! out="$(unzip -t "$1" 2>&1)"; then
+        log_err "压缩包内部损坏 (CRC 校验失败)"
+        printf '%s\n' "${out}" | grep -iE 'error|invalid|bad CRC' | tail -5 | sed 's/^/    /' >&2
+        return 1
+    fi
+    log_ok "压缩包 CRC 校验通过 (所有成员正常)"
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -337,8 +414,26 @@ report_heal_giveup() {
 #   0 = 一致(可复用)  1 = 不一致(包已更新或本地损坏)  2 = 无法判定
 local_zip_status() {
     [ -s "${ZIP_PATH}" ] || return 2
-    local rmd5; rmd5="$(remote_md5)" || return 2
-    local lmd5; lmd5="$(file_md5 "${ZIP_PATH}")" || return 2
+    local lsz lmd5 rmd5
+    lsz="$(stat -c%s "${ZIP_PATH}")"
+    resolve_vendor_md5 || true
+    if [ "${VENDOR_MD5_USABLE}" != "1" ]; then
+        # 厂商 md5 不可用。分两种, 不能一概而论:
+        #   ① 厂商 md5 已过期 -> 它是上一个包的值, 拿它比本地必然不符。
+        #      只按大小判定: 大小与远端一致即认为本地就是这一版。
+        #   ② 根本没 md5 文件 (离线/未提供) -> 同样退回按大小判断 (return 2)。
+        if [ -n "${STALE_MD5}" ]; then
+            if [ -n "${RSZ_META}" ] && [ "${lsz}" = "${RSZ_META}" ]; then
+                echo "厂商 md5 已过期 (${STALE_MD5} 属于上一版), 本地大小与远端一致"
+                return 0
+            fi
+            echo "厂商 md5 已过期 (${STALE_MD5}), 本地 $(human "${lsz}") / 远端 $(human "${RSZ_META:-0}")"
+            return 1
+        fi
+        return 2
+    fi
+    rmd5="${VENDOR_MD5_VALUE}"
+    lmd5="$(file_md5 "${ZIP_PATH}")" || return 2
     if [ "${lmd5}" = "${rmd5}" ]; then
         echo "${lmd5}"
         return 0
@@ -355,9 +450,9 @@ vendor_pkg_changed() {
     local rec; rec="$(awk -F= '/^VENDOR_MD5=/{print $2; exit}' "${mf}")"
     [ -n "${rec}" ] || return 2
     case "${rec}" in *未取得*|"") return 2 ;; esac
-    local cur; cur="$(remote_md5)" || return 2
-    [ "${rec}" = "${cur}" ] && return 0
-    echo "记录 ${rec} / 现在 ${cur}"
+    resolve_vendor_md5 || return 2
+    [ "${rec}" = "${VENDOR_MD5_VALUE}" ] && return 0
+    echo "记录 ${rec} / 现在 ${VENDOR_MD5_VALUE}"
     return 1
 }
 
@@ -389,8 +484,8 @@ download_zip() {
         local status st
         status="$(local_zip_status)"; st=$?
         if [ "${st}" = "0" ]; then
-            log_ok "本地压缩包与厂商 md5 一致, 复用: ${ZIP_PATH}"
-            log_info "  md5 = ${status} ($(human "$(stat -c%s "${ZIP_PATH}")"))"
+            log_ok "本地压缩包可复用: ${ZIP_PATH}"
+            log_info "  ${status} ($(human "$(stat -c%s "${ZIP_PATH}")"))"
             return 0
         elif [ "${st}" = "1" ]; then
             # 两种情况会走到这里: ①厂商换了包 ②本地文件被写坏。
@@ -446,11 +541,18 @@ download_zip() {
             log_warn "删除膨胀残留 ${PART_PATH}.stale ($(human "${stsz}") > 远端 $(human "${rsz}"))"
         fi
     fi
-    local rmd5; rmd5="$(remote_md5)" || true
+    # 厂商 md5: 只在“新鲜”时才能当判据。过期时不能不说一句就默默跳过。
+    resolve_vendor_md5 || true
+    local rmd5=""
+    [ "${VENDOR_MD5_USABLE}" = "1" ] && rmd5="${VENDOR_MD5_VALUE}"
     if [ -n "${rmd5}" ]; then
         log_info "厂商 md5: ${rmd5}  (下载完成后据此校验)"
+    elif [ -n "${STALE_MD5}" ]; then
+        log_warn "厂商 md5 文件已过期: ${STALE_MD5} (Last-Modified $(remote_md5_lastmod))"
+        log_warn "  它比压缩包 (Last-Modified ${RLM_META:-?}) 旧 -> 对应的是上一版包, 厂商换包后没重算"
+        log_warn "  不拿它判死本地文件; 改用【大小 + 压缩包内部 CRC】作为完整性依据"
     else
-        log_warn "未能获取厂商 md5 文件 (${MD5_URL:-未配置}), 将仅按大小判断完整性"
+        log_warn "未能获取厂商 md5 文件 (${MD5_URL:-未配置}), 将按大小 + 内部 CRC 判断完整性"
     fi
     check_space || return 1
 
@@ -575,7 +677,8 @@ download_zip() {
                 # Content-Length 与 GET 实际下发可能不一致 (CDN 多节点 / 厂商
                 # "Latest" 中途换包), 文件会比 HEAD 报告略大。此时不能直接当成功:
                 #   ① 有厂商 md5 就先判它 —— md5 一致 = 文件完整, 只是 HEAD 长度过时;
-                #   ② md5 不符或拿不到 -> 文件确实膨胀/损坏, 删掉从零自动重下 (自愈)。
+                #   ② 厂商 md5 不可用 -> 用内部 CRC 判 (证明内容没写坏);
+                #   ③ 都不通过 -> 文件确实膨胀/损坏, 删掉从零自动重下 (自愈)。
                 if [ -n "${rsz}" ] && [ "${cur_size}" -gt "${rsz}" ]; then
                     local ok=0
                     if [ -n "${rmd5}" ]; then
@@ -585,6 +688,9 @@ download_zip() {
                             log_warn "  md5 与厂商一致, 文件完整 (HEAD Content-Length 过期), 接受"
                             ok=1
                         fi
+                    elif zip_crc_ok "${PART_PATH}"; then
+                        log_warn "  本地 $(human "${cur_size}") 略大于 HEAD 报告 $(human "${rsz}"), 但 CRC 通过 -> 接受 (HEAD Content-Length 过期)"
+                        ok=1
                     fi
                     if [ "${ok}" = "1" ]; then
                         break
@@ -663,6 +769,10 @@ download_zip() {
     if [ "${lsz}" -gt "${rsz}" ]; then
         if [ -n "${lmd5}" ] && [ "${lmd5}" = "${rmd5}" ]; then
             log_warn "本地 $(human "${lsz}") 略大于 HEAD 报告 $(human "${rsz}"), 但 md5 与厂商一致 -> 接受 (HEAD Content-Length 过期)"
+        elif [ -z "${rmd5}" ] && zip_crc_ok "${PART_PATH}"; then
+            # 没有可用 md5 时, "略大于 HEAD" 也可能只是 Content-Length 过期;
+            # 内部 CRC 能证明内容没被写坏, 就不拿过时的 HEAD 判死。
+            log_warn "本地 $(human "${lsz}") 略大于 HEAD 报告 $(human "${rsz}"), 但 CRC 通过 -> 接受 (HEAD Content-Length 过期)"
         else
             log_err "本地 $(human "${lsz}") 大于远端 $(human "${rsz}") 且校验未通过: 下载文件损坏 (并发写入膨胀)"
             local hb0="${HEAL:-0}"
@@ -679,6 +789,8 @@ download_zip() {
 
     # 大小对了还不够: 必须与厂商 md5 一致才算拿到权威确认的包。
     # (仅大小相符无法发现"内容被写坏"; 这正是此前 system.img 解压失败的场景。)
+    # 厂商 md5 不可用 (过期/库无) 时不能就“只凭大小”放行: 退到内部 CRC,
+    # 这才是“文件自身没坏”的证据 (大小对的坏文件照样能让解压阶段报错)。
     if [ -n "${rmd5}" ]; then
         if [ -z "${lmd5}" ]; then
             log_info "校验厂商 md5 (几 GiB 需要一两分钟)..."
@@ -688,17 +800,6 @@ download_zip() {
             log_err "md5 校验失败: 下载内容与厂商不一致"
             log_err "  本地 md5: ${lmd5}  ($(human "${lsz}"))"
             log_err "  厂商 md5: ${rmd5}"
-            # 下面这条诊断是真实用户卡住的原因: 厂商换了 Latest.zip 但没按
-            # README.txt 的要求重跑 calc_md5.py -> md5 文件还是旧的, 于是
-            # 无论下载多少次、包多完整, 都必然"校验失败"。
-            if md5_file_looks_stale; then
-                log_err "  诊断: 厂商 md5 文件 (Last-Modified $(remote_md5_lastmod)) 比压缩包"
-                log_err "        (Last-Modified ${RLM_META}) 旧 -> 厂商换包后没重新生成 md5, 这个值已过期"
-                log_err "  绕过办法 (改以压缩包内部 CRC 为完整性依据):"
-                log_err "    QPI_NO_REMOTE_MD5=1 $0 fetch && unzip -t ${ZIP_PATH}"
-                log_err "  或等厂商更新: ${MD5_URL}"
-                return 1
-            fi
             local hb1="${HEAL:-0}"
             retry_from_scratch && return 0
             [ "${hb1}" -ge 1 ] || return 1
@@ -707,7 +808,15 @@ download_zip() {
         fi
         log_ok "md5 校验通过: ${lmd5}"
     else
-        log_warn "未能获取厂商 md5, 已按大小确认完整 (建议随后跑: $0 verify 做 CRC 校验)"
+        # 厂商 md5 不可用: 改用压缩包内部 CRC 作为完整性依据。
+        if ! zip_crc_ok "${PART_PATH}"; then
+            log_err "下载的压缩包内容损坏 (CRC 失败)"
+            local hb2="${HEAL:-0}"
+            retry_from_scratch && return 0
+            [ "${hb2}" -ge 1 ] || return 1
+            report_heal_giveup "${lsz}"
+            return 1
+        fi
     fi
 
     mv -f "${PART_PATH}" "${ZIP_PATH}"
@@ -737,9 +846,17 @@ cmd_refresh() {
     log_info "底包新鲜度检查 (打包前)..."
 
     # --- 1) 取厂商 md5; 失败即退回本地, 不阻塞构建 ---
-    local rmd5; rmd5="$(remote_md5)" || rmd5=""
+    # 注意这里必须先判“md5 能不能用”: 厂商 md5 过期时它是上一个包的值, 拿它比对
+    # 必然 "有更新", 会在每次打包前都让用户白下 7 GiB。
+    resolve_vendor_md5 || true
+    local rmd5=""
+    [ "${VENDOR_MD5_USABLE}" = "1" ] && rmd5="${VENDOR_MD5_VALUE}"
     if [ -z "${rmd5}" ]; then
-        log_warn "联网失败或取不到厂商 md5 -> 使用本地底包继续打包"
+        if [ -n "${STALE_MD5}" ]; then
+            log_warn "厂商 md5 文件已过期 (${STALE_MD5}) -> 不拿它判底包新旧, 继续用本地底包"
+        else
+            log_warn "联网失败或取不到厂商 md5 -> 使用本地底包继续打包"
+        fi
         return 0
     fi
     log_info "  厂商 md5: ${rmd5}"
@@ -865,7 +982,8 @@ verify_sha256() {
     #   若厂商 md5 与本文件一致, 说明文件本身是对的(只是本地 sha256 记录过期,
     #   例如之前基于损坏文件 pin 过), 则以厂商为准并刷新本地记录。
     local rmd5 lmd5
-    rmd5="$(remote_md5)" || rmd5=""
+    resolve_vendor_md5 || true
+    rmd5=""; [ "${VENDOR_MD5_USABLE}" = "1" ] && rmd5="${VENDOR_MD5_VALUE}"
     if [ -n "${rmd5}" ]; then
         lmd5="$(file_md5 "${ZIP_PATH}")"
         if [ "${lmd5}" = "${rmd5}" ]; then
@@ -877,6 +995,16 @@ verify_sha256() {
             log_ok "已刷新本地校验记录: ${SHA_FILE}"
             return 0
         fi
+    elif zip_crc_ok "${ZIP_PATH}"; then
+        # 厂商 md5 不可用 (过期/无) 时, CRC 是唯一能证明“内容没写坏”的判据。
+        # 通过则认这个包, 并刷新本地 sha256 记录 (它本来只是自我引用)。
+        log_warn "本地固化 sha256 与当前文件不符, 且厂商 md5 不可用"
+        log_warn "  旧记录 sha256: ${expect}"
+        log_warn "  实际   sha256: ${actual}"
+        log_warn "  压缩包内部 CRC 通过 -> 内容完好, 刷新本地记录"
+        cmd_pin >/dev/null 2>&1 || true
+        log_ok "已刷新本地校验记录: ${SHA_FILE}"
+        return 0
     fi
 
     log_err "sha256 校验失败!"
@@ -1008,13 +1136,25 @@ validate_prebuilds() {
 
 write_manifest() {
     local mf="${PREBUILDS_DIR}/.source-manifest"
+    # VENDOR_MD5 要区分“拿到且可信” / “厂商给的已过期” / “完全拿不到”:
+    # vendor_pkg_changed 拿它做新旧判断, 把过期的值当“已知”会变成永远“已更新”。
+    local vendor_md5 stale_note=""
+    resolve_vendor_md5 || true
+    if [ "${VENDOR_MD5_USABLE}" = "1" ]; then
+        vendor_md5="${VENDOR_MD5_VALUE}"
+    else
+        vendor_md5="(未取得)"
+        # 过期值单独一行记下来, 供 vendor_pkg_changed / 人工排查看
+        [ -n "${STALE_MD5}" ] && stale_note="${STALE_MD5}"
+    fi
     {
         echo "# 由 tools/fetch-prebuilds.sh 生成: 底包来源记录"
         echo "URL=${URL}"
         echo "ZIP=${ZIP_NAME}"
         echo "SHA256=$(sha256sum "${ZIP_PATH}" 2>/dev/null | awk '{print $1}')"
         echo "MD5=$(file_md5 "${ZIP_PATH}")"
-        echo "VENDOR_MD5=$(remote_md5 2>/dev/null || echo '(未取得)')"
+        echo "VENDOR_MD5=${vendor_md5}"
+        [ -n "${stale_note}" ] && echo "VENDOR_MD5_STALE=${stale_note}"
         echo "VENDOR_MD5_URL=${MD5_URL:-（未配置）}"
         echo "FETCHED=$(date -Iseconds)"
         echo "HOST=$(hostname)"
@@ -1118,10 +1258,21 @@ cmd_md5() {
         return 1
     fi
     echo "厂商 md5 文件: ${MD5_URL:-<未配置>}" >&2
-    local rmd5; rmd5="$(remote_md5)" || {
+    local rmd5=""
+    resolve_vendor_md5 || true
+    if [ "${VENDOR_MD5_USABLE}" != "1" ]; then
+        if [ -n "${STALE_MD5}" ]; then
+            remote_meta || true
+            log_warn "厂商 md5 文件已过期: ${STALE_MD5}"
+            log_warn "  md5 文件 Last-Modified $(remote_md5_lastmod)"
+            log_warn "  压缩包 Last-Modified ${RLM_META:-?} -> md5 对应的是上一版包, 不能用作判据"
+            log_info "用大小 + CRC 判断: $0 verify"
+            return 2
+        fi
         log_err "无法获取厂商 md5 (检查网络或 QPI_MD5_URL)"
         return 1
-    }
+    fi
+    rmd5="${VENDOR_MD5_VALUE}"
     log_info "厂商 md5: ${rmd5}"
     if [ -s "${ZIP_PATH}" ]; then
         log_info "计算本地包 md5 (几 GiB 需要一两分钟)..."
@@ -1150,9 +1301,10 @@ cmd_verify() {
     [ -s "${ZIP_PATH}" ] || { log_err "压缩包不存在: ${ZIP_PATH} (先跑 fetch)"; return 1; }
 
     local ok=1
-    # 1) 厂商 md5 (权威: 证明与厂商源一致)
+    # 1) 厂商 md5 (权威: 证明与厂商源一致)。过期时它不是判据, 会直接进下面的 CRC 路径。
     remote_meta || true                 # 顺带拿 Last-Modified, 用于“md5 文件是否过期”诊断
-    local rmd5; rmd5="$(remote_md5)" || true
+    resolve_vendor_md5 || true
+    local rmd5=""; [ "${VENDOR_MD5_USABLE}" = "1" ] && rmd5="${VENDOR_MD5_VALUE}"
     if [ -n "${rmd5}" ]; then
         log_info "校验厂商 md5 (几 GiB 需要一两分钟)..."
         local lmd5; lmd5="$(file_md5 "${ZIP_PATH}")"
@@ -1162,13 +1314,12 @@ cmd_verify() {
             log_err "厂商 md5 不一致!"
             log_err "  本地: ${lmd5}"
             log_err "  厂商: ${rmd5}"
-            if md5_file_looks_stale; then
-                log_err "  诊断: 厂商 md5 文件 (Last-Modified $(remote_md5_lastmod)) 比压缩包"
-                log_err "        (Last-Modified ${RLM_META}) 旧 -> 厂商换包后未重新生成 md5, 这个值已过期"
-                log_info "  这种情况请看下面的 CRC 结果: CRC 通过 = 文件本身是好的"
-            fi
             ok=0
         fi
+    elif [ -n "${STALE_MD5}" ]; then
+        log_warn "厂商 md5 文件已过期 (${STALE_MD5}), md5 文件 Last-Modified $(remote_md5_lastmod)"
+        log_warn "  压缩包 Last-Modified ${RLM_META:-?} -> 厂商换包后未重算, 该值对应上一版包"
+        log_warn "  不作为判据; 下面只以压缩包内部 CRC 为准"
     else
         log_warn "未取得厂商 md5, 跳过权威比对"
     fi

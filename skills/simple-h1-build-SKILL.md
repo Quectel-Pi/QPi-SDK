@@ -45,8 +45,10 @@ source scripts/env.sh     # 原生入口
     `QPI_DL_YES=1`/`QPI_DL_NO=1` 不询问直接下载/保留; `QPI_UPD_DEFAULT=Y|N` 非交互默认)
   * fetch 时: 本地有完整包但 md5 不同 -> **先打差异再问**, 选否就继续用本地包;
     下载完成后强制按厂商 md5 校验 (不符先自动从零重下一次, 仍不符才报错)
-  * 厂商 md5 文件过期 (md5 比 zip 旧 6h+) 会被识别: 直接提示“厂商 md5 过期”,
-    不再白重下; 绕过办法 `QPI_NO_REMOTE_MD5=1 fetch` + `unzip -t`
+  * 厂商 md5 文件过期 (md5 比 zip 旧 6h+) 会被识别并**自动降级**为
+    “大小 + 压缩包内部 CRC” 判定 (不报错退出、也不白重下);
+    降级时明确打印原因, CRC 才失败才真重下;
+    `QPI_SKIP_CRC=1` 连 CRC 也跳过 (只按大小), `QPI_NO_REMOTE_MD5=1` 彻底不取 md5
   * 替换时旧原版保留为 `system.img.prev`; 派生的 base_rootfs/sysroot 移到 `.prev` 并重建
 - **新产物不覆盖原版**: 生成的 system.img 只写 `build/result/system.img`;
   `prebuilds/system.img` 全程只读 (若两者设为同一路径, build-rootfs.sh 报错拒绝)
