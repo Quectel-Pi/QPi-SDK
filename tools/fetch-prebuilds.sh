@@ -37,7 +37,9 @@
 #                       默认 N = 保留本地 (数 GB 下载绝不擅自开下)
 #   QPI_DL_ATTEMPTS     单次 fetch 内连接中断的重试上限, 默认 40
 #   QPI_MIN_FREE_GB     磁盘空间下限, 默认 40 (压缩包 + 残留 + 解压后峰值)
-#   QPI_ARIA2=1         存在 aria2c 时用多连接下载 (默认自动探测)
+#   QPI_ARIA2=0         禁用 aria2c 多连接下载 (默认: 装了 aria2c 就自动用)
+#                       多连接对“按单连接限速”的厂商源实测快 ~3x (0.7 -> 2.3 MiB/s);
+#                       未安装时自动回退单连接 curl。aria2c 由 setup-deps.sh 安装。
 #
 # 依赖: curl 或 wget (下载), unzip 或 python3 (解压), sha256sum (校验)
 # ============================================================================
@@ -100,6 +102,66 @@ MIN_FREE_GB="${QPI_MIN_FREE_GB:-40}"
 # 底包必需项 (与 buildenv/[2] 段判定一致)
 REQUIRED_FILES=(system.img efi.bin dtb.bin)
 
+# ---------------------------------------------------------------------------
+# 异常退出处理: 不留孤儿下载进程
+# ---------------------------------------------------------------------------
+# 踩过的坑: 下载期间 Ctrl-C / 关掉终端只杀掉 bash, 后台 curl 变成孤儿 (ppid=1)
+# 继续写 .part、继续抱着 flock —— 下次 fetch 一开头就阻塞在 flock 上永远不动,
+# 而孤儿 curl 因为 -sS 又什么都不打印, 现场看就是“跑起来就不动了”。
+# 处置: 统一 signal trap -> 杀掉下载子进程 / 孙进程 (aria2c 会自己 fork) 并释放锁。
+#   注意下载进程放在后台跑, 不能用 "exec" 接管, 所以必须显式清理。
+DL_PID=""                 # download_with_progress 记录的当前下载进程
+DL_T0=""                  # 本次下载起始时间 (算速度/ETA)
+
+# 杀掉下载进程及其子进程 (aria2c 会 fork; 只杀父会留孙)。
+_kill_dl_tree() {
+    local pids="${DL_PID}" p c
+    [ -n "${DL_PID}" ] || return 0
+    # 先收集子进程 (aria2c 的子进程负责分片连接)
+    for c in $(ps -o pid= --ppid "${DL_PID}" 2>/dev/null); do
+        pids="${pids} ${c}"
+    done
+    # shellcheck disable=SC2086
+    kill -TERM ${pids} 2>/dev/null || true
+    # 给 2 秒优雅退出, 仍在则强杀 (别让 Ctrl-C 卡住)
+    local i
+    for ((i = 0; i < 20; i++)); do
+        # shellcheck disable=SC2086
+        kill -0 ${pids} 2>/dev/null || return 0
+        sleep 0.1
+    done
+    # shellcheck disable=SC2086
+    kill -KILL ${pids} 2>/dev/null || true
+    return 0
+}
+
+# 信号处理: 打印一句人话 (告诉用户 .part 已保留可续传), 然后清理退出。
+qpi_on_signal() {
+    local sig="$1"
+    printf '\n' >&2 2>/dev/null || true
+    log_warn "收到 ${sig}, 正在停止下载..."
+    _kill_dl_tree
+    # 锁会随进程退出自动释放 (fd 关闭), 这里不必显式 flock -u
+    if [ -s "${PART_PATH:-}" ]; then
+        log_warn "  已下载 $(human "$(_dl_size "${PART_PATH}")") 保留在 ${PART_PATH}"
+        log_warn "  重跑本命令会自动续传: $0 fetch"
+    fi
+    log_warn "  已中止 (${sig})"
+    # 128+n 是 shell 对“被信号终止”的惯例退出码
+    case "${sig}" in
+        INT)  exit 130 ;;
+        TERM) exit 143 ;;
+        HUP)  exit 129 ;;
+        *)    exit 1   ;;
+    esac
+}
+
+# 挂 trap。INT/TERM/HUP 都要抓: 终端关闭是 HUP, 不是 INT (这就是孤儿的主要来源)。
+trap 'qpi_on_signal INT'  INT
+trap 'qpi_on_signal TERM' TERM
+trap 'qpi_on_signal HUP'  HUP
+trap '_kill_dl_tree' EXIT
+
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 log_info() { echo -e "${CYAN}[INFO]${NC} $1" >&2; }
 log_ok()   { echo -e "${GREEN}[OK]${NC} $1" >&2; }
@@ -129,7 +191,37 @@ emit_progress() {
         pct=$((done * 100 / total))
         [ "${pct}" -gt 100 ] && pct=100
     fi
-    printf '[QPI-PROGRESS] total=%s done=%s pct=%s\n' "${total}" "${done}" "${pct}"
+    # 终端 (交互 tty) 下用 \r 原地刷新一行, 不再每秒刷一行把历史滚掉;
+    #   非终端 (插件 SSE / CI / 管道) 保持行式标记输出, 插件解析契约不变。
+    # 判据用 stderr (进度是给人看/给插件读的, 与日志同流)。
+    if [ -t 2 ]; then
+        local elapsed="${DL_T0:+$(( $(date +%s) - DL_T0 ))}"
+        local speed="" eta=""
+        if [ -n "${elapsed}" ] && [ "${elapsed}" -gt 0 ] && [ "${done}" -gt 0 ]; then
+            local bps=$((done / elapsed)) p50
+            speed=" $(human "${bps}")/s"
+            if [ "${total}" -gt 0 ] && [ "${bps}" -gt 0 ]; then
+                p50=$(( (total - done) / bps ))
+                eta=" 剩 $(printf '%02d:%02d' $((p50 / 60)) $((p50 % 60)))"
+            fi
+        fi
+        local barw=24 filled=0 bar=""
+        [ "${total}" -gt 0 ] && filled=$((pct * barw / 100))
+        local i
+        for ((i = 0; i < barw; i++)); do
+            if [ "${i}" -lt "${filled}" ]; then bar="${bar}#"; else bar="${bar}."; fi
+        done
+        printf '\r\033[K  [%s] %3d%%  %s / %s%s%s' \
+            "${bar}" "${pct}" "$(human "${done}")" "$(human "${total}")" "${speed}" "${eta}" >&2
+    else
+        printf '[QPI-PROGRESS] total=%s done=%s pct=%s\n' "${total}" "${done}" "${pct}"
+    fi
+}
+
+# 终端模式下把进度行收尾换行 (下载结束后调用, 免得后续日志接在同一行)
+end_progress_line() {
+    [ -t 2 ] && printf '\n' >&2
+    return 0
 }
 
 # 文件当前字节数 (GNU stat; 回退 BSD stat / wc)
@@ -138,21 +230,53 @@ _dl_size() {
     stat -c%s "$1" 2>/dev/null || stat -f%z "$1" 2>/dev/null || wc -c < "$1" | tr -d ' '
 }
 
+# aria2c 已下载字节数 (真实进度)。
+# 为何不能用文件大小 (_dl_size): aria2 开跑就把文件 preallocate 到接近最终大小
+#   (实测 3 秒内 stat 就从 0 跳到 6.2 GiB), 拿 stat 当进度会瞬间跳到末尾;
+#   更糟的是上层“已不小于远端 -> 剔除”的判定会把正在下的文件删掉。
+# 为何不用 .aria2 控制文件解析: 那是二进制位图 (非文本行), 解析它等于依赖
+#   aria2 内部格式, 版本一变就静默归零。
+# 可靠判据: 已分配的磁盘块数 (du -B1) —— 只有真正写入的分片才占块,
+#   空洞不占块, 所以它随下载单调增长。实测与 aria2 实际吞吐对得上。
+_aria2_done() {
+    local f="$1"
+    [ -f "${f}" ] || { echo 0; return; }
+    if du -B1 "${f}" >/dev/null 2>&1; then
+        du -B1 "${f}" 2>/dev/null | awk '{print $1}' | head -1
+    else
+        _dl_size "${f}"          # 无 du 的极端环境: 退回去用大小 (仅影响显示)
+    fi
+}
+
 # 后台执行下载 + 每秒轮询已下字节数上报进度, 返回值 = 下载进程退出码。
 # 为什么必须后台 + 轮询: curl/wget 自身的进度条用 \r 原地刷新、不产生换行,
 #   前台静默运行时整段下载期间没有任何输出 —— 终端看起来像卡死, 插件侧 SSE 也会
 #   因长时间无数据被 bodyTimeout 掐断。轮询文件大小则每秒都有稳定的进度产出。
+# 第 3 参 (可选) = 进度取数命令; 默认 _dl_size (curl/wget, 文件顺序增长是真实进度),
+#   aria2c 必须传 _aria2_done (见上)。
+# 注意: 这里 sleep 轮询, 进程退出后必须由调用方保证不留孤儿 —— 见 qpi_on_signal。
 download_with_progress() {
-    local out="$1" total="${2:-0}"; shift 2
+    local out="$1" total="${2:-0}"
+    local size_fn="_dl_size"
+    shift 2
+    # 第 3 参是非负整数时视为取数函数名 (aria2 专用); 否则它就是命令本身
+    if [ $# -gt 0 ] && [ "$1" != "${1#_}" ]; then
+        size_fn="$1"
+        shift 1
+    fi
     local rc=0 pid
+    DL_T0="$(date +%s)"
     "$@" &
     pid=$!
+    DL_PID="${pid}"          # 供 signal trap 杀掉, 避免 Ctrl-C 留下孤儿进程
     while kill -0 "${pid}" 2>/dev/null; do
-        emit_progress "$(_dl_size "${out}")" "${total}"
+        emit_progress "$(${size_fn} "${out}")" "${total}"
         sleep 1
     done
     wait "${pid}" || rc=$?
-    emit_progress "$(_dl_size "${out}")" "${total}"
+    DL_PID=""
+    emit_progress "$(${size_fn} "${out}")" "${total}"
+    end_progress_line
     return "${rc}"
 }
 
@@ -328,12 +452,18 @@ zip_crc_ok() {
 part_meta_get() { awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,"");print;exit}' "${PART_META}" 2>/dev/null; }
 
 write_part_meta() {
+    # WRITER 记录“这份 .part 是哪个下载器写的”, 供下次启动判断能不能续:
+    #   curl   -> 文件顺序增长, 大小即真实进度
+    #   aria2  -> 预分配到接近总大小 + 稀疏空洞, 大小 ≠ 进度,
+    #             交给 curl -C - 会被当成“已下完”直接宣告完成 (空数据)。
+    # 两者不可互换, 所以必须落盘。
     {
         echo "URL=${URL}"
         echo "SIZE=${1:-}"
         echo "ETAG=${2:-}"
         echo "LAST_MODIFIED=${3:-}"
         echo "VENDOR_MD5=${4:-}"
+        echo "WRITER=${5:-curl}"
         echo "OFFSET=$(stat -c%s "${PART_PATH}" 2>/dev/null || echo 0)"
         echo "TIME=$(date -Iseconds 2>/dev/null)"
     } > "${PART_META}" 2>/dev/null || true
@@ -345,7 +475,9 @@ discard_part() {
     if [ -s "${PART_PATH}" ]; then
         log_warn "  丢弃未完成文件 $(human "$(stat -c%s "${PART_PATH}")")"
     fi
-    rm -f "${PART_PATH}" "${PART_META}"
+    # .aria2 是 aria2c 的续传控制文件 (分片位图)。不删会在下一轮被 aria2
+    #   “认领”到一个已经换过的 .part 上, 导致续传位图与实际数据错位。
+    rm -f "${PART_PATH}" "${PART_PATH}.aria2" "${PART_META}"
 }
 
 # 备份本地完整压缩包 (不是作废: 厂商换包时旧包可能还要回退)
@@ -558,13 +690,28 @@ download_zip() {
 
     # ---- 未完成文件: 先确认“它和当前远端是同一版”, 再决定续传还是重下 ----
     if [ -s "${PART_PATH}" ]; then
-        local psz
+        local psz m_writer
         psz="$(stat -c%s "${PART_PATH}")"
-        if [ "${QPI_NO_RESUME:-0}" = "1" ]; then
+        m_writer="$(part_meta_get WRITER)"
+        # aria2 写的 .part 是预分配 + 稀疏空洞, 大小≠真实进度。两种处理必错:
+        #   ① 拿大小判“已不小于远端” -> 把还在下的文件删掉
+        #   ② 原样交给 curl -C - -> curl 看到大小=total 直接宣告完成 (拿到空数据)
+        # 所以只要上一个写入者是 aria2 而这次不走 aria2, 就从零重下。
+        if [ "${m_writer}" = "aria2" ] && \
+           { [ "${QPI_ARIA2:-1}" = "0" ] || ! command -v aria2c >/dev/null 2>&1; }; then
+            log_warn "未完成文件由 aria2c 写入 ($(human "${psz}") 为预分配大小, 非真实进度)"
+            log_warn "  本次改用 curl/wget 无法正确续传 (会把空洞当成已下数据), 从零下载"
+            discard_part
+            psz=0
+        fi
+        if [ ! -s "${PART_PATH}" ]; then
+            :   # 已被上面丢弃 / QPI_NO_RESUME
+        elif [ "${QPI_NO_RESUME:-0}" = "1" ]; then
             log_info "QPI_NO_RESUME=1, 不续传, 从零下载 (已有 $(human "${psz}"))"
             discard_part
         # ① 已不小于远端: 旧版包残留(厂商换包变小) 或并发写入膨胀 -> 续传必 416
-        elif [ -n "${rsz}" ] && [ "${psz}" -ge "${rsz}" ]; then
+        #    aria2 例外: 预分配本来就会等于总大小, 不是膨胀。
+        elif [ -n "${rsz}" ] && [ "${psz}" -ge "${rsz}" ] && [ "${m_writer}" != "aria2" ]; then
             log_warn "未完成文件 $(human "${psz}") 已不小于远端大小 $(human "${rsz}") (旧版底包残留/写入膨胀)"
             log_warn "  续传不可行 (HTTP 416), 丢弃后从零下载"
             discard_part
@@ -585,7 +732,12 @@ download_zip() {
                 log_warn "  丢弃旧数据, 从零下载最新包"
                 discard_part
             else
-                log_info "检测到未完成文件 $(human "${psz}") (与远端同一版本), 断点续传..."
+                # 显示真实进度: aria2 写的 .part 大小是预分配值, 会误导成“已下 6 GiB”
+                if [ "${m_writer}" = "aria2" ]; then
+                    log_info "检测到未完成文件 (已下 $(human "$(_aria2_done "${PART_PATH}")") / 预分配显示 $(human "${psz}")) (与远端同一版本), 断点续传..."
+                else
+                    log_info "检测到未完成文件 $(human "${psz}") (与远端同一版本), 断点续传..."
+                fi
             fi
         # ③ 无版本记录 (旧脚本/手工留下的 .part): 无法确认是否同一版
         else
@@ -600,18 +752,43 @@ download_zip() {
     fi
 
     # 每次传输前把“本次下的是哪一版”写进 .part.meta (续传正确性的根据)
-    write_part_meta "${rsz}" "${RETAG_META}" "${RLM_META}" "${rmd5}"
+    # 最后一个参数 = WRITER, 决定下次能不能拿 curl 接着续 (见 write_part_meta 注释)
+    local use_aria2=0
+    if [ "${QPI_ARIA2:-1}" != "0" ] && command -v aria2c >/dev/null 2>&1; then
+        use_aria2=1
+    fi
+    if [ "${use_aria2}" = "1" ]; then
+        write_part_meta "${rsz}" "${RETAG_META}" "${RLM_META}" "${rmd5}" aria2
+    else
+        write_part_meta "${rsz}" "${RETAG_META}" "${RLM_META}" "${rmd5}" curl
+    fi
 
     # 优先 aria2c (多连接, 有则明显更快), 其次 curl -C -, 最后 wget -c
     # lmd5: 下载过程/校验可能重复需要本地 md5 (几 GiB 算一次要一两分钟), 缓存复用
     local lmd5=""
-    if [ -n "${QPI_ARIA2:-}" ] && command -v aria2c >/dev/null 2>&1; then
-        log_info "使用 aria2c (多连接): ${URL}"
-        download_with_progress "${PART_PATH}" "${rsz}" \
+    # aria2c 默认启用 (QPI_ARIA2=0 可关): 厂商源按单连接限速, 实测单连接 ~0.7 MiB/s,
+    #   8 分片合计 ~2.3 MiB/s, 7.4 GiB 从 3 小时降到 50 分钟左右。
+    if [ "${use_aria2}" = "1" ]; then
+        log_info "使用 aria2c 多连接下载 (QPI_ARIA2=0 可关): ${URL}"
+        local a2_rc=0
+        # 进度取数必须用 _aria2_done (du 已分配块), 不能用文件大小:
+        #   aria2 开跑就 preallocate 到接近总大小, stat 从第一秒就是 6+ GiB。
+        download_with_progress "${PART_PATH}" "${rsz}" _aria2_done \
             aria2c -c -x 8 -s 8 -k 1M --file-allocation=none \
                    --console-log-level=error --summary-interval=0 \
-                   -d "${DL_DIR}" -o "$(basename "${PART_PATH}")" "${URL}" || {
-            log_err "aria2c 下载失败"; return 1; }
+                   --auto-file-renaming=false --allow-overwrite=true \
+                   -d "${DL_DIR}" -o "$(basename "${PART_PATH}")" "${URL}" || a2_rc=$?
+        # .aria2 位图文件统一删掉: 它的格式是二进制且与 curl 不兼容, 留着只会
+        #   让下次续传位图与实际数据错位。aria2 自己下次也能从 .part 重新建位图。
+        rm -f "${PART_PATH}.aria2"
+        if [ "${a2_rc}" != "0" ]; then
+            log_warn "aria2c 退出码 ${a2_rc} (已下 $(human "$(_aria2_done "${PART_PATH}")"))"
+            # 不把 aria2 的半成品交给 curl: 稀疏空洞会被 curl -C - 当成“已下完”。
+            # 直接丢弃; 下次 fetch 用 aria2 从零重下 (多连接本身不慢, 丢掉的是本次未完成的分片)。
+            log_warn "  丢弃预分配文件, 避免后续校验把空洞当已下数据"
+            discard_part
+            return 1
+        fi
     elif command -v curl >/dev/null 2>&1; then
         log_info "使用 curl 下载 (支持断点续传): ${URL}"
         log_info "  预计耗时较长 (几 GiB), 中断后重跑本命令会自动续传"
@@ -653,7 +830,7 @@ download_zip() {
                     log_warn "  手里的 $(human "${cur_size}") 是旧版本, 丢弃后从零下载最新包"
                     discard_part
                     remote_meta && rsz="${RSZ_META}"
-                    write_part_meta "${rsz}" "${RETAG_META}" "${RLM_META}" "${rmd5}"
+                    write_part_meta "${rsz}" "${RETAG_META}" "${RLM_META}" "${rmd5}" curl
                     if [ -n "${RETAG_META}" ]; then curl_hdr=(-H "If-Range: ${RETAG_META}"); else curl_hdr=(); fi
                     stall=0
                     continue
@@ -697,7 +874,7 @@ download_zip() {
                     fi
                     heal=$((heal+1))
                     log_warn "  校验未通过, 删除异常文件并重新下载 (自动从零开始, 第 ${heal} 次自愈)..."
-                    rm -f "${PART_PATH}"
+                    rm -f "${PART_PATH}" "${PART_PATH}.aria2"
                     if [ "${heal}" -ge 2 ]; then
                         log_err "连续 2 次下载后文件都异常 (服务端 HEAD/GET 不一致或网络改写), 放弃"
                         log_err "  处理: 稍后重跑本命令 $0 fetch"
@@ -1241,7 +1418,8 @@ cmd_clean() {
     [ -s "${ZIP_PATH}" ] && freed=$((freed + $(stat -c%s "${ZIP_PATH}")))
     [ -s "${PART_PATH}" ] && freed=$((freed + $(stat -c%s "${PART_PATH}")))
     [ -s "${PART_PATH}.stale" ] && freed=$((freed + $(stat -c%s "${PART_PATH}.stale")))
-    rm -f "${ZIP_PATH}" "${ZIP_PATH}.stale" "${PART_PATH}" "${PART_PATH}.stale" "${PART_META}"
+    rm -f "${ZIP_PATH}" "${ZIP_PATH}.stale" "${PART_PATH}" "${PART_PATH}.stale" \
+          "${PART_PATH}.aria2" "${PART_META}"
     rm -rf "${UNPACK_DIR}"
     log_ok "已清理下载缓存 (释放 $(human "${freed}")), prebuilds/ 未改动"
 }

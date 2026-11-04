@@ -39,6 +39,7 @@ REQUIRED_TOOLS=(
   "gcc:build-essential"                    # 内核 host 工具编译
   "git:git"                                # 仓库 / 资源获取
   "curl:curl"                              # 固件底包下载 (tools/fetch-prebuilds.sh)
+  "aria2c:aria2"                           # 固件底包多连接下载 (7 GiB 级提速 ~3x; 缺则回退单连接 curl)
   "unzip:unzip"                            # 固件底包解压 (tools/fetch-prebuilds.sh)
   "file:file"                              # 镜像类型识别
   "flex:flex"                              # 内核编译 (词法分析)
