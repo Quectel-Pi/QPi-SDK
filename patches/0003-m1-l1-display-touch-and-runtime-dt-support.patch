@@ -1,0 +1,2078 @@
+diff --git a/arch/arm64/configs/vendor/bengal_le_GKI.config b/arch/arm64/configs/vendor/bengal_le_GKI.config
+index 4e68c48c114c4aba5dee19643f520b6c92a14416..28dd14195ffe4b5cf612401085e27fbe9fa8b858 100644
+--- a/arch/arm64/configs/vendor/bengal_le_GKI.config
++++ b/arch/arm64/configs/vendor/bengal_le_GKI.config
+@@ -300,3 +300,8 @@ CONFIG_ZRAM=m
+ CONFIG_ZRAM_DEF_COMP="lzo-rle"
+ CONFIG_ZRAM_DEF_COMP_LZORLE=y
+ CONFIG_ZSMALLOC=m
++CONFIG_WAVESHARE_DSI_PANEL_BL=m
++CONFIG_TOUCHSCREEN_GOODIX=m
++CONFIG_I2C=y
++CONFIG_INPUT=y
++CONFIG_INPUT_TOUCHSCREEN=y
+diff --git a/arch/arm64/configs/vendor/bengal_le_consolidate.config b/arch/arm64/configs/vendor/bengal_le_consolidate.config
+index debd8f0826bca6202201457b46da626cd463a9a7..c763e86a2b6328127363344732ff2e46e1885175 100644
+--- a/arch/arm64/configs/vendor/bengal_le_consolidate.config
++++ b/arch/arm64/configs/vendor/bengal_le_consolidate.config
+@@ -39,3 +39,8 @@ CONFIG_SDHCI_MSM_DBG=y
+ CONFIG_SLUB_DEBUG_ON=y
+ # CONFIG_TC956X_PCIE_ETH is not set
+ CONFIG_TEST_USER_COPY=m
++CONFIG_WAVESHARE_DSI_PANEL_BL=m
++CONFIG_TOUCHSCREEN_GOODIX=m
++CONFIG_I2C=y
++CONFIG_INPUT=y
++CONFIG_INPUT_TOUCHSCREEN=y
+diff --git a/arch/arm64/configs/vendor/qpi_debian.config b/arch/arm64/configs/vendor/qpi_debian.config
+index c4a8555d4789a2302d89534f7d5ea96f79015feb..306ce074542564716cbaca90e158d70de384d32b 100644
+--- a/arch/arm64/configs/vendor/qpi_debian.config
++++ b/arch/arm64/configs/vendor/qpi_debian.config
+@@ -8,3 +8,6 @@ CONFIG_VT_HW_CONSOLE_BINDING=y
+ #CONFIG_CONSOLE_TRANSLATIONS=y
+ #CONFIG_QCOM_RPMPD=y
+ #CONFIG_QCOM_SMD_RPM=y
++CONFIG_DRM_SCHED=y
++CONFIG_OF_OVERLAY=y
++CONFIG_OF_CONFIGFS=y
+diff --git a/drivers/gpu/drm/Kconfig b/drivers/gpu/drm/Kconfig
+index a2e4fc23412b5258cc7af911fd0fd9af8ac064fe..67c0d94dbcca3174b9ddcd8ba77a88f49fbdfe6c 100644
+--- a/drivers/gpu/drm/Kconfig
++++ b/drivers/gpu/drm/Kconfig
+@@ -216,7 +216,7 @@ config DRM_GEM_SHMEM_HELPER
+ 	  Choose this if you need the GEM shmem helper functions
+ 
+ config DRM_SCHED
+-	tristate
++	tristate "DRM Scheduler"
+ 	depends on DRM
+ 
+ source "drivers/gpu/drm/i2c/Kconfig"
+diff --git a/drivers/gpu/drm/bridge/Kconfig b/drivers/gpu/drm/bridge/Kconfig
+index 694d3b5f085c49d17ee96f25718cc0177424e34e..1ee8a2f79288f4854ffce02e75dde340373e0e8a 100644
+--- a/drivers/gpu/drm/bridge/Kconfig
++++ b/drivers/gpu/drm/bridge/Kconfig
+@@ -329,6 +329,13 @@ config DRM_TI_TPD12S015
+ 	  Texas Instruments TPD12S015 HDMI level shifter and ESD protection
+ 	  driver.
+ 
++config WAVESHARE_DSI_PANEL_BL
++	tristate "waveshare dsi panels backlight control"
++	depends on OF
++	help
++	  Texas waveshare dsi panels backlight control
++	  driver.
++
+ source "drivers/gpu/drm/bridge/analogix/Kconfig"
+ 
+ source "drivers/gpu/drm/bridge/adv7511/Kconfig"
+diff --git a/drivers/gpu/drm/bridge/Makefile b/drivers/gpu/drm/bridge/Makefile
+index da32142e41e9ba22f36880c5d68316a4bfb0a201..3430844b3f63af54f1bc73a8ad8aa6097b00d340 100644
+--- a/drivers/gpu/drm/bridge/Makefile
++++ b/drivers/gpu/drm/bridge/Makefile
+@@ -30,6 +30,7 @@ obj-$(CONFIG_DRM_TI_TFP410) += ti-tfp410.o
+ obj-$(CONFIG_DRM_TI_TPD12S015) += ti-tpd12s015.o
+ obj-$(CONFIG_DRM_NWL_MIPI_DSI) += nwl-dsi.o
+ obj-$(CONFIG_DRM_ITE_IT66121) += ite-it66121.o
++obj-$(CONFIG_WAVESHARE_DSI_PANEL_BL) += waveshare-bl.o
+ 
+ obj-y += analogix/
+ obj-y += cadence/
+diff --git a/drivers/gpu/drm/bridge/waveshare-bl.c b/drivers/gpu/drm/bridge/waveshare-bl.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..c8d6ee62d82fcd4ea778f0e3c43aafc5726f020b
+--- /dev/null
++++ b/drivers/gpu/drm/bridge/waveshare-bl.c
+@@ -0,0 +1,722 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright © 2023 Raspberry Pi Ltd
++ *
++ * Based on panel-raspberrypi-touchscreen by Broadcom
++ */
++
++#include <linux/backlight.h>
++#include <linux/i2c.h>
++#include <linux/err.h>
++#include <linux/module.h>
++#include <linux/regulator/consumer.h>
++#include <linux/gpio/consumer.h>
++#include <linux/err.h>
++#include <linux/debugfs.h>
++#include <linux/sysfs.h>
++#include <linux/delay.h>
++#include <linux/pm_runtime.h>
++
++struct ws_panel {
++    struct i2c_client *i2c;
++    struct backlight_device *bl_dev;
++    struct regulator *vddio_i2c;
++    struct regulator *vdd_ana;
++    struct gpio_desc *switch_gpio;
++    struct gpio_desc *power_gpio;
++    struct dentry *debugfs_dir;
++    struct device *dev;
++};
++
++// 模块参数用于调试
++static bool debug_mode = false;
++module_param(debug_mode, bool, 0644);
++MODULE_PARM_DESC(debug_mode, "Enable debug mode");
++
++#define WAVESHARE_BL_VDD_USE    0
++
++// 全局面板实例指针（用于与显示驱动通信）
++static struct ws_panel *g_ws_panel = NULL;
++
++// 获取面板实例的函数
++struct ws_panel *ws_panel_get_instance(void)
++{
++    return g_ws_panel;
++}
++EXPORT_SYMBOL_GPL(ws_panel_get_instance);
++
++// 写读寄存器函数
++int ws_panel_i2c_read(u8 reg)
++{
++    int ret = 0;
++    struct ws_panel *ts = ws_panel_get_instance();
++    
++    if (!ts || !ts->i2c) {
++        pr_err("[%s:%d]: invalid parameter!\n", __func__, __LINE__);
++        return -EINVAL;
++    }
++    
++    ret = i2c_smbus_read_byte_data(ts->i2c, reg);
++    if (ret < 0) {
++        pr_err("[%s:%d]: I2C read failed at reg 0x%02x: %d\n", __func__, __LINE__, reg, ret);
++        return ret;
++    }
++    
++    return ret;
++}
++EXPORT_SYMBOL_GPL(ws_panel_i2c_read);
++
++// 写寄存器函数
++int ws_panel_i2c_write(u8 reg, u8 val)
++{
++    int ret;
++    struct ws_panel *ts = ws_panel_get_instance();
++    
++    if (!ts || !ts->i2c) {
++        pr_err("[%s:%d]: invalid parameter!\n", __func__, __LINE__);
++        return -EINVAL;
++    }
++    
++    ret = i2c_smbus_write_byte_data(ts->i2c, reg, val);
++    if (ret) {
++        pr_err("[%s:%d]: I2C write failed at reg 0x%02x: %d\n", __func__, __LINE__, reg, ret);
++        return ret;
++    }
++    
++    return ret;
++}
++EXPORT_SYMBOL_GPL(ws_panel_i2c_write);
++
++int ws_panel_set_backlight(unsigned int value)
++{
++    int ret = 0;
++    struct ws_panel *ts = ws_panel_get_instance();
++
++    if (!ts) {
++        pr_err("[%s:%d]: invalid parameter!\n", __func__, __LINE__);
++        return -EINVAL;
++    }
++    
++    ret = ws_panel_i2c_write(0xab, 0xff - value);
++    if (ret != 0) {
++        pr_err("[%s:%d]: I2C write failed at reg 0xab: %d\n", __func__, __LINE__, ret);
++        return ret;
++    }
++    
++    ret = ws_panel_i2c_write(0xaa, 0x01);
++    if (ret != 0) {
++        pr_err("[%s:%d]: I2C write failed at reg 0xaa: %d\n", __func__, __LINE__, ret);
++        return ret;
++    }
++    
++    return ret;
++}
++EXPORT_SYMBOL_GPL(ws_panel_set_backlight);
++
++// 更新背光状态的回调函数
++static int ws_panel_bl_update_status(struct backlight_device *bl)
++{
++    int brightness = backlight_get_brightness(bl);
++    
++    return ws_panel_set_backlight(brightness);
++}
++
++static const struct backlight_ops ws_panel_bl_ops = {
++    .update_status = ws_panel_bl_update_status,
++};
++
++// 在探测函数中调用此函数来注册背光设备
++static struct backlight_device *ws_panel_create_backlight(struct ws_panel *ts)
++{
++    struct device *dev = &ts->i2c->dev;
++    const struct backlight_properties props = {
++        .type = BACKLIGHT_RAW,
++        .brightness = 255, // 默认亮度
++        .max_brightness = 255, // 最大亮度
++    };
++    
++    // 使用devm_backlight_device_register注册背光设备
++    return devm_backlight_device_register(dev, dev_name(dev), dev, ts,
++                                          &ws_panel_bl_ops, &props);
++}
++
++void ws_panel_switch_mipi(bool switch_ws)
++{
++    struct ws_panel *ts = ws_panel_get_instance();
++    if (ts && ts->switch_gpio) {
++        if (switch_ws) {
++            pr_info("%s: switch to L\n", __func__);
++            gpiod_set_value_cansleep(ts->switch_gpio, 0);
++        } else {
++            pr_info("%s: switch to H\n", __func__);
++            gpiod_set_value_cansleep(ts->switch_gpio, 1);
++        }
++    }
++}
++EXPORT_SYMBOL_GPL(ws_panel_switch_mipi);
++
++void ws_panel_poweron_mipi(void)
++{
++    struct ws_panel *ts = ws_panel_get_instance();
++    if (ts && ts->power_gpio) {
++        // gpiod_set_value_cansleep(ts->power_gpio, 0);
++        // mdelay(100);
++        gpiod_set_value_cansleep(ts->power_gpio, 1);
++    }
++}
++EXPORT_SYMBOL_GPL(ws_panel_poweron_mipi);
++
++// 调试接口实现
++static ssize_t reg_read_store(struct device *dev,
++                             struct device_attribute *attr,
++                             const char *buf, size_t count)
++{
++    unsigned int reg;
++    int ret;
++    
++    if (sscanf(buf, "%x", &reg) != 1)
++        return -EINVAL;
++    
++    ret = ws_panel_i2c_read(reg);
++    if (ret < 0) {
++        dev_err(dev, "Failed to read reg 0x%02x: %d\n", reg, ret);
++        return ret;
++    }
++    
++    dev_info(dev, "Read reg 0x%02x: 0x%02x\n", reg, ret);
++    return count;
++}
++
++static ssize_t reg_write_store(struct device *dev,
++                              struct device_attribute *attr,
++                              const char *buf, size_t count)
++{
++    unsigned int reg, val;
++    int ret;
++    
++    if (sscanf(buf, "%x %x", &reg, &val) != 2)
++        return -EINVAL;
++    
++    ret = ws_panel_i2c_write(reg, val);
++    if (ret) {
++        dev_err(dev, "Failed to write reg 0x%02x: %d\n", reg, ret);
++        return ret;
++    }
++    
++    dev_info(dev, "Write reg 0x%02x: 0x%02x\n", reg, val);
++    return count;
++}
++
++static ssize_t backlight_brightness_store(struct device *dev,
++                                         struct device_attribute *attr,
++                                         const char *buf, size_t count)
++{
++    unsigned int brightness;
++    int ret;
++    
++    if (sscanf(buf, "%u", &brightness) != 1)
++        return -EINVAL;
++    
++    if (brightness > 255)
++        brightness = 255;
++    
++    ret = ws_panel_set_backlight(brightness);
++    if (ret) {
++        dev_err(dev, "Failed to set backlight: %d\n", ret);
++        return ret;
++    }
++    
++    dev_info(dev, "Set backlight to %u\n", brightness);
++    return count;
++}
++
++static ssize_t power_status_show(struct device *dev,
++                                struct device_attribute *attr, char *buf)
++{
++    struct ws_panel *ts = dev_get_drvdata(dev);
++    int vdd_ana_enabled = 0, vddio_enabled = 0;
++    
++    if (ts->vdd_ana)
++        vdd_ana_enabled = regulator_is_enabled(ts->vdd_ana);
++    
++    if (ts->vddio_i2c)
++        vddio_enabled = regulator_is_enabled(ts->vddio_i2c);
++    
++    return sprintf(buf, "vdd_ana: %s\nvddio_i2c: %s\n",
++                   vdd_ana_enabled ? "enabled" : "disabled",
++                   vddio_enabled ? "enabled" : "disabled");
++}
++
++static ssize_t gpio_status_show(struct device *dev,
++                               struct device_attribute *attr, char *buf)
++{
++    struct ws_panel *ts = dev_get_drvdata(dev);
++    int switch_val = -1, power_val = -1;
++    
++    if (ts->switch_gpio)
++        switch_val = gpiod_get_value(ts->switch_gpio);
++    
++    if (ts->power_gpio)
++        power_val = gpiod_get_value(ts->power_gpio);
++    
++    return sprintf(buf, "switch_gpio: %d\npower_gpio: %d\n",
++                   switch_val, power_val);
++}
++
++// 新增：Power GPIO控制接口
++static ssize_t power_gpio_store(struct device *dev,
++                               struct device_attribute *attr,
++                               const char *buf, size_t count)
++{
++    struct ws_panel *ts = dev_get_drvdata(dev);
++    unsigned int value;
++    
++    if (sscanf(buf, "%u", &value) != 1)
++        return -EINVAL;
++    
++    if (value > 1)
++        value = 1;
++    
++    if (ts && ts->power_gpio) {
++        gpiod_set_value_cansleep(ts->power_gpio, value);
++        dev_info(dev, "Set power GPIO to %u\n", value);
++    }
++    
++    return count;
++}
++
++static ssize_t power_gpio_show(struct device *dev,
++                              struct device_attribute *attr, char *buf)
++{
++    struct ws_panel *ts = dev_get_drvdata(dev);
++    int value = -1;
++    
++    if (ts && ts->power_gpio)
++        value = gpiod_get_value(ts->power_gpio);
++    
++    return sprintf(buf, "%d\n", value);
++}
++
++// 新增：Switch GPIO控制接口
++static ssize_t switch_gpio_store(struct device *dev,
++                                struct device_attribute *attr,
++                                const char *buf, size_t count)
++{
++    struct ws_panel *ts = dev_get_drvdata(dev);
++    unsigned int value;
++    
++    if (sscanf(buf, "%u", &value) != 1)
++        return -EINVAL;
++    
++    if (value > 1)
++        value = 1;
++    
++    if (ts && ts->switch_gpio) {
++        gpiod_set_value_cansleep(ts->switch_gpio, value);
++        dev_info(dev, "Set switch GPIO to %u\n", value);
++    }
++    
++    return count;
++}
++
++static ssize_t switch_gpio_show(struct device *dev,
++                               struct device_attribute *attr, char *buf)
++{
++    struct ws_panel *ts = dev_get_drvdata(dev);
++    int value = -1;
++    
++    if (ts && ts->switch_gpio)
++        value = gpiod_get_value(ts->switch_gpio);
++    
++    return sprintf(buf, "%d\n", value);
++}
++
++// 定义sysfs属性
++static DEVICE_ATTR_WO(reg_read);
++static DEVICE_ATTR_WO(reg_write);
++static DEVICE_ATTR_WO(backlight_brightness);
++static DEVICE_ATTR_RW(power_gpio);
++static DEVICE_ATTR_RW(switch_gpio);
++static DEVICE_ATTR_RO(power_status);
++static DEVICE_ATTR_RO(gpio_status);
++
++static struct attribute *ws_panel_attrs[] = {
++    &dev_attr_reg_read.attr,
++    &dev_attr_reg_write.attr,
++    &dev_attr_backlight_brightness.attr,
++    &dev_attr_power_gpio.attr,
++    &dev_attr_switch_gpio.attr,
++    &dev_attr_power_status.attr,
++    &dev_attr_gpio_status.attr,
++    NULL,
++};
++
++static const struct attribute_group ws_panel_group = {
++    .attrs = ws_panel_attrs,
++};
++
++// debugfs接口实现
++static ssize_t debug_registers_read(struct file *file, char __user *user_buf,
++                                   size_t count, loff_t *ppos)
++{
++//    struct ws_panel *ts = file->private_data;
++    char *buf;
++    int len = 0, ret;
++    int i;
++    
++    buf = kzalloc(1024, GFP_KERNEL);
++    if (!buf)
++        return -ENOMEM;
++    
++    len += snprintf(buf + len, 1024 - len, "Waveshare Panel Registers:\n");
++    
++    // 读取一些关键寄存器
++    for (i = 0; i <= 0x05; i++) {
++        ret = ws_panel_i2c_read(i);
++        if (ret >= 0) {
++            len += snprintf(buf + len, 1024 - len, "Reg 0x%02x: 0x%02x\n", i, ret);
++        } else {
++            len += snprintf(buf + len, 1024 - len, "Reg 0x%02x: ERROR(%d)\n", i, ret);
++        }
++    }
++    
++    ret = simple_read_from_buffer(user_buf, count, ppos, buf, len);
++    kfree(buf);
++    return ret;
++}
++
++// 新增：debugfs power控制接口
++static ssize_t debug_power_gpio_write(struct file *file,
++                                     const char __user *user_buf,
++                                     size_t count, loff_t *ppos)
++{
++    struct ws_panel *ts = file->private_data;
++    char buf[16];
++    unsigned int value;
++    
++    if (count >= sizeof(buf))
++        return -EINVAL;
++    
++    if (copy_from_user(buf, user_buf, count))
++        return -EFAULT;
++    
++    buf[count] = '\0';
++    
++    if (kstrtouint(buf, 10, &value))
++        return -EINVAL;
++    
++    if (value > 1)
++        value = 1;
++    
++    if (ts && ts->power_gpio) {
++        gpiod_set_value_cansleep(ts->power_gpio, value);
++        pr_info("Debug: Set power GPIO to %u\n", value);
++    }
++    
++    return count;
++}
++
++static ssize_t debug_power_gpio_read(struct file *file, char __user *user_buf,
++                                    size_t count, loff_t *ppos)
++{
++    struct ws_panel *ts = file->private_data;
++    char buf[16];
++    int len, value = -1;
++    
++    if (ts && ts->power_gpio)
++        value = gpiod_get_value(ts->power_gpio);
++    
++    len = snprintf(buf, sizeof(buf), "%d\n", value);
++    
++    return simple_read_from_buffer(user_buf, count, ppos, buf, len);
++}
++
++// 新增：debugfs switch控制接口
++static ssize_t debug_switch_gpio_write(struct file *file,
++                                      const char __user *user_buf,
++                                      size_t count, loff_t *ppos)
++{
++    struct ws_panel *ts = file->private_data;
++    char buf[16];
++    unsigned int value;
++    
++    if (count >= sizeof(buf))
++        return -EINVAL;
++    
++    if (copy_from_user(buf, user_buf, count))
++        return -EFAULT;
++    
++    buf[count] = '\0';
++    
++    if (kstrtouint(buf, 10, &value))
++        return -EINVAL;
++    
++    if (value > 1)
++        value = 1;
++    
++    if (ts && ts->switch_gpio) {
++        gpiod_set_value_cansleep(ts->switch_gpio, value);
++        pr_info("Debug: Set switch GPIO to %u\n", value);
++    }
++    
++    return count;
++}
++
++static ssize_t debug_switch_gpio_read(struct file *file, char __user *user_buf,
++                                     size_t count, loff_t *ppos)
++{
++    struct ws_panel *ts = file->private_data;
++    char buf[16];
++    int len, value = -1;
++    
++    if (ts && ts->switch_gpio)
++        value = gpiod_get_value(ts->switch_gpio);
++    
++    len = snprintf(buf, sizeof(buf), "%d\n", value);
++    
++    return simple_read_from_buffer(user_buf, count, ppos, buf, len);
++}
++
++static const struct file_operations debug_registers_fops = {
++    .read = debug_registers_read,
++    .open = simple_open,
++    .llseek = default_llseek,
++};
++
++static const struct file_operations debug_power_gpio_fops = {
++    .read = debug_power_gpio_read,
++    .write = debug_power_gpio_write,
++    .open = simple_open,
++    .llseek = default_llseek,
++};
++
++static const struct file_operations debug_switch_gpio_fops = {
++    .read = debug_switch_gpio_read,
++    .write = debug_switch_gpio_write,
++    .open = simple_open,
++    .llseek = default_llseek,
++};
++
++static int ws_panel_debugfs_init(struct ws_panel *ts)
++{
++    ts->debugfs_dir = debugfs_create_dir("ws_panel", NULL);
++    if (IS_ERR(ts->debugfs_dir)) {
++        dev_warn(ts->dev, "Failed to create debugfs directory\n");
++        ts->debugfs_dir = NULL;
++        return PTR_ERR(ts->debugfs_dir);
++    }
++    
++    debugfs_create_file("registers", 0444, ts->debugfs_dir, ts, &debug_registers_fops);
++    debugfs_create_file("power_gpio", 0644, ts->debugfs_dir, ts, &debug_power_gpio_fops);
++    debugfs_create_file("switch_gpio", 0644, ts->debugfs_dir, ts, &debug_switch_gpio_fops);
++    
++    return 0;
++}
++
++static void ws_panel_debugfs_exit(struct ws_panel *ts)
++{
++    if (ts->debugfs_dir)
++        debugfs_remove_recursive(ts->debugfs_dir);
++}
++
++// 修改probe函数以设置全局指针
++static int ws_panel_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
++{
++    int ret;
++    struct device *dev = &i2c->dev;
++    struct ws_panel *ts = NULL;
++    
++    pr_info("[%s:%d]: waveshare_8.0inch-panel probe start\n", __func__, __LINE__);
++    
++    ts = devm_kzalloc(dev, sizeof(*ts), GFP_KERNEL);
++    if (!ts) {
++        pr_err("%s: Failed to allocate memory for ws_panel\n", __func__);
++        return -ENOMEM;
++    }
++    
++    ts->i2c = i2c;
++    ts->dev = dev;
++    i2c_set_clientdata(i2c, ts);
++    
++    // 获取GPIO
++    ts->switch_gpio = devm_gpiod_get_optional(dev, "switch", GPIOD_ASIS); // GPIOD_OUT_LOW);
++    if (IS_ERR(ts->switch_gpio)) {
++        pr_err("failed to acquire switch gpio\n");
++        return PTR_ERR(ts->switch_gpio);
++    }
++    
++    ts->power_gpio = devm_gpiod_get_optional(dev, "power", GPIOD_OUT_HIGH);
++    if (IS_ERR(ts->power_gpio)) {
++        pr_err("failed to acquire power gpio\n");
++        return PTR_ERR(ts->power_gpio);
++    }
++
++    #if WAVESHARE_BL_VDD_USE
++    // 获取并启用vdd_ana调节器
++    ts->vdd_ana = devm_regulator_get(dev, "vdd_ana");
++    if (IS_ERR(ts->vdd_ana)) {
++        pr_err("%s: Failed to get vdd_ana regulator\n", __func__);
++        return PTR_ERR(ts->vdd_ana);
++    }
++    ret = regulator_enable(ts->vdd_ana);
++    if (ret) {
++        pr_err("%s: Failed to enable vdd_ana regulator, ret=%d\n", __func__, ret);
++        return ret;
++    }
++    
++    // 获取并启用vddio_i2c调节器
++    ts->vddio_i2c = devm_regulator_get(dev, "vddio_i2c");
++    if (IS_ERR(ts->vddio_i2c)) {
++        pr_err("%s: Failed to get vddio_i2c regulator\n", __func__);
++        ret = PTR_ERR(ts->vddio_i2c);
++        goto probe_err;
++    }
++    
++    ret = regulator_enable(ts->vddio_i2c);
++    if (ret) {
++        pr_err("%s: Failed to enable vddio_i2c regulator, ret=%d\n", __func__, ret);
++        goto probe_err;
++    }
++    #endif
++
++    // 添加电源稳定延时
++    mdelay(100);
++    
++    // 设置全局指针
++    g_ws_panel = ts;
++    
++    // 注册背光设备
++    ts->bl_dev = ws_panel_create_backlight(ts);
++    if (IS_ERR(ts->bl_dev)) {
++        ret = PTR_ERR(ts->bl_dev);
++        goto probe_err;
++    }
++    
++    // 保存设备指针用于调试
++    dev_set_drvdata(dev, ts);
++
++    // 创建sysfs调试接口
++    ret = sysfs_create_group(&dev->kobj, &ws_panel_group);
++    if (ret) {
++        dev_warn(dev, "Failed to create sysfs group: %d\n", ret);
++        // 继续执行，不因调试接口失败而影响驱动加载
++    }
++    
++    // 创建debugfs调试接口
++    ws_panel_debugfs_init(ts);
++    
++    pr_info("[%s:%d]: waveshare_8.0inch-panel probe end\n", __func__, __LINE__);
++    
++    return 0;
++    
++probe_err:
++    // if(ts->vddio_i2c) regulator_disable(ts->vddio_i2c);
++    // if(ts->vdd_ana) regulator_disable(ts->vdd_ana);
++    g_ws_panel = NULL;
++    return ret;
++}
++
++// 修改remove函数以清除全局指针
++static int ws_panel_remove(struct i2c_client *i2c)
++{
++    struct ws_panel *ts = i2c_get_clientdata(i2c);
++    struct device *dev = &i2c->dev;
++    
++    // 清除全局指针
++    g_ws_panel = NULL;
++    
++    // 清理debugfs
++    ws_panel_debugfs_exit(ts);
++    
++    // 清理sysfs
++    sysfs_remove_group(&dev->kobj, &ws_panel_group);
++    
++    // 释放背光设备
++    if (ts->bl_dev)
++        backlight_device_unregister(ts->bl_dev);
++    
++    #if WAVESHARE_BL_VDD_USE
++    // 禁用调节器
++    if (ts->vddio_i2c)
++        regulator_disable(ts->vddio_i2c);
++    
++    if (ts->vdd_ana)
++        regulator_disable(ts->vdd_ana);
++    #endif
++
++    return 0;
++}
++
++#ifdef CONFIG_PM_SLEEP
++static int ws_panel_suspend(struct device *dev)
++{
++    #if WAVESHARE_BL_VDD_USE
++    struct i2c_client *i2c = to_i2c_client(dev);
++    struct ws_panel *ts = i2c_get_clientdata(i2c);
++    
++    if (ts->vddio_i2c)
++        regulator_disable(ts->vddio_i2c);
++    
++    if (ts->vdd_ana)
++        regulator_disable(ts->vdd_ana);
++    #endif
++
++    return 0;
++}
++
++static int ws_panel_resume(struct device *dev)
++{
++    #if WAVESHARE_BL_VDD_USE
++    struct i2c_client *i2c = to_i2c_client(dev);
++    struct ws_panel *ts = i2c_get_clientdata(i2c);
++    int ret;
++ 
++    ret = regulator_enable(ts->vdd_ana);
++    if (ret) {
++        dev_err(dev, "Failed to enable vdd_ana: %d\n", ret);
++        return ret;
++    }
++    
++    ret = regulator_enable(ts->vddio_i2c);
++    if (ret) {
++        dev_err(dev, "Failed to enable vddio_i2c: %d\n", ret);
++        regulator_disable(ts->vdd_ana);
++        return ret;
++    }
++
++    msleep(100);
++    #endif
++
++    return 0;
++}
++#endif
++
++static const struct dev_pm_ops ws_panel_pm_ops = {
++#ifdef CONFIG_PM_SLEEP
++    .suspend = ws_panel_suspend,
++    .resume = ws_panel_resume,
++#endif
++};
++
++static const struct of_device_id ws_panel_of_ids[] = {
++    {
++        .compatible = "waveshare,8.0inch-panel",
++    },
++    { /* sentinel */ }
++};
++MODULE_DEVICE_TABLE(of, ws_panel_of_ids);
++
++static struct i2c_driver ws_panel_driver = {
++    .driver = {
++        .name = "ws_touchscreen",
++        .of_match_table = ws_panel_of_ids,
++        .pm = &ws_panel_pm_ops,
++    },
++    .probe = ws_panel_probe,
++    .remove = ws_panel_remove,
++};
++module_i2c_driver(ws_panel_driver);
++
++MODULE_AUTHOR("Dave Stevenson <dave.stevenson@raspberrypi.com>");
++MODULE_DESCRIPTION("Waveshare DSI panel driver");
++MODULE_LICENSE("GPL");
+\ No newline at end of file
+diff --git a/drivers/gpu/drm/panel/Kconfig b/drivers/gpu/drm/panel/Kconfig
+index 479ffdb64486ec2b4defe80778bb4196777fcb4c..e81d15a27f1d38f7a69ba17f1d19619f44e70fbf 100644
+--- a/drivers/gpu/drm/panel/Kconfig
++++ b/drivers/gpu/drm/panel/Kconfig
+@@ -621,4 +621,5 @@ config DRM_PANEL_XINPENG_XPP055C272
+ 	  Say Y here if you want to enable support for the Xinpeng
+ 	  XPP055C272 controller for 720x1280 LCD panels with MIPI/RGB/SPI
+ 	  system interfaces.
++
+ endmenu
+diff --git a/drivers/input/touchscreen/goodix.c b/drivers/input/touchscreen/goodix.c
+index 2a58be797276a5d1198931dcb05dbfc8c8a969fd..3034490d5e897b2297e9f146d8c10f89cac5bddb 100644
+--- a/drivers/input/touchscreen/goodix.c
++++ b/drivers/input/touchscreen/goodix.c
+@@ -11,25 +11,14 @@
+  */
+ 
+ 
+-#include <linux/kernel.h>
+-#include <linux/dmi.h>
+-#include <linux/firmware.h>
+-#include <linux/module.h>
+-#include <linux/delay.h>
+-#include <linux/irq.h>
+-#include <linux/interrupt.h>
+-#include <linux/platform_data/x86/soc.h>
+-#include <linux/slab.h>
+-#include <linux/acpi.h>
+-#include <linux/of.h>
+-#include <asm/unaligned.h>
++
+ #include "goodix.h"
+ 
+ #define GOODIX_GPIO_INT_NAME		"irq"
+ #define GOODIX_GPIO_RST_NAME		"reset"
+ 
+-#define GOODIX_MAX_HEIGHT		4096
+-#define GOODIX_MAX_WIDTH		4096
++#define GOODIX_MAX_HEIGHT		800
++#define GOODIX_MAX_WIDTH		1280
+ #define GOODIX_INT_TRIGGER		1
+ #define GOODIX_CONTACT_SIZE		8
+ #define GOODIX_MAX_CONTACT_SIZE		9
+@@ -48,6 +37,8 @@
+ #define MAX_CONTACTS_LOC	5
+ #define TRIGGER_LOC		6
+ 
++#define POLL_INTERVAL_MS		17	/* 17ms = 60fps */
++
+ /* Our special handling for GPIO accesses through ACPI is x86 specific */
+ #if defined CONFIG_X86 && defined CONFIG_ACPI
+ #define ACPI_GPIO_SUPPORT
+@@ -183,7 +174,13 @@ int goodix_i2c_read(struct i2c_client *client, u16 reg, u8 *buf, int len)
+ 	msgs[1].buf   = buf;
+ 
+ 	ret = i2c_transfer(client->adapter, msgs, 2);
+-	return ret < 0 ? ret : (ret != ARRAY_SIZE(msgs) ? -EIO : 0);
++	if (ret >= 0)
++		ret = (ret == ARRAY_SIZE(msgs) ? 0 : -EIO);
++
++	if (ret)
++		dev_err(&client->dev, "Error reading %d bytes from 0x%04x: %d\n",
++			len, reg, ret);
++	return ret;
+ }
+ 
+ /**
+@@ -214,8 +211,15 @@ int goodix_i2c_write(struct i2c_client *client, u16 reg, const u8 *buf, int len)
+ 	msg.len = len + 2;
+ 
+ 	ret = i2c_transfer(client->adapter, &msg, 1);
++	if (ret >= 0)
++		ret = (ret == 1 ? 0 : -EIO);
++
+ 	kfree(addr_buf);
+-	return ret < 0 ? ret : (ret != 1 ? -EIO : 0);
++
++	if (ret)
++		dev_err(&client->dev, "Error writing %d bytes to 0x%04x: %d\n",
++			len, reg, ret);
++	return ret;
+ }
+ 
+ int goodix_i2c_write_u8(struct i2c_client *client, u16 reg, u8 value)
+@@ -257,11 +261,8 @@ static int goodix_ts_read_input_report(struct goodix_ts_data *ts, u8 *data)
+ 	do {
+ 		error = goodix_i2c_read(ts->client, addr, data,
+ 					header_contact_keycode_size);
+-		if (error) {
+-			dev_err(&ts->client->dev, "I2C transfer error: %d\n",
+-					error);
++		if (error)
+ 			return error;
+-		}
+ 
+ 		if (data[0] & GOODIX_BUFFER_STATUS_READY) {
+ 			touch_num = data[0] & 0x0f;
+@@ -282,6 +283,11 @@ static int goodix_ts_read_input_report(struct goodix_ts_data *ts, u8 *data)
+ 			return touch_num;
+ 		}
+ 
++		if (data[0] == 0 && ts->firmware_name) {
++			if (goodix_handle_fw_request(ts))
++				return 0;
++		}
++
+ 		usleep_range(1000, 2000); /* Poll every 1 - 2 ms */
+ 	} while (time_before(jiffies, max_timeout));
+ 
+@@ -292,13 +298,120 @@ static int goodix_ts_read_input_report(struct goodix_ts_data *ts, u8 *data)
+ 	return -ENOMSG;
+ }
+ 
++static int goodix_create_pen_input(struct goodix_ts_data *ts)
++{
++	struct device *dev = &ts->client->dev;
++	struct input_dev *input;
++
++	input = devm_input_allocate_device(dev);
++	if (!input)
++		return -ENOMEM;
++
++	//input_copy_abs(input, ABS_X, ts->input_dev, ABS_MT_POSITION_X);
++	input_set_abs_params(input, ABS_X,
++                    input_abs_get_min(ts->input_dev, ABS_MT_POSITION_X),
++                    input_abs_get_max(ts->input_dev, ABS_MT_POSITION_X),
++                    input_abs_get_fuzz(ts->input_dev, ABS_MT_POSITION_X),
++                    input_abs_get_flat(ts->input_dev, ABS_MT_POSITION_X));
++	//input_copy_abs(input, ABS_Y, ts->input_dev, ABS_MT_POSITION_Y);
++	input_set_abs_params(input, ABS_Y,
++                    input_abs_get_min(ts->input_dev, ABS_MT_POSITION_Y),
++                    input_abs_get_max(ts->input_dev, ABS_MT_POSITION_Y),
++                    input_abs_get_fuzz(ts->input_dev, ABS_MT_POSITION_Y),
++                    input_abs_get_flat(ts->input_dev, ABS_MT_POSITION_Y));
++	/*
++	 * The resolution of these touchscreens is about 10 units/mm, the actual
++	 * resolution does not matter much since we set INPUT_PROP_DIRECT.
++	 * Userspace wants something here though, so just set it to 10 units/mm.
++	 */
++	input_abs_set_res(input, ABS_X, 10);
++	input_abs_set_res(input, ABS_Y, 10);
++	input_set_abs_params(input, ABS_PRESSURE, 0, 255, 0, 0);
++
++	input_set_capability(input, EV_KEY, BTN_TOUCH);
++	input_set_capability(input, EV_KEY, BTN_TOOL_PEN);
++	input_set_capability(input, EV_KEY, BTN_STYLUS);
++	input_set_capability(input, EV_KEY, BTN_STYLUS2);
++	__set_bit(INPUT_PROP_DIRECT, input->propbit);
++
++	input->name = "Goodix Active Pen";
++	input->phys = "input/pen";
++	input->id.bustype = BUS_I2C;
++	input->id.vendor = 0x0416;
++	if (kstrtou16(ts->id, 10, &input->id.product))
++		input->id.product = 0x1001;
++	input->id.version = ts->version;
++
++	ts->input_pen = input;
++	return 0;
++}
++
++static void goodix_ts_report_pen_down(struct goodix_ts_data *ts, u8 *data)
++{
++	int input_x, input_y, input_w, error;
++	u8 key_value;
++
++	if (!ts->pen_input_registered) {
++		error = input_register_device(ts->input_pen);
++		ts->pen_input_registered = (error == 0) ? 1 : error;
++	}
++
++	if (ts->pen_input_registered < 0)
++		return;
++
++	if (ts->contact_size == 9) {
++		input_x = get_unaligned_le16(&data[4]);
++		input_y = get_unaligned_le16(&data[6]);
++		input_w = get_unaligned_le16(&data[8]);
++	} else {
++		input_x = get_unaligned_le16(&data[2]);
++		input_y = get_unaligned_le16(&data[4]);
++		input_w = get_unaligned_le16(&data[6]);
++	}
++
++	touchscreen_report_pos(ts->input_pen, &ts->prop, input_x, input_y, false);
++	input_report_abs(ts->input_pen, ABS_PRESSURE, input_w);
++
++	input_report_key(ts->input_pen, BTN_TOUCH, 1);
++	input_report_key(ts->input_pen, BTN_TOOL_PEN, 1);
++
++	if (data[0] & GOODIX_HAVE_KEY) {
++		key_value = data[1 + ts->contact_size];
++		input_report_key(ts->input_pen, BTN_STYLUS, key_value & 0x10);
++		input_report_key(ts->input_pen, BTN_STYLUS2, key_value & 0x20);
++	} else {
++		input_report_key(ts->input_pen, BTN_STYLUS, 0);
++		input_report_key(ts->input_pen, BTN_STYLUS2, 0);
++	}
++
++	input_sync(ts->input_pen);
++}
++
++static void goodix_ts_report_pen_up(struct goodix_ts_data *ts)
++{
++	if (!ts->input_pen)
++		return;
++
++	input_report_key(ts->input_pen, BTN_TOUCH, 0);
++	input_report_key(ts->input_pen, BTN_TOOL_PEN, 0);
++	input_report_key(ts->input_pen, BTN_STYLUS, 0);
++	input_report_key(ts->input_pen, BTN_STYLUS2, 0);
++
++	input_sync(ts->input_pen);
++}
++
+ static void goodix_ts_report_touch_8b(struct goodix_ts_data *ts, u8 *coor_data)
+ {
++	int temp = 0;
+ 	int id = coor_data[0] & 0x0F;
+ 	int input_x = get_unaligned_le16(&coor_data[1]);
+ 	int input_y = get_unaligned_le16(&coor_data[3]);
+ 	int input_w = get_unaligned_le16(&coor_data[5]);
+ 
++	temp = input_y;
++	input_y = 800 - input_x;
++	input_x = temp;
++
+ 	input_mt_slot(ts->input_dev, id);
+ 	input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, true);
+ 	touchscreen_report_pos(ts->input_dev, &ts->prop,
+@@ -322,6 +435,14 @@ static void goodix_ts_report_touch_9b(struct goodix_ts_data *ts, u8 *coor_data)
+ 	input_report_abs(ts->input_dev, ABS_MT_WIDTH_MAJOR, input_w);
+ }
+ 
++static void goodix_ts_release_keys(struct goodix_ts_data *ts)
++{
++	int i;
++
++	for (i = 0; i < GOODIX_MAX_KEYS; i++)
++		input_report_key(ts->input_dev, ts->keymap[i], 0);
++}
++
+ static void goodix_ts_report_key(struct goodix_ts_data *ts, u8 *data)
+ {
+ 	int touch_num;
+@@ -336,8 +457,7 @@ static void goodix_ts_report_key(struct goodix_ts_data *ts, u8 *data)
+ 				input_report_key(ts->input_dev,
+ 						 ts->keymap[i], 1);
+ 	} else {
+-		for (i = 0; i < GOODIX_MAX_KEYS; i++)
+-			input_report_key(ts->input_dev, ts->keymap[i], 0);
++		goodix_ts_release_keys(ts);
+ 	}
+ }
+ 
+@@ -359,6 +479,15 @@ static void goodix_process_events(struct goodix_ts_data *ts)
+ 	if (touch_num < 0)
+ 		return;
+ 
++	/* The pen being down is always reported as a single touch */
++	if (touch_num == 1 && (point_data[1] & 0x80)) {
++		goodix_ts_report_pen_down(ts, point_data);
++		goodix_ts_release_keys(ts);
++		goto sync; /* Release any previously registered touches */
++	} else {
++		goodix_ts_report_pen_up(ts);
++	}
++
+ 	goodix_ts_report_key(ts, point_data);
+ 
+ 	for (i = 0; i < touch_num; i++)
+@@ -369,6 +498,7 @@ static void goodix_process_events(struct goodix_ts_data *ts)
+ 			goodix_ts_report_touch_8b(ts,
+ 				&point_data[1 + ts->contact_size * i]);
+ 
++sync:
+ 	input_mt_sync_frame(ts->input_dev);
+ 	input_sync(ts->input_dev);
+ }
+@@ -384,23 +514,72 @@ static irqreturn_t goodix_ts_irq_handler(int irq, void *dev_id)
+ 	struct goodix_ts_data *ts = dev_id;
+ 
+ 	goodix_process_events(ts);
+-
+-	if (goodix_i2c_write_u8(ts->client, GOODIX_READ_COOR_ADDR, 0) < 0)
+-		dev_err(&ts->client->dev, "I2C write end_cmd error\n");
++	goodix_i2c_write_u8(ts->client, GOODIX_READ_COOR_ADDR, 0);
+ 
+ 	return IRQ_HANDLED;
+ }
+ 
++static void goodix_ts_irq_poll_timer(struct timer_list *t)
++{
++	struct goodix_ts_data *ts = from_timer(ts, t, timer);
++
++	schedule_work(&ts->work_i2c_poll);
++	mod_timer(&ts->timer, jiffies + msecs_to_jiffies(POLL_INTERVAL_MS));
++}
++
++static void goodix_ts_work_i2c_poll(struct work_struct *work)
++{
++	struct goodix_ts_data *ts = container_of(work,
++			struct goodix_ts_data, work_i2c_poll);
++
++	goodix_process_events(ts);
++	goodix_i2c_write_u8(ts->client, GOODIX_READ_COOR_ADDR, 0);
++}
++
++static void goodix_enable_irq(struct goodix_ts_data *ts)
++{
++	if (ts->client->irq) {
++		enable_irq(ts->client->irq);
++	} else {
++		ts->timer.expires = jiffies + msecs_to_jiffies(POLL_INTERVAL_MS);
++		add_timer(&ts->timer);
++	}
++}
++
++static void goodix_disable_irq(struct goodix_ts_data *ts)
++{
++	if (ts->client->irq) {
++		disable_irq(ts->client->irq);
++	} else {
++		del_timer_sync(&ts->timer);
++		cancel_work_sync(&ts->work_i2c_poll);
++	}
++}
++
+ static void goodix_free_irq(struct goodix_ts_data *ts)
+ {
+-	devm_free_irq(&ts->client->dev, ts->client->irq, ts);
++	if (ts->client->irq) {
++		devm_free_irq(&ts->client->dev, ts->client->irq, ts);
++	} else {
++		del_timer_sync(&ts->timer);
++		cancel_work_sync(&ts->work_i2c_poll);
++	}
+ }
+ 
+ static int goodix_request_irq(struct goodix_ts_data *ts)
+ {
+-	return devm_request_threaded_irq(&ts->client->dev, ts->client->irq,
+-					 NULL, goodix_ts_irq_handler,
+-					 ts->irq_flags, ts->client->name, ts);
++	if (ts->client->irq) {
++		return devm_request_threaded_irq(&ts->client->dev, ts->client->irq,
++						 NULL, goodix_ts_irq_handler,
++						 ts->irq_flags, ts->client->name, ts);
++	} else {
++		INIT_WORK(&ts->work_i2c_poll,
++			  goodix_ts_work_i2c_poll);
++		timer_setup(&ts->timer, goodix_ts_irq_poll_timer, 0);
++		if (ts->irq_pin_access_method == IRQ_PIN_ACCESS_NONE)
++			goodix_enable_irq(ts);
++		return 0;
++	}
+ }
+ 
+ static int goodix_check_cfg_8(struct goodix_ts_data *ts, const u8 *cfg, int len)
+@@ -511,11 +690,9 @@ int goodix_send_cfg(struct goodix_ts_data *ts, const u8 *cfg, int len)
+ 		return error;
+ 
+ 	error = goodix_i2c_write(ts->client, ts->chip->config_addr, cfg, len);
+-	if (error) {
+-		dev_err(&ts->client->dev, "Failed to write config data: %d",
+-			error);
++	if (error)
+ 		return error;
+-	}
++
+ 	dev_dbg(&ts->client->dev, "Config sent successfully.");
+ 
+ 	/* Let the firmware reconfigure itself, so sleep for 10ms */
+@@ -711,22 +888,16 @@ static int goodix_resource(struct acpi_resource *ares, void *data)
+ 	struct device *dev = &ts->client->dev;
+ 	struct acpi_resource_gpio *gpio;
+ 
+-	switch (ares->type) {
+-	case ACPI_RESOURCE_TYPE_GPIO:
+-		gpio = &ares->data.gpio;
+-		if (gpio->connection_type == ACPI_RESOURCE_GPIO_TYPE_INT) {
+-			if (ts->gpio_int_idx == -1) {
+-				ts->gpio_int_idx = ts->gpio_count;
+-			} else {
+-				dev_err(dev, "More then one GpioInt resource, ignoring ACPI GPIO resources\n");
+-				ts->gpio_int_idx = -2;
+-			}
++	if (acpi_gpio_get_irq_resource(ares, &gpio)) {
++		if (ts->gpio_int_idx == -1) {
++			ts->gpio_int_idx = ts->gpio_count;
++		} else {
++			dev_err(dev, "More then one GpioInt resource, ignoring ACPI GPIO resources\n");
++			ts->gpio_int_idx = -2;
+ 		}
+ 		ts->gpio_count++;
+-		break;
+-	default:
+-		break;
+-	}
++	} else if (acpi_gpio_get_io_resource(ares, &gpio))
++		ts->gpio_count++;
+ 
+ 	return 0;
+ }
+@@ -743,7 +914,7 @@ static int goodix_add_acpi_gpio_mappings(struct goodix_ts_data *ts)
+ 	const struct acpi_gpio_mapping *gpio_mapping = NULL;
+ 	struct device *dev = &ts->client->dev;
+ 	LIST_HEAD(resources);
+-	int ret;
++	int irq, ret;
+ 
+ 	ts->gpio_count = 0;
+ 	ts->gpio_int_idx = -1;
+@@ -756,7 +927,22 @@ static int goodix_add_acpi_gpio_mappings(struct goodix_ts_data *ts)
+ 
+ 	acpi_dev_free_resource_list(&resources);
+ 
+-	if (ts->gpio_count == 2 && ts->gpio_int_idx == 0) {
++	/*
++	 * CHT devices should have a GpioInt + a regular GPIO ACPI resource.
++	 * Some CHT devices have a bug (where the also is bogus Interrupt
++	 * resource copied from a previous BYT based generation). i2c-core-acpi
++	 * will use the non-working Interrupt resource, fix this up.
++	 */
++	if (soc_intel_is_cht() && ts->gpio_count == 2 && ts->gpio_int_idx != -1) {
++		irq = acpi_dev_gpio_irq_get(ACPI_COMPANION(dev), 0);
++		if (irq > 0 && irq != ts->client->irq) {
++			dev_warn(dev, "Overriding IRQ %d -> %d\n", ts->client->irq, irq);
++			ts->client->irq = irq;
++		}
++	}
++
++	/* Some devices with gpio_int_idx 0 list a third unused GPIO */
++	if ((ts->gpio_count == 2 || ts->gpio_count == 3) && ts->gpio_int_idx == 0) {
+ 		ts->irq_pin_access_method = IRQ_PIN_ACCESS_ACPI_GPIO;
+ 		gpio_mapping = acpi_goodix_int_first_gpios;
+ 	} else if (ts->gpio_count == 2 && ts->gpio_int_idx == 1) {
+@@ -794,6 +980,11 @@ static int goodix_add_acpi_gpio_mappings(struct goodix_ts_data *ts)
+ 	} else {
+ 		dev_warn(dev, "Unexpected ACPI resources: gpio_count %d, gpio_int_idx %d\n",
+ 			 ts->gpio_count, ts->gpio_int_idx);
++		/*
++		 * On some devices _PS0 does a reset for us and
++		 * sometimes this is necessary for things to work.
++		 */
++		acpi_device_fix_up_power(ACPI_COMPANION(dev));
+ 		return -EINVAL;
+ 	}
+ 
+@@ -821,7 +1012,6 @@ static int goodix_add_acpi_gpio_mappings(struct goodix_ts_data *ts)
+  */
+ static int goodix_get_gpio_config(struct goodix_ts_data *ts)
+ {
+-	int error;
+ 	struct device *dev;
+ 	struct gpio_desc *gpiod;
+ 	bool added_acpi_mappings = false;
+@@ -837,33 +1027,20 @@ static int goodix_get_gpio_config(struct goodix_ts_data *ts)
+ 	ts->gpiod_rst_flags = GPIOD_IN;
+ 
+ 	ts->avdd28 = devm_regulator_get(dev, "AVDD28");
+-	if (IS_ERR(ts->avdd28)) {
+-		error = PTR_ERR(ts->avdd28);
+-		if (error != -EPROBE_DEFER)
+-			dev_err(dev,
+-				"Failed to get AVDD28 regulator: %d\n", error);
+-		return error;
+-	}
++	if (IS_ERR(ts->avdd28))
++		return dev_err_probe(dev, PTR_ERR(ts->avdd28), "Failed to get AVDD28 regulator\n");
+ 
+ 	ts->vddio = devm_regulator_get(dev, "VDDIO");
+-	if (IS_ERR(ts->vddio)) {
+-		error = PTR_ERR(ts->vddio);
+-		if (error != -EPROBE_DEFER)
+-			dev_err(dev,
+-				"Failed to get VDDIO regulator: %d\n", error);
+-		return error;
+-	}
++	if (IS_ERR(ts->vddio))
++		return dev_err_probe(dev, PTR_ERR(ts->vddio), "Failed to get VDDIO regulator\n");
+ 
+ retry_get_irq_gpio:
+ 	/* Get the interrupt GPIO pin number */
+ 	gpiod = devm_gpiod_get_optional(dev, GOODIX_GPIO_INT_NAME, GPIOD_IN);
+-	if (IS_ERR(gpiod)) {
+-		error = PTR_ERR(gpiod);
+-		if (error != -EPROBE_DEFER)
+-			dev_dbg(dev, "Failed to get %s GPIO: %d\n",
+-				GOODIX_GPIO_INT_NAME, error);
+-		return error;
+-	}
++	if (IS_ERR(gpiod))
++		return dev_err_probe(dev, PTR_ERR(gpiod), "Failed to get %s GPIO\n",
++				     GOODIX_GPIO_INT_NAME);
++
+ 	if (!gpiod && has_acpi_companion(dev) && !added_acpi_mappings) {
+ 		added_acpi_mappings = true;
+ 		if (goodix_add_acpi_gpio_mappings(ts) == 0)
+@@ -874,13 +1051,9 @@ static int goodix_get_gpio_config(struct goodix_ts_data *ts)
+ 
+ 	/* Get the reset line GPIO pin number */
+ 	gpiod = devm_gpiod_get_optional(dev, GOODIX_GPIO_RST_NAME, ts->gpiod_rst_flags);
+-	if (IS_ERR(gpiod)) {
+-		error = PTR_ERR(gpiod);
+-		if (error != -EPROBE_DEFER)
+-			dev_dbg(dev, "Failed to get %s GPIO: %d\n",
+-				GOODIX_GPIO_RST_NAME, error);
+-		return error;
+-	}
++	if (IS_ERR(gpiod))
++		return dev_err_probe(dev, PTR_ERR(gpiod), "Failed to get %s GPIO\n",
++				     GOODIX_GPIO_RST_NAME);
+ 
+ 	ts->gpiod_rst = gpiod;
+ 
+@@ -924,14 +1097,19 @@ static void goodix_read_config(struct goodix_ts_data *ts)
+ 	int x_max, y_max;
+ 	int error;
+ 
+-	error = goodix_i2c_read(ts->client, ts->chip->config_addr,
+-				ts->config, ts->chip->config_len);
+-	if (error) {
+-		dev_warn(&ts->client->dev, "Error reading config: %d\n",
+-			 error);
+-		ts->int_trigger_type = GOODIX_INT_TRIGGER;
+-		ts->max_touch_num = GOODIX_MAX_CONTACTS;
+-		return;
++	/*
++	 * On controllers where we need to upload the firmware
++	 * (controllers without flash) ts->config already has the config
++	 * at this point and the controller itself does not have it yet!
++	 */
++	if (!ts->firmware_name) {
++		error = goodix_i2c_read(ts->client, ts->chip->config_addr,
++					ts->config, ts->chip->config_len);
++		if (error) {
++			ts->int_trigger_type = GOODIX_INT_TRIGGER;
++			ts->max_touch_num = GOODIX_MAX_CONTACTS;
++			return;
++		}
+ 	}
+ 
+ 	ts->int_trigger_type = ts->config[TRIGGER_LOC] & 0x03;
+@@ -939,6 +1117,10 @@ static void goodix_read_config(struct goodix_ts_data *ts)
+ 
+ 	x_max = get_unaligned_le16(&ts->config[RESOLUTION_LOC]);
+ 	y_max = get_unaligned_le16(&ts->config[RESOLUTION_LOC + 2]);
++
++	x_max = 1280;
++	y_max = 800;
++
+ 	if (x_max && y_max) {
+ 		input_abs_set_max(ts->input_dev, ABS_MT_POSITION_X, x_max - 1);
+ 		input_abs_set_max(ts->input_dev, ABS_MT_POSITION_Y, y_max - 1);
+@@ -959,10 +1141,8 @@ static int goodix_read_version(struct goodix_ts_data *ts)
+ 	char id_str[GOODIX_ID_MAX_LEN + 1];
+ 
+ 	error = goodix_i2c_read(ts->client, GOODIX_REG_ID, buf, sizeof(buf));
+-	if (error) {
+-		dev_err(&ts->client->dev, "read version failed: %d\n", error);
++	if (error)
+ 		return error;
+-	}
+ 
+ 	memcpy(id_str, buf, GOODIX_ID_MAX_LEN);
+ 	id_str[GOODIX_ID_MAX_LEN] = 0;
+@@ -971,7 +1151,7 @@ static int goodix_read_version(struct goodix_ts_data *ts)
+ 	ts->version = get_unaligned_le16(&buf[4]);
+ 
+ 	dev_info(&ts->client->dev, "ID %s, version: %04x\n", ts->id,
+-		 ts->version);
++                ts->version);
+ 
+ 	return 0;
+ }
+@@ -988,13 +1168,10 @@ static int goodix_i2c_test(struct i2c_client *client)
+ 	u8 test;
+ 
+ 	while (retry++ < 2) {
+-		error = goodix_i2c_read(client, GOODIX_REG_ID,
+-					&test, 1);
++		error = goodix_i2c_read(client, GOODIX_REG_ID, &test, 1);
+ 		if (!error)
+ 			return 0;
+ 
+-		dev_err(&client->dev, "i2c test failed attempt %d: %d\n",
+-			retry, error);
+ 		msleep(20);
+ 	}
+ 
+@@ -1110,6 +1287,17 @@ static int goodix_configure_dev(struct goodix_ts_data *ts)
+ 		return error;
+ 	}
+ 
++	/*
++	 * Create the input_pen device before goodix_request_irq() calls
++	 * devm_request_threaded_irq() so that the devm framework frees
++	 * it after disabling the irq.
++	 * Unfortunately there is no way to detect if the touchscreen has pen
++	 * support, so registering the dev is delayed till the first pen event.
++	 */
++	error = goodix_create_pen_input(ts);
++	if (error)
++		return error;
++
+ 	ts->irq_flags = goodix_irq_flags[ts->int_trigger_type] | IRQF_ONESHOT;
+ 	error = goodix_request_irq(ts);
+ 	if (error) {
+@@ -1134,7 +1322,16 @@ static void goodix_config_cb(const struct firmware *cfg, void *ctx)
+ 	struct goodix_ts_data *ts = ctx;
+ 	int error;
+ 
+-	if (cfg) {
++	if (ts->firmware_name) {
++		if (!cfg)
++			goto err_release_cfg;
++
++		error = goodix_check_cfg(ts, cfg->data, cfg->size);
++		if (error)
++			goto err_release_cfg;
++
++		memcpy(ts->config, cfg->data, cfg->size);
++	} else if (cfg) {
+ 		/* send device configuration to the firmware */
+ 		error = goodix_send_cfg(ts, cfg->data, cfg->size);
+ 		if (error)
+@@ -1148,21 +1345,37 @@ static void goodix_config_cb(const struct firmware *cfg, void *ctx)
+ 	complete_all(&ts->firmware_loading_complete);
+ }
+ 
+-static void goodix_disable_regulators(void *arg)
++void goodix_disable_regulators(void *arg)
+ {
+ 	struct goodix_ts_data *ts = arg;
+ 
+ 	regulator_disable(ts->vddio);
+ 	regulator_disable(ts->avdd28);
+ }
+-
+-static int goodix_ts_probe(struct i2c_client *client,
+-			   const struct i2c_device_id *id)
++int goodix_firmware_check(struct goodix_ts_data *ts)
++{
++    // 实现固件检查逻辑
++    dev_info(&ts->client->dev, "Firmware check placeholder\n");
++    return 0; // 返回0表示检查通过
++}
++void goodix_save_bak_ref(struct goodix_ts_data *ts)
++{
++    // 实现保存参考值的逻辑
++    dev_info(&ts->client->dev, "Save backup reference placeholder\n");
++}
++bool goodix_handle_fw_request(struct goodix_ts_data *ts)
++{
++    // 实现固件请求处理逻辑
++    dev_info(&ts->client->dev, "Handle firmware request placeholder\n");
++    return 0;
++}
++static int goodix_ts_probe(struct i2c_client *client,const struct i2c_device_id *id)
+ {
+ 	struct goodix_ts_data *ts;
++	const char *cfg_name;
+ 	int error;
+ 
+-	dev_dbg(&client->dev, "I2C Address: 0x%02x\n", client->addr);
++	pr_info("I2C Address: 0x%02x\n", client->addr);
+ 
+ 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
+ 		dev_err(&client->dev, "I2C check functionality failed.\n");
+@@ -1225,20 +1438,27 @@ static int goodix_ts_probe(struct i2c_client *client,
+ 		return error;
+ 	}
+ 
++	error = goodix_firmware_check(ts);
++	if (error)
++		return error;
++
+ 	error = goodix_read_version(ts);
+-	if (error) {
+-		dev_err(&client->dev, "Read version failed.\n");
++	if (error)
+ 		return error;
+-	}
+ 
+ 	ts->chip = goodix_get_chip_data(ts->id);
+ 
+ 	if (ts->load_cfg_from_disk) {
+ 		/* update device config */
+-		ts->cfg_name = devm_kasprintf(&client->dev, GFP_KERNEL,
+-					      "goodix_%s_cfg.bin", ts->id);
+-		if (!ts->cfg_name)
+-			return -ENOMEM;
++		error = device_property_read_string(&client->dev,
++						    "goodix,config-name",
++						    &cfg_name);
++		if (!error)
++			snprintf(ts->cfg_name, sizeof(ts->cfg_name),
++				 "goodix/%s", cfg_name);
++		else
++			snprintf(ts->cfg_name, sizeof(ts->cfg_name),
++				 "goodix_%s_cfg.bin", ts->id);
+ 
+ 		error = request_firmware_nowait(THIS_MODULE, true, ts->cfg_name,
+ 						&client->dev, GFP_KERNEL, ts,
+@@ -1264,13 +1484,17 @@ static int goodix_ts_remove(struct i2c_client *client)
+ {
+ 	struct goodix_ts_data *ts = i2c_get_clientdata(client);
+ 
++	if (!client->irq) {
++		del_timer_sync(&ts->timer);
++		cancel_work_sync(&ts->work_i2c_poll);
++	}
++
+ 	if (ts->load_cfg_from_disk)
+ 		wait_for_completion(&ts->firmware_loading_complete);
+-
+ 	return 0;
+ }
+ 
+-static int __maybe_unused goodix_suspend(struct device *dev)
++static int goodix_suspend(struct device *dev)
+ {
+ 	struct i2c_client *client = to_i2c_client(dev);
+ 	struct goodix_ts_data *ts = i2c_get_clientdata(client);
+@@ -1281,13 +1505,16 @@ static int __maybe_unused goodix_suspend(struct device *dev)
+ 
+ 	/* We need gpio pins to suspend/resume */
+ 	if (ts->irq_pin_access_method == IRQ_PIN_ACCESS_NONE) {
+-		disable_irq(client->irq);
++		goodix_disable_irq(ts);
+ 		return 0;
+ 	}
+ 
+ 	/* Free IRQ as IRQ pin is used as output in the suspend sequence */
+ 	goodix_free_irq(ts);
+ 
++	/* Save reference (calibration) info if necessary */
++	goodix_save_bak_ref(ts);
++
+ 	/* Output LOW on the INT pin for 5 ms */
+ 	error = goodix_irq_direction_output(ts, 0);
+ 	if (error) {
+@@ -1300,7 +1527,6 @@ static int __maybe_unused goodix_suspend(struct device *dev)
+ 	error = goodix_i2c_write_u8(ts->client, GOODIX_REG_COMMAND,
+ 				    GOODIX_CMD_SCREEN_OFF);
+ 	if (error) {
+-		dev_err(&ts->client->dev, "Screen off command failed\n");
+ 		goodix_irq_direction_input(ts);
+ 		goodix_request_irq(ts);
+ 		return -EAGAIN;
+@@ -1315,7 +1541,7 @@ static int __maybe_unused goodix_suspend(struct device *dev)
+ 	return 0;
+ }
+ 
+-static int __maybe_unused goodix_resume(struct device *dev)
++static int goodix_resume(struct device *dev)
+ {
+ 	struct i2c_client *client = to_i2c_client(dev);
+ 	struct goodix_ts_data *ts = i2c_get_clientdata(client);
+@@ -1323,7 +1549,7 @@ static int __maybe_unused goodix_resume(struct device *dev)
+ 	int error;
+ 
+ 	if (ts->irq_pin_access_method == IRQ_PIN_ACCESS_NONE) {
+-		enable_irq(client->irq);
++		goodix_enable_irq(ts);
+ 		return 0;
+ 	}
+ 
+@@ -1343,10 +1569,7 @@ static int __maybe_unused goodix_resume(struct device *dev)
+ 
+ 	error = goodix_i2c_read(ts->client, ts->chip->config_addr,
+ 				&config_ver, 1);
+-	if (error)
+-		dev_warn(dev, "Error reading config version: %d, resetting controller\n",
+-			 error);
+-	else if (config_ver != ts->config[0])
++	if (!error && config_ver != ts->config[0])
+ 		dev_info(dev, "Config version mismatch %d != %d, resetting controller\n",
+ 			 config_ver, ts->config[0]);
+ 
+@@ -1367,7 +1590,7 @@ static int __maybe_unused goodix_resume(struct device *dev)
+ 	return 0;
+ }
+ 
+-static SIMPLE_DEV_PM_OPS(goodix_pm_ops, goodix_suspend, goodix_resume);
++static DEFINE_SIMPLE_DEV_PM_OPS(goodix_pm_ops, goodix_suspend, goodix_resume);
+ 
+ static const struct i2c_device_id goodix_ts_id[] = {
+ 	{ "GDIX1001:00", 0 },
+@@ -1379,6 +1602,7 @@ MODULE_DEVICE_TABLE(i2c, goodix_ts_id);
+ static const struct acpi_device_id goodix_acpi_match[] = {
+ 	{ "GDIX1001", 0 },
+ 	{ "GDIX1002", 0 },
++	{ "GDX9110", 0 },
+ 	{ }
+ };
+ MODULE_DEVICE_TABLE(acpi, goodix_acpi_match);
+@@ -1413,7 +1637,7 @@ static struct i2c_driver goodix_ts_driver = {
+ 		.name = "Goodix-TS",
+ 		.acpi_match_table = ACPI_PTR(goodix_acpi_match),
+ 		.of_match_table = of_match_ptr(goodix_of_match),
+-		.pm = &goodix_pm_ops,
++		.pm = pm_sleep_ptr(&goodix_pm_ops),
+ 	},
+ };
+ module_i2c_driver(goodix_ts_driver);
+diff --git a/drivers/input/touchscreen/goodix.h b/drivers/input/touchscreen/goodix.h
+index 1a1571ad2cd23c87c3bcd4502a568980c3a80345..822fa5d671d4f02fd9ee6b986ede3a9a946a008a 100644
+--- a/drivers/input/touchscreen/goodix.h
++++ b/drivers/input/touchscreen/goodix.h
+@@ -2,6 +2,18 @@
+ #ifndef __GOODIX_H__
+ #define __GOODIX_H__
+ 
++#include <linux/kernel.h>
++#include <linux/dmi.h>
++#include <linux/firmware.h>
++#include <linux/module.h>
++#include <linux/delay.h>
++#include <linux/irq.h>
++#include <linux/interrupt.h>
++#include <linux/platform_data/x86/soc.h>
++#include <linux/slab.h>
++#include <linux/acpi.h>
++#include <linux/of.h>
++#include <asm/unaligned.h>
+ #include <linux/gpio/consumer.h>
+ #include <linux/i2c.h>
+ #include <linux/input.h>
+@@ -10,17 +22,52 @@
+ #include <linux/regulator/consumer.h>
+ 
+ /* Register defines */
+-#define GOODIX_REG_COMMAND			0x8040
+-#define GOODIX_CMD_SCREEN_OFF			0x05
++#define GOODIX_REG_MISCTL_DSP_CTL               0x4010
++#define GOODIX_REG_MISCTL_SRAM_BANK             0x4048
++#define GOODIX_REG_MISCTL_MEM_CD_EN             0x4049
++#define GOODIX_REG_MISCTL_CACHE_EN              0x404B
++#define GOODIX_REG_MISCTL_TMR0_EN               0x40B0
++#define GOODIX_REG_MISCTL_SWRST                 0x4180
++#define GOODIX_REG_MISCTL_CPU_SWRST_PULSE       0x4184
++#define GOODIX_REG_MISCTL_BOOTCTL               0x4190
++#define GOODIX_REG_MISCTL_BOOT_OPT              0x4218
++#define GOODIX_REG_MISCTL_BOOT_CTL              0x5094
+ 
+-#define GOODIX_GT1X_REG_CONFIG_DATA		0x8050
+-#define GOODIX_GT9X_REG_CONFIG_DATA		0x8047
+-#define GOODIX_REG_ID				0x8140
+-#define GOODIX_READ_COOR_ADDR			0x814E
++#define GOODIX_REG_FW_SIG                       0x8000
++#define GOODIX_FW_SIG_LEN                       10
+ 
+-#define GOODIX_ID_MAX_LEN			4
+-#define GOODIX_CONFIG_MAX_LENGTH		240
+-#define GOODIX_MAX_KEYS				7
++#define GOODIX_REG_MAIN_CLK                     0x8020
++#define GOODIX_MAIN_CLK_LEN                     6
++
++#define GOODIX_REG_COMMAND                      0x8040
++#define GOODIX_CMD_SCREEN_OFF                   0x05
++
++#define GOODIX_REG_SW_WDT                       0x8041
++
++#define GOODIX_REG_REQUEST                      0x8043
++#define GOODIX_RQST_RESPONDED                   0x00
++#define GOODIX_RQST_CONFIG                      0x01
++#define GOODIX_RQST_BAK_REF                     0x02
++#define GOODIX_RQST_RESET                       0x03
++#define GOODIX_RQST_MAIN_CLOCK                  0x04
++/*
++ * Unknown request which gets send by the controller aprox.
++ * every 34 seconds once it is up and running.
++ */
++#define GOODIX_RQST_UNKNOWN                     0x06
++#define GOODIX_RQST_IDLE                        0xFF
++
++#define GOODIX_REG_STATUS                       0x8044
++
++#define GOODIX_GT1X_REG_CONFIG_DATA             0x8050
++#define GOODIX_GT9X_REG_CONFIG_DATA             0x8047
++#define GOODIX_REG_ID                           0x8140
++#define GOODIX_READ_COOR_ADDR                   0x814E
++#define GOODIX_REG_BAK_REF                      0x99D0
++
++#define GOODIX_ID_MAX_LEN                       4
++#define GOODIX_CONFIG_MAX_LENGTH                240
++#define GOODIX_MAX_KEYS                         7
+ 
+ enum goodix_irq_pin_access_method {
+ 	IRQ_PIN_ACCESS_NONE,
+@@ -39,30 +86,38 @@ struct goodix_chip_data {
+ };
+ 
+ struct goodix_ts_data {
+-	struct i2c_client *client;
+-	struct input_dev *input_dev;
+-	const struct goodix_chip_data *chip;
+-	struct touchscreen_properties prop;
+-	unsigned int max_touch_num;
+-	unsigned int int_trigger_type;
+-	struct regulator *avdd28;
+-	struct regulator *vddio;
+-	struct gpio_desc *gpiod_int;
+-	struct gpio_desc *gpiod_rst;
+-	int gpio_count;
+-	int gpio_int_idx;
+-	enum gpiod_flags gpiod_rst_flags;
+-	char id[GOODIX_ID_MAX_LEN + 1];
+-	u16 version;
+-	const char *cfg_name;
+-	bool reset_controller_at_probe;
+-	bool load_cfg_from_disk;
+-	struct completion firmware_loading_complete;
+-	unsigned long irq_flags;
+-	enum goodix_irq_pin_access_method irq_pin_access_method;
+-	unsigned int contact_size;
+-	u8 config[GOODIX_CONFIG_MAX_LENGTH];
+-	unsigned short keymap[GOODIX_MAX_KEYS];
++struct i2c_client *client;
++       struct input_dev *input_dev;
++       struct input_dev *input_pen;
++       const struct goodix_chip_data *chip;
++       const char *firmware_name;
++       struct touchscreen_properties prop;
++       unsigned int max_touch_num;
++       unsigned int int_trigger_type;
++       struct regulator *avdd28;
++       struct regulator *vddio;
++       struct gpio_desc *gpiod_int;
++       struct gpio_desc *gpiod_rst;
++       int gpio_count;
++       int gpio_int_idx;
++       enum gpiod_flags gpiod_rst_flags;
++       char id[GOODIX_ID_MAX_LEN + 1];
++       char cfg_name[64];
++       u16 version;
++       bool reset_controller_at_probe;
++       bool load_cfg_from_disk;
++       int pen_input_registered;
++       struct completion firmware_loading_complete;
++       unsigned long irq_flags;
++       enum goodix_irq_pin_access_method irq_pin_access_method;
++       unsigned int contact_size;
++       u8 config[GOODIX_CONFIG_MAX_LENGTH];
++       unsigned short keymap[GOODIX_MAX_KEYS];
++       u8 main_clk[GOODIX_MAIN_CLK_LEN];
++       int bak_ref_len;
++       u8 *bak_ref;
++       struct timer_list timer;
++       struct work_struct work_i2c_poll;
+ };
+ 
+ int goodix_i2c_read(struct i2c_client *client, u16 reg, u8 *buf, int len);
+@@ -71,5 +126,7 @@ int goodix_i2c_write_u8(struct i2c_client *client, u16 reg, u8 value);
+ int goodix_send_cfg(struct goodix_ts_data *ts, const u8 *cfg, int len);
+ int goodix_int_sync(struct goodix_ts_data *ts);
+ int goodix_reset_no_int_sync(struct goodix_ts_data *ts);
+-
++int goodix_firmware_check(struct goodix_ts_data *ts);
++bool goodix_handle_fw_request(struct goodix_ts_data *ts);
++void goodix_save_bak_ref(struct goodix_ts_data *ts);
+ #endif
+diff --git a/drivers/of/Kconfig b/drivers/of/Kconfig
+index 80b5fd44ab1c7f057f36529af36f53da7f805d57..7374379a4d7cbe00d762f7abaf44733ecc8e88d8 100644
+--- a/drivers/of/Kconfig
++++ b/drivers/of/Kconfig
+@@ -87,6 +87,18 @@ config OF_OVERLAY
+ 	  While this option is selected automatically when needed, you can
+ 	  enable it manually to improve device tree unit test coverage.
+ 
++config OF_CONFIGFS
++	bool "Device Tree overlays via configfs"
++	depends on OF_OVERLAY
++	depends on CONFIGFS_FS
++	help
++	  This option exposes a configfs interface for applying and removing
++	  device tree overlays at runtime.
++
++	  Overlays can be loaded by creating a directory under
++	  /sys/kernel/config/device-tree/overlays and writing a dtbo blob to
++	  the dtbo attribute.
++
+ config OF_NUMA
+ 	bool
+ 
+diff --git a/drivers/of/Makefile b/drivers/of/Makefile
+index e0360a44306e29f71ad94b91b854147823ef8a24..90c92ced24e6259ae51fda9da433968de54c1991 100644
+--- a/drivers/of/Makefile
++++ b/drivers/of/Makefile
+@@ -1,6 +1,7 @@
+ # SPDX-License-Identifier: GPL-2.0
+ obj-y = base.o device.o platform.o property.o
+ obj-$(CONFIG_OF_KOBJ) += kobj.o
++obj-$(CONFIG_OF_CONFIGFS) += configfs.o
+ obj-$(CONFIG_OF_DYNAMIC) += dynamic.o
+ obj-$(CONFIG_OF_FLATTREE) += fdt.o
+ obj-$(CONFIG_OF_EARLY_FLATTREE) += fdt_address.o
+diff --git a/drivers/of/configfs.c b/drivers/of/configfs.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..0a7b74ff23a9ab609c42b2c256ed0c120520bd64
+--- /dev/null
++++ b/drivers/of/configfs.c
+@@ -0,0 +1,235 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Configfs entries for device tree overlays.
++ */
++
++#include <linux/configfs.h>
++#include <linux/firmware.h>
++#include <linux/limits.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/of_fdt.h>
++#include <linux/slab.h>
++#include <linux/sizes.h>
++#include <linux/string.h>
++
++#include "of_private.h"
++
++struct cfs_overlay_item {
++	struct config_item item;
++	char path[PATH_MAX];
++	const struct firmware *fw;
++	void *dtbo;
++	int dtbo_size;
++	int ov_id;
++};
++
++static inline struct cfs_overlay_item *to_cfs_overlay_item(
++		struct config_item *item)
++{
++	return item ? container_of(item, struct cfs_overlay_item, item) : NULL;
++}
++
++static ssize_t cfs_overlay_item_path_show(struct config_item *item, char *page)
++{
++	struct cfs_overlay_item *overlay = to_cfs_overlay_item(item);
++
++	return sprintf(page, "%s\n", overlay->path);
++}
++
++static ssize_t cfs_overlay_item_path_store(struct config_item *item,
++					   const char *page, size_t count)
++{
++	struct cfs_overlay_item *overlay = to_cfs_overlay_item(item);
++	char *newline;
++	int err;
++
++	if (overlay->path[0] != '\0' || overlay->dtbo_size > 0)
++		return -EPERM;
++
++	snprintf(overlay->path, sizeof(overlay->path), "%s", page);
++	newline = strchr(overlay->path, '\n');
++	if (newline)
++		*newline = '\0';
++
++	err = request_firmware(&overlay->fw, overlay->path, NULL);
++	if (err)
++		goto err_clear_path;
++
++	err = of_overlay_fdt_apply(overlay->fw->data, (u32)overlay->fw->size,
++				   &overlay->ov_id);
++	if (err)
++		goto err_release_firmware;
++
++	return count;
++
++err_release_firmware:
++	release_firmware(overlay->fw);
++	overlay->fw = NULL;
++err_clear_path:
++	overlay->path[0] = '\0';
++	return err;
++}
++
++static ssize_t cfs_overlay_item_status_show(struct config_item *item, char *page)
++{
++	struct cfs_overlay_item *overlay = to_cfs_overlay_item(item);
++
++	return sprintf(page, "%s\n",
++		       overlay->ov_id > 0 ? "applied" : "unapplied");
++}
++
++CONFIGFS_ATTR(cfs_overlay_item_, path);
++CONFIGFS_ATTR_RO(cfs_overlay_item_, status);
++
++static struct configfs_attribute *cfs_overlay_attrs[] = {
++	&cfs_overlay_item_attr_path,
++	&cfs_overlay_item_attr_status,
++	NULL,
++};
++
++static ssize_t cfs_overlay_item_dtbo_read(struct config_item *item,
++					  void *buf, size_t max_count)
++{
++	struct cfs_overlay_item *overlay = to_cfs_overlay_item(item);
++
++	if (!overlay->dtbo)
++		return 0;
++
++	if (buf) {
++		if (overlay->dtbo_size > max_count)
++			return -ENOSPC;
++
++		memcpy(buf, overlay->dtbo, overlay->dtbo_size);
++	}
++
++	return overlay->dtbo_size;
++}
++
++static ssize_t cfs_overlay_item_dtbo_write(struct config_item *item,
++					   const void *buf, size_t count)
++{
++	struct cfs_overlay_item *overlay = to_cfs_overlay_item(item);
++	int err;
++
++	if (overlay->path[0] != '\0' || overlay->dtbo_size > 0)
++		return -EPERM;
++
++	overlay->dtbo = kmemdup(buf, count, GFP_KERNEL);
++	if (!overlay->dtbo)
++		return -ENOMEM;
++
++	overlay->dtbo_size = count;
++	err = of_overlay_fdt_apply(overlay->dtbo, (u32)overlay->dtbo_size,
++				   &overlay->ov_id);
++	if (err)
++		goto err_free_dtbo;
++
++	return count;
++
++err_free_dtbo:
++	kfree(overlay->dtbo);
++	overlay->dtbo = NULL;
++	overlay->dtbo_size = 0;
++	overlay->ov_id = 0;
++	return err;
++}
++
++CONFIGFS_BIN_ATTR(cfs_overlay_item_, dtbo, NULL, SZ_1M);
++
++static struct configfs_bin_attribute *cfs_overlay_bin_attrs[] = {
++	&cfs_overlay_item_attr_dtbo,
++	NULL,
++};
++
++static void cfs_overlay_release(struct config_item *item)
++{
++	struct cfs_overlay_item *overlay = to_cfs_overlay_item(item);
++
++	if (overlay->ov_id > 0)
++		of_overlay_remove(&overlay->ov_id);
++	if (overlay->fw)
++		release_firmware(overlay->fw);
++	kfree(overlay->dtbo);
++	kfree(overlay);
++}
++
++static struct configfs_item_operations cfs_overlay_item_ops = {
++	.release = cfs_overlay_release,
++};
++
++static struct config_item_type cfs_overlay_type = {
++	.ct_item_ops = &cfs_overlay_item_ops,
++	.ct_attrs = cfs_overlay_attrs,
++	.ct_bin_attrs = cfs_overlay_bin_attrs,
++	.ct_owner = THIS_MODULE,
++};
++
++static struct config_item *cfs_overlay_group_make_item(struct config_group *group,
++					       const char *name)
++{
++	struct cfs_overlay_item *overlay;
++
++	overlay = kzalloc(sizeof(*overlay), GFP_KERNEL);
++	if (!overlay)
++		return ERR_PTR(-ENOMEM);
++
++	config_item_init_type_name(&overlay->item, name, &cfs_overlay_type);
++	return &overlay->item;
++}
++
++static void cfs_overlay_group_drop_item(struct config_group *group,
++						struct config_item *item)
++{
++	struct cfs_overlay_item *overlay = to_cfs_overlay_item(item);
++
++	config_item_put(&overlay->item);
++}
++
++static struct configfs_group_operations overlays_ops = {
++	.make_item = cfs_overlay_group_make_item,
++	.drop_item = cfs_overlay_group_drop_item,
++};
++
++static struct config_item_type overlays_type = {
++	.ct_group_ops = &overlays_ops,
++	.ct_owner = THIS_MODULE,
++};
++
++static struct configfs_group_operations of_cfs_ops = {
++};
++
++static struct config_item_type of_cfs_type = {
++	.ct_group_ops = &of_cfs_ops,
++	.ct_owner = THIS_MODULE,
++};
++
++static struct config_group of_cfs_overlay_group;
++
++static struct configfs_subsystem of_cfs_subsys = {
++	.su_group = {
++		.cg_item = {
++			.ci_namebuf = "device-tree",
++			.ci_type = &of_cfs_type,
++		},
++	},
++	.su_mutex = __MUTEX_INITIALIZER(of_cfs_subsys.su_mutex),
++};
++
++static int __init of_cfs_init(void)
++{
++	int ret;
++
++	config_group_init(&of_cfs_subsys.su_group);
++	config_group_init_type_name(&of_cfs_overlay_group, "overlays",
++				    &overlays_type);
++	configfs_add_default_group(&of_cfs_overlay_group,
++				   &of_cfs_subsys.su_group);
++
++	ret = configfs_register_subsystem(&of_cfs_subsys);
++	if (ret)
++		pr_err("failed to register device-tree configfs subsystem\n");
++
++	return ret;
++}
++late_initcall(of_cfs_init);
+\ No newline at end of file
+diff --git a/include/drm/bridge/waveshare-bl.h b/include/drm/bridge/waveshare-bl.h
+new file mode 100755
+index 0000000000000000000000000000000000000000..283beeae39143b5b06ec4b055617caef410af647
+--- /dev/null
++++ b/include/drm/bridge/waveshare-bl.h
+@@ -0,0 +1,22 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Copyright © 2023 Raspberry Pi Ltd
++ *
++ * Based on panel-raspberrypi-touchscreen by Broadcom
++ */
++
++#ifndef _LATTICE_I2C_H_
++#define _LATTICE_I2C_H_
++
++struct WriteCommand {
++    __u8 address;
++    __u8 data;
++};
++
++extern int ws_panel_i2c_read(u8 reg);
++extern int ws_panel_i2c_write(u8 reg, u8 val);
++extern int ws_panel_set_backlight(unsigned int value);
++extern void ws_panel_switch_mipi(bool switch_ws);
++extern void ws_panel_poweron_mipi(void);
++
++#endif

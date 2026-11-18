@@ -1,0 +1,60 @@
+/.scratch/
+/tmp/
+/boot.img
+/dtbo.img
+/boot.img.*
+/vble-qti.key
+*.sha256
+*.sig
+*.sig.padded
+*~
+*.orig
+*.rej
+__pycache__/
+*.pyc
+/out-kernel/
+# 固件包（几 GB，放【且只放一份】在这里，见 fw_locate.sh）
+/fw/
+
+# 大基线：不预置，从 ./fw/ 里的固件包还原（build.sh 的 restore_baseline）。
+# 文件名【统一，不带档位】—— 归属记在 prebuilds/baseline.platform（见 platforms.sh）。
+# 旧命名（Image.200e-debian 等）也在下面留着，便于兼容旧工作区里的残留文件。
+/prebuilds/Image
+/prebuilds/Image.*
+/prebuilds/dtb.img
+/prebuilds/dtbo.img
+/prebuilds/system.img
+/prebuilds/system.*.img
+/prebuilds/qti-ramdisk-*.cpio.lz4
+/prebuilds/ramdisk.cpio.lz4
+/prebuilds/ramdisk.*.cpio.lz4
+/prebuilds/.system.raw
+/prebuilds/.system.*.raw
+/prebuilds/baseline.platform
+/prebuilds/baseline.platform.tmp.*
+
+# 派生态：kernel release 的值 = ramdisk 里 lib/modules/<release> 目录名，
+# 由 build.sh 的 restore_baseline 从 fw 现推落盘（编完内核后 tools/build-kernel.sh
+# 会用新内核的值覆写）。预置一份只会多个漂移点 —— 派生物一律不进仓库。
+/prebuilds/kernel*.release
+
+# 旧的手工档位文件 —— 已废弃：档位改由 buildenv 自动探测，结果写 .tmp/platform
+# （本机缓存，不跟 git 传走）。这里精确忽略，别误伤 config/platforms.sh。
+/config/platform
+
+# Kernel 工作配置由 buildenv 从当前 fw 的 boot image 初始化，并用 metadata
+# 绑定固件身份；不作为 SDK 固定内置文件发布。
+/config/kernel.config
+/config/kernel.config.meta
+/config/kernel.perf.config
+/config/kernel.perf.config.meta
+
+# 构建产物 / 临时文件
+/.tmp/
+/out-system/
+/out-ramdisk/
+/out-modules/
+/stage/
+
+# App CMake 构建产物（仅 docs/examples 下，不误伤仓库里的其他 build/）
+/docs/examples/*/build/

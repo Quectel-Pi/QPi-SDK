@@ -1,0 +1,31 @@
+--- a/_setup_env.sh
++++ b/_setup_env.sh
+@@ -81,7 +81,9 @@
+ if [ -z "${SOURCE_DATE_EPOCH}" ]; then
+   export SOURCE_DATE_EPOCH=$(git -C ${ROOT_DIR}/${KERNEL_DIR} log -1 --pretty=%ct)
+ fi
+-export KBUILD_BUILD_TIMESTAMP="$(date -d @${SOURCE_DATE_EPOCH})"
++#export KBUILD_BUILD_TIMESTAMP="$(date -d @${SOURCE_DATE_EPOCH})"
++# Use actual build time for uname -a display, not git commit timestamp
++export KBUILD_BUILD_TIMESTAMP="$(date)"
+ export KBUILD_BUILD_HOST=build-host
+ export KBUILD_BUILD_USER=build-user
+ export KBUILD_BUILD_VERSION=1
+--- a/config.sh
++++ b/config.sh
+@@ -97,6 +97,15 @@
+   menucommand="menuconfig"
+ fi
+ 
++# dt2 keeps a complete generated .config outside the kernel source tree.
++# In this mode, edit that working copy directly and leave it in OUT_DIR for
++# the caller to validate and save; do not run savedefconfig or update DEFCONFIG.
++if [ "${FULL_CONFIG_MODE}" = "1" ]; then
++  (cd ${KERNEL_DIR} && make ${TOOL_ARGS} O=${OUT_DIR} ${MAKE_ARGS} olddefconfig)
++  (cd ${KERNEL_DIR} && make ${TOOL_ARGS} O=${OUT_DIR} ${MAKE_ARGS} ${menucommand})
++  exit 0
++fi
++
+ # let all the POST_DEFCONFIG_CMDS run since they may clean up loose files, then exit
+ append_cmd POST_DEFCONFIG_CMDS "exit"
+ # menuconfig should go first. If POST_DEFCONFIG_CMDS modifies the .config, then we probably don't

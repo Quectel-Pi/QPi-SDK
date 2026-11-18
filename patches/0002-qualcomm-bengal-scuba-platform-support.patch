@@ -1,0 +1,1775 @@
+diff --git a/drivers/clk/qcom/clk-alpha-pll.c b/drivers/clk/qcom/clk-alpha-pll.c
+index 15c195b7b075421fc65c87d5754df577b34e2567..27bc9b803ed27228111c1372f5ac48f5c5ae3946 100644
+--- a/drivers/clk/qcom/clk-alpha-pll.c
++++ b/drivers/clk/qcom/clk-alpha-pll.c
+@@ -85,6 +85,19 @@ const u8 clk_alpha_pll_regs[][PLL_OFF_MAX_REGS] = {
+ 		[PLL_OFF_TEST_CTL_U] = 0x20,
+ 		[PLL_OFF_STATUS] = 0x24,
+ 	},
++	[CLK_ALPHA_PLL_TYPE_HUAYRA_2290] = {
++		[PLL_OFF_L_VAL] = 0x04,
++		[PLL_OFF_ALPHA_VAL] = 0x08,
++		[PLL_OFF_USER_CTL] = 0x0c,
++		[PLL_OFF_CONFIG_CTL] = 0x10,
++		[PLL_OFF_CONFIG_CTL_U] = 0x14,
++		[PLL_OFF_CONFIG_CTL_U1] = 0x18,
++		[PLL_OFF_TEST_CTL] = 0x1c,
++		[PLL_OFF_TEST_CTL_U] = 0x20,
++		[PLL_OFF_TEST_CTL_U1] = 0x24,
++		[PLL_OFF_OPMODE] = 0x28,
++		[PLL_OFF_STATUS] = 0x38,
++	},
+ 	[CLK_ALPHA_PLL_TYPE_BRAMMO] =  {
+ 		[PLL_OFF_L_VAL] = 0x04,
+ 		[PLL_OFF_ALPHA_VAL] = 0x08,
+@@ -980,6 +993,40 @@ void clk_huayra_pll_configure(struct clk_alpha_pll *pll, struct regmap *regmap,
+ }
+ EXPORT_SYMBOL(clk_huayra_pll_configure);
+ 
++void clk_huayra_2290_pll_configure(struct clk_alpha_pll *pll, struct regmap *regmap,
++				   const struct alpha_pll_config *config)
++{
++	u32 val;
++
++	clk_alpha_pll_write_config(regmap, PLL_CONFIG_CTL(pll), config->config_ctl_val);
++	clk_alpha_pll_write_config(regmap, PLL_CONFIG_CTL_U(pll), config->config_ctl_hi_val);
++	clk_alpha_pll_write_config(regmap, PLL_CONFIG_CTL_U1(pll), config->config_ctl_hi1_val);
++	clk_alpha_pll_write_config(regmap, PLL_TEST_CTL(pll), config->test_ctl_val);
++	clk_alpha_pll_write_config(regmap, PLL_TEST_CTL_U(pll), config->test_ctl_hi_val);
++	clk_alpha_pll_write_config(regmap, PLL_TEST_CTL_U1(pll), config->test_ctl_hi1_val);
++	clk_alpha_pll_write_config(regmap, PLL_L_VAL(pll), config->l);
++	clk_alpha_pll_write_config(regmap, PLL_ALPHA_VAL(pll), config->alpha);
++	clk_alpha_pll_write_config(regmap, PLL_USER_CTL(pll), config->user_ctl_val);
++
++	/* Set PLL_BYPASSNL */
++	regmap_update_bits(regmap, PLL_MODE(pll), PLL_BYPASSNL, PLL_BYPASSNL);
++	regmap_read(regmap, PLL_MODE(pll), &val);
++
++	/* Wait 5 us between setting BYPASS and deasserting reset */
++	udelay(5);
++
++	/* Take PLL out from reset state */
++	regmap_update_bits(regmap, PLL_MODE(pll), PLL_RESET_N, PLL_RESET_N);
++	regmap_read(regmap, PLL_MODE(pll), &val);
++
++	/* Wait 50us for PLL_LOCK_DET bit to go high */
++	usleep_range(50, 55);
++
++	/* Enable PLL output */
++	regmap_update_bits(regmap, PLL_MODE(pll), PLL_OUTCTRL, PLL_OUTCTRL);
++}
++EXPORT_SYMBOL_GPL(clk_huayra_2290_pll_configure);
++
+ static unsigned long
+ alpha_huayra_pll_calc_rate(u64 prate, u32 l, u32 a)
+ {
+diff --git a/drivers/clk/qcom/clk-alpha-pll.h b/drivers/clk/qcom/clk-alpha-pll.h
+index 11ddbe7dcc0676d7338efe73f52b204eeec3e864..516f03a460a33eae4c9e348340509aaf706af64b 100644
+--- a/drivers/clk/qcom/clk-alpha-pll.h
++++ b/drivers/clk/qcom/clk-alpha-pll.h
+@@ -14,6 +14,7 @@
+ enum {
+ 	CLK_ALPHA_PLL_TYPE_DEFAULT,
+ 	CLK_ALPHA_PLL_TYPE_HUAYRA,
++	CLK_ALPHA_PLL_TYPE_HUAYRA_2290,
+ 	CLK_ALPHA_PLL_TYPE_BRAMMO,
+ 	CLK_ALPHA_PLL_TYPE_FABIA,
+ 	CLK_ALPHA_PLL_TYPE_TRION,
+@@ -241,6 +242,8 @@ int clk_rivian_evo_pll_configure(struct clk_alpha_pll *pll,
+ 
+ void clk_huayra_pll_configure(struct clk_alpha_pll *pll, struct regmap *regmap,
+ 				const struct alpha_pll_config *config);
++void clk_huayra_2290_pll_configure(struct clk_alpha_pll *pll, struct regmap *regmap,
++				   const struct alpha_pll_config *config);
+ int clk_zonda_evo_pll_configure(struct clk_alpha_pll *pll,
+ 				struct regmap *regmap,
+ 				const struct alpha_pll_config *config);
+diff --git a/drivers/clk/qcom/gcc-scuba.c b/drivers/clk/qcom/gcc-scuba.c
+index 794fa04913febcd092bb9390412225d18fbf627c..ebc24eb85ad2dc9ed0951d17a3a1ab7136a277f9 100644
+--- a/drivers/clk/qcom/gcc-scuba.c
++++ b/drivers/clk/qcom/gcc-scuba.c
+@@ -1339,6 +1339,7 @@ static const struct freq_tbl ftbl_gcc_qupv3_wrap0_s0_clk_src[] = {
+ 	F(117964800, P_GPLL0_OUT_AUX2, 1, 6144, 15625),
+ 	F(120000000, P_GPLL0_OUT_AUX2, 2.5, 0, 0),
+ 	F(128000000, P_GPLL6_OUT_MAIN, 3, 0, 0),
++	F(300000000, P_GPLL0_OUT_AUX2, 1, 0, 0),  // 添加300MHz支持
+ 	{ }
+ };
+ 
+@@ -1363,7 +1364,7 @@ static struct clk_rcg2 gcc_qupv3_wrap0_s0_clk_src = {
+ 		.rate_max = (unsigned long[VDD_NUM]) {
+ 			[VDD_LOWER] = 75000000,
+ 			[VDD_LOW] = 100000000,
+-			[VDD_NOMINAL] = 128000000},
++			[VDD_NOMINAL] = 300000000},  // 从128MHz提高到300MHz
+ 	},
+ };
+ 
+@@ -1388,7 +1389,7 @@ static struct clk_rcg2 gcc_qupv3_wrap0_s1_clk_src = {
+ 		.rate_max = (unsigned long[VDD_NUM]) {
+ 			[VDD_LOWER] = 75000000,
+ 			[VDD_LOW] = 100000000,
+-			[VDD_NOMINAL] = 128000000},
++			[VDD_NOMINAL] = 300000000},  // 从128MHz提高到300MHz
+ 	},
+ };
+ 
+@@ -1413,7 +1414,7 @@ static struct clk_rcg2 gcc_qupv3_wrap0_s2_clk_src = {
+ 		.rate_max = (unsigned long[VDD_NUM]) {
+ 			[VDD_LOWER] = 75000000,
+ 			[VDD_LOW] = 100000000,
+-			[VDD_NOMINAL] = 128000000},
++			[VDD_NOMINAL] = 300000000},  // 从128MHz提高到300MHz
+ 	},
+ };
+ 
+@@ -1438,7 +1439,7 @@ static struct clk_rcg2 gcc_qupv3_wrap0_s3_clk_src = {
+ 		.rate_max = (unsigned long[VDD_NUM]) {
+ 			[VDD_LOWER] = 75000000,
+ 			[VDD_LOW] = 100000000,
+-			[VDD_NOMINAL] = 128000000},
++			[VDD_NOMINAL] = 300000000},  // 从128MHz提高到300MHz
+ 	},
+ };
+ 
+@@ -1463,7 +1464,7 @@ static struct clk_rcg2 gcc_qupv3_wrap0_s4_clk_src = {
+ 		.rate_max = (unsigned long[VDD_NUM]) {
+ 			[VDD_LOWER] = 75000000,
+ 			[VDD_LOW] = 100000000,
+-			[VDD_NOMINAL] = 128000000},
++			[VDD_NOMINAL] = 300000000},  // 从128MHz提高到300MHz
+ 	},
+ };
+ 
+@@ -1488,7 +1489,7 @@ static struct clk_rcg2 gcc_qupv3_wrap0_s5_clk_src = {
+ 		.rate_max = (unsigned long[VDD_NUM]) {
+ 			[VDD_LOWER] = 75000000,
+ 			[VDD_LOW] = 100000000,
+-			[VDD_NOMINAL] = 128000000},
++			[VDD_NOMINAL] = 300000000},  // 从128MHz提高到300MHz
+ 	},
+ };
+ 
+diff --git a/drivers/gpu/drm/Kconfig b/drivers/gpu/drm/Kconfig
+index cea777ae7fb92f90ebeba758eb1027600080feb0..a2e4fc23412b5258cc7af911fd0fd9af8ac064fe 100644
+--- a/drivers/gpu/drm/Kconfig
++++ b/drivers/gpu/drm/Kconfig
+@@ -323,7 +323,7 @@ source "drivers/gpu/drm/qxl/Kconfig"
+ 
+ source "drivers/gpu/drm/virtio/Kconfig"
+ 
+-source "drivers/gpu/drm/msm/Kconfig"
++# source "drivers/gpu/drm/msm/Kconfig"
+ 
+ source "drivers/gpu/drm/fsl-dcu/Kconfig"
+ 
+diff --git a/drivers/iio/adc/qcom-spmi-adc5.c b/drivers/iio/adc/qcom-spmi-adc5.c
+index 9a473931a0493ae5763ed2679e75951decd699b5..2dda3ab78567dfcc6892fd777676dd752941e6bc 100644
+--- a/drivers/iio/adc/qcom-spmi-adc5.c
++++ b/drivers/iio/adc/qcom-spmi-adc5.c
+@@ -899,6 +899,17 @@ static const struct adc5_channels adc5_chans_pmic[ADC5_MAX_CHANNEL] = {
+ 					SCALE_HW_CALIB_THERM_100K_PULLUP)
+ 	[ADC5_GPIO4_100K_PU]	= ADC5_CHAN_TEMP("gpio4_100k_pu", 0,
+ 					SCALE_HW_CALIB_THERM_100K_PULLUP)
++	[ADC5_GPIO4]    = ADC5_CHAN_VOLT("gpio4_open", 0,
++					SCALE_HW_CALIB_DEFAULT)
++	[ADC5_GPIO2]    = ADC5_CHAN_VOLT("gpio4_no_pull", 1,
++                    SCALE_HW_CALIB_DEFAULT)
++    [ADC5_GPIO4]    = ADC5_CHAN_VOLT("gpio7_no_pull", 1,
++                    SCALE_HW_CALIB_DEFAULT)
++	[ADC5_GPIO1]    = ADC5_CHAN_VOLT("gpio3_no_pull", 0,
++                    SCALE_HW_CALIB_DEFAULT)
++	[ADC5_GPIO3]    = ADC5_CHAN_VOLT("gpio6_no_pull", 0,
++                    SCALE_HW_CALIB_DEFAULT)							
++
+ };
+ 
+ static const struct adc5_channels adc7_chans_pmic[ADC5_MAX_CHANNEL] = {
+diff --git a/drivers/iio/adc/qcom-vadc-common.c b/drivers/iio/adc/qcom-vadc-common.c
+index ffdfcb50a1619b6a888f84a472e8c691ad5dcf03..b5a626a5e5a10898fe52609e7374e2dd9f747fe5 100644
+--- a/drivers/iio/adc/qcom-vadc-common.c
++++ b/drivers/iio/adc/qcom-vadc-common.c
+@@ -182,76 +182,76 @@ static const struct vadc_map_pt adcmap_batt_therm_100k[] = {
+  * Alium.
+  */
+ static const struct vadc_map_pt adcmap_batt_therm_30k[] = {
+-	{1864,	-400},
+-	{1863,	-380},
+-	{1861,	-360},
+-	{1858,	-340},
+-	{1856,	-320},
+-	{1853,	-300},
+-	{1850,	-280},
+-	{1846,	-260},
+-	{1842,	-240},
+-	{1837,	-220},
+-	{1831,	-200},
+-	{1825,	-180},
+-	{1819,	-160},
+-	{1811,	-140},
+-	{1803,	-120},
+-	{1794,	-100},
+-	{1784,	-80},
+-	{1773,	-60},
+-	{1761,	-40},
+-	{1748,	-20},
+-	{1734,	0},
+-	{1718,	20},
+-	{1702,	40},
+-	{1684,	60},
+-	{1664,	80},
+-	{1643,	100},
+-	{1621,	120},
+-	{1597,	140},
+-	{1572,	160},
+-	{1546,	180},
+-	{1518,	200},
+-	{1489,	220},
+-	{1458,	240},
+-	{1426,	260},
+-	{1393,	280},
+-	{1359,	300},
+-	{1324,	320},
+-	{1288,	340},
+-	{1252,	360},
+-	{1214,	380},
+-	{1176,	400},
+-	{1138,	420},
+-	{1100,	440},
+-	{1061,	460},
+-	{1023,	480},
+-	{985,	500},
+-	{947,	520},
+-	{910,	540},
+-	{873,	560},
+-	{836,	580},
+-	{801,	600},
+-	{766,	620},
+-	{732,	640},
+-	{699,	660},
+-	{668,	680},
+-	{637,	700},
+-	{607,	720},
+-	{578,	740},
+-	{550,	760},
+-	{524,	780},
+-	{498,	800},
+-	{474,	820},
+-	{451,	840},
+-	{428,	860},
+-	{407,	880},
+-	{387,	900},
+-	{367,	920},
+-	{349,	940},
+-	{332,	960},
+-	{315,	980}
++		{1851,  -400},
++        {1847,  -380},
++        {1842,  -360},
++        {1837,  -340},
++        {1831,  -320},
++        {1825,  -300},
++        {1818,  -280},
++        {1810,  -260},
++        {1801,  -240},
++        {1791,  -220},
++        {1779,  -200},
++        {1767,  -180},
++        {1753,  -160},
++        {1738,  -140},
++        {1722,  -120},
++        {1704,  -100},
++        {1685,  -80},
++        {1664,  -60},
++        {1641,  -40},
++        {1617,  -20},
++        {1591,  0},
++        {1563,  20},
++        {1534,  40},
++        {1503,  60},
++        {1470,  80},
++        {1436,  100},
++        {1401,  120},
++        {1364,  140},
++        {1326,  160},
++        {1287,  180},
++        {1247,  200},
++        {1206,  220},
++        {1165,  240},
++        {1124,  260},
++        {1082,  280},
++        {1040,  300},
++        {998,   320},
++        {957,   340},
++        {916,   360},
++        {875,   380},
++        {836,   400},
++        {797,   420},
++        {759,   440},
++        {723,   460},
++        {687,   480},
++        {652,   500},
++        {619,   520},
++        {587,   540},
++        {557,   560},
++        {527,   580},
++        {499,   600},
++        {473,   620},
++        {447,   640},
++        {423,   660},
++        {400,   680},
++        {378,   700},
++        {357,   720},
++        {338,   740},
++        {319,   760},
++        {302,   780},
++        {285,   800},
++        {269,   820},
++        {255,   840},
++        {241,   860},
++        {228,   880},
++        {215,   900},
++        {204,   920},
++        {193,   940},
++        {182,   960},
++        {173,   980}
+ };
+ 
+ /*
+diff --git a/drivers/interconnect/qcom/Makefile b/drivers/interconnect/qcom/Makefile
+index e97c8c2f90db41146c8bc038f32ebf9a8812928b..3ea46b841a0f956164bf51035a1779f5fa376f5f 100644
+--- a/drivers/interconnect/qcom/Makefile
++++ b/drivers/interconnect/qcom/Makefile
+@@ -21,6 +21,7 @@ qnoc-scuba-objs				:= scuba.o
+ qnoc-sdx55-objs				:= sdx55.o
+ qnoc-lemans-objs			:= lemans.o
+ qnoc-monaco-auto-objs			:= monaco_auto.o
++qnoc-sm6115-objs			:= sm6115.o
+ qnoc-sm8150-objs			:= sm8150.o
+ qnoc-sm8250-objs			:= sm8250.o
+ qnoc-sm8350-objs			:= sm8350.o
+@@ -58,6 +59,7 @@ obj-$(CONFIG_INTERCONNECT_QCOM_SDM660) += qnoc-sdm660.o
+ obj-$(CONFIG_INTERCONNECT_QCOM_SDM845) += qnoc-sdm845.o
+ obj-$(CONFIG_INTERCONNECT_QCOM_SDM670) += qnoc-sdm670.o
+ obj-$(CONFIG_INTERCONNECT_QCOM_SDX55) += qnoc-sdx55.o
++obj-$(CONFIG_INTERCONNECT_QCOM_SM6115) += qnoc-sm6115.o
+ obj-$(CONFIG_INTERCONNECT_QCOM_SM8150) += qnoc-sm8150.o
+ obj-$(CONFIG_INTERCONNECT_QCOM_SM8250) += qnoc-sm8250.o
+ obj-$(CONFIG_INTERCONNECT_QCOM_SM8350) += qnoc-sm8350.o
+diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
+index fa902cdfc8bda087624e3490c9b0020051cacd6e..2b4b4dd9863a0dd069a783b1f8920a66039e9ec9 100644
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
+@@ -3107,6 +3107,8 @@ static int qcom_def_domain_type(struct device *dev)
+ 		return IOMMU_DOMAIN_UNMANAGED;
+ 	if (!strcmp(str, "bypass"))
+ 		return IOMMU_DOMAIN_UNMANAGED;
++	if (!strcmp(str, "lazy"))
++		return IOMMU_DOMAIN_DMA_FQ;
+ 	if (!strcmp(str, "atomic"))
+ 		return IOMMU_DOMAIN_DMA;
+ 	if (!strcmp(str, "disabled"))
+@@ -3284,6 +3286,8 @@ static const struct of_device_id __maybe_unused qcom_smmu_impl_of_match[] = {
+ 	{ .compatible = "qcom,sdm630-smmu-v2" },
+ 	{ .compatible = "qcom,sdm845-smmu-500" },
+ 	{ .compatible = "qcom,sm6125-smmu-500" },
++	{ .compatible = "qcom,sm6115-smmu-500" },
++	{ .compatible = "qcom,qcm2290-smmu-500" },
+ 	{ .compatible = "qcom,sm8150-smmu-500" },
+ 	{ .compatible = "qcom,sm8250-smmu-500" },
+ 	{ .compatible = "qcom,sm8350-smmu-500" },
+diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu.c b/drivers/iommu/arm/arm-smmu/arm-smmu.c
+index 4a062b3db2771763dd6bb5cef4c2c33ca7138cb2..c74c6138d54627a66f51ac3151102dc953c189b0 100644
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu.c
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu.c
+@@ -54,6 +54,7 @@
+ #include "../../qcom-dma-iommu-generic.h"
+ #include "../../qcom-io-pgtable-alloc.h"
+ #include <linux/qcom-iommu-util.h>
++#include <linux/io-pgtable.h>
+ 
+ #define CREATE_TRACE_POINTS
+ #include "arm-smmu-trace.h"
+@@ -2941,10 +2942,17 @@ static int arm_smmu_def_domain_type(struct device *dev)
+ {
+ 	struct arm_smmu_master_cfg *cfg = dev_iommu_priv_get(dev);
+ 	const struct arm_smmu_impl *impl;
++	struct device_node *np;
++	const char *str;
+ 
+ 	if (!cfg)
+ 		return 0;
+ 
++	np = arm_smmu_get_of_node(dev);
++	if (np && !of_property_read_string(np, "qcom,iommu-dma", &str) &&
++	    !strcmp(str, "lazy"))
++		return IOMMU_DOMAIN_DMA_FQ;
++
+ 	impl = cfg->smmu->impl;
+ 	if (impl && impl->def_domain_type)
+ 		return impl->def_domain_type(dev);
+@@ -3070,6 +3078,8 @@ static int arm_smmu_enable_s1_translation(struct iommu_domain *domain)
+ 	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
+ 	struct arm_smmu_cfg *cfg = &smmu_domain->cfg;
+ 	struct arm_smmu_device *smmu = smmu_domain->smmu;
++	struct io_pgtable_ops *pgtbl_ops = smmu_domain->pgtbl_ops;
++	struct io_pgtable *iop = io_pgtable_ops_to_pgtable(pgtbl_ops);
+ 	int idx;
+ 	struct arm_smmu_cb *cb;
+ 	int ret;
+@@ -3090,11 +3100,47 @@ static int arm_smmu_enable_s1_translation(struct iommu_domain *domain)
+ 	idx = cfg->cbndx;
+ 	cfg->sctlr.m = 1;
+ 	cb = &smmu->cbs[idx];
++
++	/*
++	 * Update TTBR from io_pgtable. When using qcom,iommu-earlymap,
++	 * the initial domain initialization happens before any mappings,
++	 * so cb->ttbr was 0 at that time. The actual root page table is
++	 * allocated later when mapping the splash region, and the TTBR
++	 * is stored in io_pgtable->cfg. We need to sync it to cb->ttbr
++	 * before writing the context bank.
++	 */
++	if (cfg->fmt != ARM_SMMU_CTX_FMT_AARCH32_S) {
++		cb->ttbr[0] = FIELD_PREP(ARM_SMMU_TTBRn_ASID, cfg->asid);
++		cb->ttbr[1] = FIELD_PREP(ARM_SMMU_TTBRn_ASID, cfg->asid);
++
++		if (iop->cfg.quirks & IO_PGTABLE_QUIRK_ARM_TTBR1)
++			cb->ttbr[1] |= iop->cfg.arm_lpae_s1_cfg.ttbr;
++		else
++			cb->ttbr[0] |= iop->cfg.arm_lpae_s1_cfg.ttbr;
++
++		cb->mair[0] = iop->cfg.arm_lpae_s1_cfg.mair;
++		cb->mair[1] = iop->cfg.arm_lpae_s1_cfg.mair >> 32;
++	} else {
++		cb->ttbr[0] = iop->cfg.arm_v7s_cfg.ttbr;
++		cb->ttbr[1] = 0;
++		cb->mair[0] = iop->cfg.arm_v7s_cfg.prrr;
++		cb->mair[1] = iop->cfg.arm_v7s_cfg.nmrr;
++	}
++
+ 	cb->sctlr = arm_smmu_lpae_sctlr(cfg);
+ 
+-	arm_smmu_cb_write(smmu, idx, ARM_SMMU_CB_SCTLR, cb->sctlr);
+-	arm_smmu_rpm_put(smmu);
++	/*
++	 * Rewrite the full context bank including TTBR and MAIR,
++	 * not just SCTLR. During delayed S1 enable, page tables may
++	 * have been allocated/mapped after the initial domain
++	 * initialization. After 500ms delay for active splash handoff,
++	 * the SMMU may have runtime suspended and lost all register
++	 * values. Writing only SCTLR leaves TTBR at 0, causing
++	 * continuous translation faults on the first DMA access.
++	 */
++	arm_smmu_write_context_bank(smmu, idx);
+ 	smmu_domain->delayed_s1_trans_enable = false;
++	arm_smmu_rpm_put(smmu);
+ out:
+ 	mutex_unlock(&smmu_domain->init_mutex);
+ 	return ret;
+diff --git a/drivers/pinctrl/qcom/pinctrl-bengal.c b/drivers/pinctrl/qcom/pinctrl-bengal.c
+index f84f9cd38d59218533d0ca2eea929ebee121ea42..f24521ae7ec72cefc8c95d28758a17b40252a624 100644
+--- a/drivers/pinctrl/qcom/pinctrl-bengal.c
++++ b/drivers/pinctrl/qcom/pinctrl-bengal.c
+@@ -1528,7 +1528,7 @@ static const struct msm_pingroup bengal_groups[] = {
+ };
+ 
+ static const int bengal_reserved_gpios[] = {
+-	0, 1, 2, 3, 14, 15, 16, 17, -1
++	-1
+ };
+ 
+ static const struct msm_gpio_wakeirq_map bengal_mpm_map[] = {
+diff --git a/drivers/pinctrl/qcom/pinctrl-khaje.c b/drivers/pinctrl/qcom/pinctrl-khaje.c
+index 5bb37e32556acba436efaca292fdf7a09a48c45a..6f56f3cf1461196165d5f1b7141bd137cdbf7c0f 100644
+--- a/drivers/pinctrl/qcom/pinctrl-khaje.c
++++ b/drivers/pinctrl/qcom/pinctrl-khaje.c
+@@ -1538,7 +1538,7 @@ static const struct msm_pingroup khaje_groups[] = {
+ };
+ 
+ static const int khaje_reserved_gpios[] = {
+-	0, 1, 2, 3, 14, 15, 16, 17, -1
++	14, 15, 16, 17, -1
+ };
+ 
+ static const struct msm_gpio_wakeirq_map khaje_mpm_map[] = {
+diff --git a/drivers/pinctrl/qcom/pinctrl-scuba.c b/drivers/pinctrl/qcom/pinctrl-scuba.c
+index 43d42f4e11c282a0901fdc152efcbe1db37fba5d..36c870b27b5dc7a258e7e82af41c992ede99ed0c 100644
+--- a/drivers/pinctrl/qcom/pinctrl-scuba.c
++++ b/drivers/pinctrl/qcom/pinctrl-scuba.c
+@@ -1586,7 +1586,7 @@ static const struct msm_pingroup scuba_groups[] = {
+ };
+ 
+ static const int scuba_reserved_gpios[] = {
+-		0, 1, 2, 3, 14, 15, 16, 17, -1
++		 -1
+ };
+ 
+ static const struct msm_gpio_wakeirq_map scuba_mpm_map[] = {
+diff --git a/drivers/platform/msm/qpnp-revid.c b/drivers/platform/msm/qpnp-revid.c
+index 22f7096eb76a3429f604eb4ed15fa12f6ae92776..744c55cfdbe5d4ca95b983e69581b051f69218f8 100644
+--- a/drivers/platform/msm/qpnp-revid.c
++++ b/drivers/platform/msm/qpnp-revid.c
+@@ -157,6 +157,52 @@ static size_t build_pmic_string(char *buf, size_t n, int sid,
+ 	return pos;
+ }
+ 
++#define QUECTEL_QDEVINFO_CMD
++#ifdef  QUECTEL_QDEVINFO_CMD
++
++static char quectel_pmic_info[64] = {'\0'};
++
++static size_t quectel_get_pmic_string(int sid, u8 subtype, u8 rev3, u8 rev4)
++{
++    char buf[64] = {'\0'};
++    int sid_temp = 0;
++
++    if (quectel_pmic_info[0] != '\0')
++        sprintf(buf, "%s,", quectel_pmic_info); //add a "," for pm and pmi
++    else
++        memcpy(buf, quectel_pmic_info, 64);
++
++    if (((int)subtype == PM8941_PERIPHERAL_SUBTYPE
++                || (int)subtype == PM8226_PERIPHERAL_SUBTYPE)
++            && rev4 < 0x02)
++        rev4++;
++
++    sid_temp = sid;
++
++    if (sid == 0) {
++        printk(KERN_INFO "type = %d\n", subtype);
++        sid_temp = 1;
++
++        if (pmic_names[subtype] == NULL) {
++            sprintf(quectel_pmic_info, "PM8953v%d.%d", rev4, rev3);
++            return 0;
++        }
++    }
++    sprintf(quectel_pmic_info, "%s%sv%d.%d", buf, pmic_names[subtype], rev4, rev3);
++
++    return 0;
++}
++
++void quectel_get_pmic_info(char *buf)
++{
++    snprintf(buf, sizeof(quectel_pmic_info), "%s", quectel_pmic_info);
++    return;
++}
++
++EXPORT_SYMBOL(quectel_get_pmic_info);
++
++#endif /* QUECTEL_QDEVINFO_CMD */
++
+ #define PMIC_PERIPHERAL_TYPE		0x51
+ #define PMIC_STRING_MAXLENGTH		80
+ static int qpnp_revid_probe(struct platform_device *pdev)
+diff --git a/drivers/soc/qcom/socinfo.c b/drivers/soc/qcom/socinfo.c
+old mode 100644
+new mode 100755
+index bed913a8683a5f4ab605f133691724d5b9c88c48..03091fda3cd1215fc3a3bbd68f549a2edbc42e35
+--- a/drivers/soc/qcom/socinfo.c
++++ b/drivers/soc/qcom/socinfo.c
+@@ -1299,12 +1299,123 @@ static char *socinfo_get_image_version_base_address(void)
+ 			&size);
+ }
+ 
++#define IMAGE_MAX_LEN 128
++
++int cus_get_image_crm_version(char* stringAddress, char* imageCrmVersion, size_t crmVersionbufLen)
++{
++	char *string_address = NULL;
++	size_t crmLen = 0;
++
++	if (stringAddress == NULL || imageCrmVersion == NULL || crmVersionbufLen < IMAGE_MAX_LEN) {
++		//pr_err("%s : get error params\n", __func__);
++		return -1;
++	}
++
++	string_address = stringAddress;
++	crmLen = strlen(string_address);
++	if (crmLen >= crmVersionbufLen) {
++		//pr_err("%s : the string_address is too big : crmLen = %lu ;crmVersionbufLen = %lu\n", __func__, crmLen, crmVersionbufLen);
++		return -1;
++	}
++
++	strncpy(imageCrmVersion, string_address, crmLen);
++	return crmLen;
++}
++
++int cus_get_image_variant_version(char* stringAddress, char* variant, size_t variantVersionbufLen, size_t *endPos)
++ {
++	char *string_address = NULL;
++	size_t crmLen = 0;
++	size_t variantLen = 0;
++	char imageCrmVersion[IMAGE_MAX_LEN] ={0};
++	if (stringAddress == NULL || variant == NULL || variantVersionbufLen < IMAGE_MAX_LEN) {
++		//pr_err("%s : get error params\n", __func__);
++		return -1;
++	}
++
++	/* get crm */
++	crmLen = cus_get_image_crm_version(stringAddress, imageCrmVersion, IMAGE_MAX_LEN);
++	if (crmLen < 0) {
++		//pr_err("%s : get image crm version failed: crmLen = %lu\n", __func__, crmLen);
++		return -1;
++	}
++
++	/* Find the starting position of the variant */
++	string_address = stringAddress;
++	string_address += crmLen;
++	do {
++		string_address += 1;
++		crmLen++;
++	} while( (*string_address == '\0' ) && (crmLen < IMAGE_MAX_LEN));
++
++	if (crmLen >= IMAGE_MAX_LEN) {
++		//pr_err("%s : not get variant is too big : crmLen = %lu \n", __func__, crmLen);
++		return -1;
++	}
++
++	variantLen = strlen(string_address);
++	strncpy(variant, string_address, variantLen);
++
++	*endPos = crmLen + variantLen;
++	return variantLen;
++}
++
++int cus_get_image_version(char* stringAddress, char* imageVersion, size_t imageVersionbufLen)
++{
++	char *string_address = NULL;
++
++	size_t varianEndPos = 0;
++	size_t variantLen = 0;
++	size_t imageVersionLen = 0;
++	char  tempImageVersion[IMAGE_MAX_LEN] ={0};
++
++	if (stringAddress == NULL || imageVersion == NULL || imageVersionbufLen < IMAGE_MAX_LEN) {
++		//pr_err("%s : get error params\n", __func__);
++		return -1;
++	}
++
++	/* get variant */
++	string_address = stringAddress;
++	variantLen = cus_get_image_variant_version(string_address, tempImageVersion, IMAGE_MAX_LEN, &varianEndPos);
++	if (variantLen < 0 || varianEndPos >= IMAGE_MAX_LEN) {
++		//pr_err("%s : get image crm version failed: variantLen = %lu varianEndPos= %lu\n", __func__, variantLen, varianEndPos);
++		return -1;
++	}
++
++	/* Find the starting position of imageVersion */
++	string_address = stringAddress;
++	string_address += varianEndPos;
++	do {
++		string_address += 1;
++		varianEndPos++;
++	} while( (*string_address == '\0' ) && (varianEndPos < IMAGE_MAX_LEN));
++
++	if (varianEndPos >= IMAGE_MAX_LEN) {
++		//pr_err("%s : not get variant is too big : varianEndPos = %lu \n", __func__, varianEndPos);
++		return -1;
++	}
++
++	/* Remove the colon, whether to remove the colon or not, choose according to actual needs */
++#if 1
++	if (*string_address == ':') {
++		string_address +=1;
++	}
++#endif
++
++	imageVersionLen = strlen(string_address);
++	strncpy(imageVersion, string_address, imageVersionLen);
++
++	return imageVersionLen;
++}
+ static ssize_t
+ msm_get_image_version(struct device *dev,
+ 		struct device_attribute *attr,
+ 		char *buf)
+ {
+ 	char *string_address;
++	char imageCrmVersion[IMAGE_MAX_LEN] ={0};
++	size_t crmLen = 0;
++	size_t pos = 0;
+ 
+ 	string_address = socinfo_get_image_version_base_address();
+ 	if (IS_ERR_OR_NULL(string_address)) {
+@@ -1316,8 +1427,14 @@ msm_get_image_version(struct device *dev,
+ 	string_address +=
+ 		qsocinfo->current_image * SMEM_IMAGE_VERSION_SINGLE_BLOCK_SIZE;
+ 	up_read(&qsocinfo->current_image_rwsem);
+-	return scnprintf(buf, SMEM_IMAGE_VERSION_NAME_SIZE, "%-.75s\n",
+-			string_address);
++	crmLen = cus_get_image_crm_version(string_address, imageCrmVersion, IMAGE_MAX_LEN);
++	if (crmLen < 0) {
++		//pr_err("Failed to get image crm version\n");
++		return crmLen;
++	}
++
++	pos = snprintf(buf, crmLen + 3, "%s\r\n", imageCrmVersion); /* 3 is the \r \n and \0 character bits */
++	return pos;
+ }
+ 
+ static ssize_t
+@@ -1352,6 +1469,10 @@ msm_get_image_variant(struct device *dev,
+ 		char *buf)
+ {
+ 	char *string_address;
++	char imageVariantVersion[IMAGE_MAX_LEN] ={0};
++	size_t variantLen = 0;
++	size_t pos = 0;
++	size_t endVariantPos;
+ 
+ 	string_address = socinfo_get_image_version_base_address();
+ 	if (IS_ERR_OR_NULL(string_address)) {
+@@ -1364,9 +1485,14 @@ msm_get_image_variant(struct device *dev,
+ 	string_address +=
+ 		qsocinfo->current_image * SMEM_IMAGE_VERSION_SINGLE_BLOCK_SIZE;
+ 	up_read(&qsocinfo->current_image_rwsem);
+-	string_address += SMEM_IMAGE_VERSION_VARIANT_OFFSET;
+-	return scnprintf(buf, SMEM_IMAGE_VERSION_VARIANT_SIZE, "%-.20s\n",
+-			string_address);
++	variantLen = cus_get_image_variant_version(string_address, imageVariantVersion, IMAGE_MAX_LEN, &endVariantPos);
++	if (variantLen < 0) {
++		//pr_err("Failed to get image varian version\n");
++		return variantLen;
++	}
++
++	pos = snprintf(buf, variantLen + 3 , "%s\r\n", imageVariantVersion); /* 3 is the \r \n and \0 character bits */
++	return pos;
+ }
+ 
+ static ssize_t
+@@ -1402,6 +1528,8 @@ msm_get_image_crm_version(struct device *dev,
+ 		char *buf)
+ {
+ 	char *string_address;
++	char imageVersion[IMAGE_MAX_LEN] ={0};
++	size_t imageVersiontLen = 0;
+ 
+ 	string_address = socinfo_get_image_version_base_address();
+ 	if (IS_ERR_OR_NULL(string_address)) {
+@@ -1412,9 +1540,13 @@ msm_get_image_crm_version(struct device *dev,
+ 	string_address +=
+ 		qsocinfo->current_image * SMEM_IMAGE_VERSION_SINGLE_BLOCK_SIZE;
+ 	up_read(&qsocinfo->current_image_rwsem);
+-	string_address += SMEM_IMAGE_VERSION_OEM_OFFSET;
+-	return scnprintf(buf, SMEM_IMAGE_VERSION_OEM_SIZE, "%-.33s\n",
+-			string_address);
++	imageVersiontLen = cus_get_image_version(string_address, imageVersion, IMAGE_MAX_LEN);
++	if (imageVersiontLen < 0) {
++		//pr_err("Failed to get image version\n");
++		return imageVersiontLen;
++	}
++
++	return snprintf(buf, imageVersiontLen + 2, "%s\n", imageVersion);  /*2 is the \n and \0 character bits */
+ }
+ 
+ static ssize_t
+@@ -1484,6 +1616,13 @@ msm_get_images(struct device *dev,
+ 	int pos = 0;
+ 	int image;
+ 	char *image_address;
++	char imageCrmVersion[IMAGE_MAX_LEN] ={0};
++	size_t crmLen = 0;
++	char imageVariantVersion[IMAGE_MAX_LEN] ={0};
++	size_t variantLen = 0;
++	size_t endVariantPOS = 0;
++	char imageVersion[IMAGE_MAX_LEN] ={0};
++	size_t imageVersiontLen = 0;
+ 
+ 	image_address = socinfo_get_image_version_base_address();
+ 	if (IS_ERR_OR_NULL(image_address))
+@@ -1496,16 +1635,28 @@ msm_get_images(struct device *dev,
+ 			continue;
+ 		}
+ 
+-		pos += scnprintf(buf + pos, PAGE_SIZE - pos, "%d:\n",
+-				image);
+-		pos += scnprintf(buf + pos, PAGE_SIZE - pos,
+-				"\tCRM:\t\t%-.75s\n", image_address);
+-		pos += scnprintf(buf + pos, PAGE_SIZE - pos,
+-				"\tVariant:\t%-.20s\n",
+-				image_address + SMEM_IMAGE_VERSION_VARIANT_OFFSET);
+-		pos += scnprintf(buf + pos, PAGE_SIZE - pos,
+-				"\tVersion:\t%-.33s\n",
+-				image_address + SMEM_IMAGE_VERSION_OEM_OFFSET);
++		pos += snprintf(buf + pos, PAGE_SIZE - pos, "%d:\n", image);
++		memset(imageCrmVersion, 0, sizeof(imageCrmVersion));
++		crmLen = cus_get_image_crm_version(image_address, imageCrmVersion, IMAGE_MAX_LEN);
++		if (crmLen < 0) {
++			//pr_err("Failed to get image crm version\n");
++		} else {
++			pos += snprintf(buf + pos, PAGE_SIZE - pos, "\tCRM:\t\t%s\n", imageCrmVersion);
++		}
++		memset(imageVariantVersion, 0, sizeof(imageVariantVersion));
++		variantLen = cus_get_image_variant_version(image_address, imageVariantVersion, IMAGE_MAX_LEN, &endVariantPOS);
++		if (variantLen < 0) {
++			//pr_err("Failed to get image varian version\n");
++		} else {
++			pos += snprintf(buf + pos, PAGE_SIZE - pos, "\tVariant:\t%s\n", imageVariantVersion);
++		}
++		memset(imageVersion, 0, sizeof(imageVersion));
++		imageVersiontLen = cus_get_image_version(image_address, imageVersion, IMAGE_MAX_LEN);
++		if (imageVersiontLen < 0) {
++			//pr_err("Failed to get image version\n");
++		} else {
++			pos += snprintf(buf + pos, PAGE_SIZE - pos, "\tVersion:\t%s\n", imageVersion);
++		}
+ 
+ 		image_address += SMEM_IMAGE_VERSION_SINGLE_BLOCK_SIZE;
+ 	}
+@@ -2447,16 +2598,9 @@ static int qcom_socinfo_probe(struct platform_device *pdev)
+ 	qs->attr.revision = devm_kasprintf(&pdev->dev, GFP_KERNEL, "%u.%u",
+ 					   SOCINFO_MAJOR(le32_to_cpu(info->ver)),
+ 					   SOCINFO_MINOR(le32_to_cpu(info->ver)));
+-	if (!qs->attr.soc_id || !qs->attr.revision)
+-		return -ENOMEM;
+-
+-	if (offsetofend(struct socinfo, serial_num) <= item_size) {
+-		qs->attr.serial_number = devm_kasprintf(&pdev->dev, GFP_KERNEL,
+-							"%u",
+-							le32_to_cpu(info->serial_num));
+-		if (!qs->attr.serial_number)
+-			return -ENOMEM;
+-	}
++	qs->attr.soc_id = kasprintf(GFP_KERNEL, "%d", socinfo_get_id());
++	if (offsetof(struct socinfo, serial_num) <= item_size)
++		qs->attr.serial_number = kasprintf(GFP_KERNEL, "%u", socinfo_get_serial_number());
+ 
+ 	if (socinfo_format >= SOCINFO_VERSION(0, 16)) {
+ 		socinfo_enumerate_partinfo_details();
+diff --git a/include/dt-bindings/clock/qcom,dispcc-qcm2290.h b/include/dt-bindings/clock/qcom,dispcc-qcm2290.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..cb687949be41fd204e351683cebc41d9e3980ea0
+--- /dev/null
++++ b/include/dt-bindings/clock/qcom,dispcc-qcm2290.h
+@@ -0,0 +1,38 @@
++/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause) */
++/*
++ * Copyright (c) 2019, The Linux Foundation. All rights reserved.
++ */
++
++#ifndef _DT_BINDINGS_CLK_QCOM_DISP_CC_QCM2290_H
++#define _DT_BINDINGS_CLK_QCOM_DISP_CC_QCM2290_H
++
++/* DISP_CC clocks */
++#define DISP_CC_PLL0				0
++#define DISP_CC_MDSS_AHB_CLK			1
++#define DISP_CC_MDSS_AHB_CLK_SRC		2
++#define DISP_CC_MDSS_BYTE0_CLK			3
++#define DISP_CC_MDSS_BYTE0_CLK_SRC		4
++#define DISP_CC_MDSS_BYTE0_DIV_CLK_SRC		5
++#define DISP_CC_MDSS_BYTE0_INTF_CLK		6
++#define DISP_CC_MDSS_ESC0_CLK			7
++#define DISP_CC_MDSS_ESC0_CLK_SRC		8
++#define DISP_CC_MDSS_MDP_CLK			9
++#define DISP_CC_MDSS_MDP_CLK_SRC		10
++#define DISP_CC_MDSS_MDP_LUT_CLK		11
++#define DISP_CC_MDSS_NON_GDSC_AHB_CLK		12
++#define DISP_CC_MDSS_PCLK0_CLK			13
++#define DISP_CC_MDSS_PCLK0_CLK_SRC		14
++#define DISP_CC_MDSS_VSYNC_CLK			15
++#define DISP_CC_MDSS_VSYNC_CLK_SRC		16
++#define DISP_CC_SLEEP_CLK			17
++#define DISP_CC_SLEEP_CLK_SRC			18
++#define DISP_CC_XO_CLK				19
++#define DISP_CC_XO_CLK_SRC			20
++
++/* GDSCs */
++#define MDSS_GDSC				0
++
++/* Resets */
++#define DISP_CC_MDSS_CORE_BCR			0
++
++#endif
+diff --git a/include/dt-bindings/clock/qcom,dsi-phy-28nm.h b/include/dt-bindings/clock/qcom,dsi-phy-28nm.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..ab94d58377a1c6aae740bef75c866e8ce5d93260
+--- /dev/null
++++ b/include/dt-bindings/clock/qcom,dsi-phy-28nm.h
+@@ -0,0 +1,9 @@
++/* SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause */
++
++#ifndef _DT_BINDINGS_CLK_QCOM_DSI_PHY_28NM_H
++#define _DT_BINDINGS_CLK_QCOM_DSI_PHY_28NM_H
++
++#define DSI_BYTE_PLL_CLK		0
++#define DSI_PIXEL_PLL_CLK		1
++
++#endif
+diff --git a/include/dt-bindings/clock/qcom,gcc-qcm2290.h b/include/dt-bindings/clock/qcom,gcc-qcm2290.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..f5e45f340e88b831ed567ff3d07abdfe09191dc1
+--- /dev/null
++++ b/include/dt-bindings/clock/qcom,gcc-qcm2290.h
+@@ -0,0 +1,188 @@
++/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause) */
++/*
++ * Copyright (c) 2019-2020, The Linux Foundation. All rights reserved.
++ */
++
++#ifndef _DT_BINDINGS_CLK_QCOM_GCC_QCM2290_H
++#define _DT_BINDINGS_CLK_QCOM_GCC_QCM2290_H
++
++/* GCC clocks */
++//#define GPLL0						0
++//#define GPLL0_OUT_AUX2					1
++//#define GPLL1						2
++//#define GPLL10						3
++//#define GPLL11						4
++//#define GPLL3						5
++//#define GPLL3_OUT_MAIN					6
++//#define GPLL4						7
++//#define GPLL5						8
++//#define GPLL6						9
++//#define GPLL6_OUT_MAIN					10
++//#define GPLL7						11
++//#define GPLL8						12
++//#define GPLL8_OUT_MAIN					13
++//#define GPLL9						14
++//#define GPLL9_OUT_MAIN					15
++//#define GCC_AHB2PHY_CSI_CLK				16
++//#define GCC_AHB2PHY_USB_CLK				17
++//#define GCC_APC_VS_CLK					18
++//#define GCC_BIMC_GPU_AXI_CLK				19
++//#define GCC_BOOT_ROM_AHB_CLK				20
++//#define GCC_CAM_THROTTLE_NRT_CLK			21
++//#define GCC_CAM_THROTTLE_RT_CLK				22
++//#define GCC_CAMERA_AHB_CLK				23
++//#define GCC_CAMERA_XO_CLK				24
++//#define GCC_CAMSS_AXI_CLK				25
++//#define GCC_CAMSS_AXI_CLK_SRC				26
++//#define GCC_CAMSS_CAMNOC_ATB_CLK			27
++//#define GCC_CAMSS_CAMNOC_NTS_XO_CLK			28
++//#define GCC_CAMSS_CCI_0_CLK				29
++//#define GCC_CAMSS_CCI_CLK_SRC				30
++//#define GCC_CAMSS_CPHY_0_CLK				31
++//#define GCC_CAMSS_CPHY_1_CLK				32
++//#define GCC_CAMSS_CSI0PHYTIMER_CLK			33
++//#define GCC_CAMSS_CSI0PHYTIMER_CLK_SRC			34
++//#define GCC_CAMSS_CSI1PHYTIMER_CLK			35
++//#define GCC_CAMSS_CSI1PHYTIMER_CLK_SRC			36
++//#define GCC_CAMSS_MCLK0_CLK				37
++//#define GCC_CAMSS_MCLK0_CLK_SRC				38
++//#define GCC_CAMSS_MCLK1_CLK				39
++//#define GCC_CAMSS_MCLK1_CLK_SRC				40
++//#define GCC_CAMSS_MCLK2_CLK				41
++//#define GCC_CAMSS_MCLK2_CLK_SRC				42
++//#define GCC_CAMSS_MCLK3_CLK				43
++//#define GCC_CAMSS_MCLK3_CLK_SRC				44
++//#define GCC_CAMSS_NRT_AXI_CLK				45
++//#define GCC_CAMSS_OPE_AHB_CLK				46
++//#define GCC_CAMSS_OPE_AHB_CLK_SRC			47
++//#define GCC_CAMSS_OPE_CLK				48
++//#define GCC_CAMSS_OPE_CLK_SRC				49
++//#define GCC_CAMSS_RT_AXI_CLK				50
++//#define GCC_CAMSS_TFE_0_CLK				51
++//#define GCC_CAMSS_TFE_0_CLK_SRC				52
++//#define GCC_CAMSS_TFE_0_CPHY_RX_CLK			53
++//#define GCC_CAMSS_TFE_0_CSID_CLK			54
++//#define GCC_CAMSS_TFE_0_CSID_CLK_SRC			55
++//#define GCC_CAMSS_TFE_1_CLK				56
++//#define GCC_CAMSS_TFE_1_CLK_SRC				57
++//#define GCC_CAMSS_TFE_1_CPHY_RX_CLK			58
++//#define GCC_CAMSS_TFE_1_CSID_CLK			59
++//#define GCC_CAMSS_TFE_1_CSID_CLK_SRC			60
++//#define GCC_CAMSS_TFE_CPHY_RX_CLK_SRC			61
++//#define GCC_CAMSS_TOP_AHB_CLK				62
++//#define GCC_CAMSS_TOP_AHB_CLK_SRC			63
++//#define GCC_CFG_NOC_USB3_PRIM_AXI_CLK			64
++//#define GCC_CPUSS_AHB_CLK				65
++//#define GCC_CPUSS_AHB_CLK_SRC				66
++//#define GCC_CPUSS_AHB_POSTDIV_CLK_SRC			67
++//#define GCC_CPUSS_GNOC_CLK				68
++//#define GCC_CPUSS_THROTTLE_CORE_CLK			69
++//#define GCC_CPUSS_THROTTLE_XO_CLK			70
++//#define GCC_DISP_AHB_CLK				71
++//#define GCC_DISP_GPLL0_CLK_SRC				72
++//#define GCC_DISP_GPLL0_DIV_CLK_SRC			73
++//#define GCC_DISP_HF_AXI_CLK				74
++//#define GCC_DISP_THROTTLE_CORE_CLK			75
++//#define GCC_DISP_XO_CLK					76
++//#define GCC_GP1_CLK					77
++//#define GCC_GP1_CLK_SRC					78
++//#define GCC_GP2_CLK					79
++//#define GCC_GP2_CLK_SRC					80
++//#define GCC_GP3_CLK					81
++//#define GCC_GP3_CLK_SRC					82
++//#define GCC_GPU_CFG_AHB_CLK				83
++//#define GCC_GPU_GPLL0_CLK_SRC				84
++//#define GCC_GPU_GPLL0_DIV_CLK_SRC			85
++//#define GCC_GPU_IREF_CLK				86
++//#define GCC_GPU_MEMNOC_GFX_CLK				87
++//#define GCC_GPU_SNOC_DVM_GFX_CLK			88
++//#define GCC_GPU_THROTTLE_CORE_CLK			89
++//#define GCC_GPU_THROTTLE_XO_CLK				90
++//#define GCC_PDM2_CLK					91
++//#define GCC_PDM2_CLK_SRC				92
++//#define GCC_PDM_AHB_CLK					93
++//#define GCC_PDM_XO4_CLK					94
++//#define GCC_PWM0_XO512_CLK				95
++//#define GCC_QMIP_CAMERA_NRT_AHB_CLK			96
++//#define GCC_QMIP_CAMERA_RT_AHB_CLK			97
++//#define GCC_QMIP_CPUSS_CFG_AHB_CLK			98
++//#define GCC_QMIP_DISP_AHB_CLK				99
++//#define GCC_QMIP_GPU_CFG_AHB_CLK			100
++//#define GCC_QMIP_VIDEO_VCODEC_AHB_CLK			101
++//#define GCC_QUPV3_WRAP0_CORE_2X_CLK			102
++//#define GCC_QUPV3_WRAP0_CORE_CLK			103
++//#define GCC_QUPV3_WRAP0_S0_CLK				104
++//#define GCC_QUPV3_WRAP0_S0_CLK_SRC			105
++//#define GCC_QUPV3_WRAP0_S1_CLK				106
++//#define GCC_QUPV3_WRAP0_S1_CLK_SRC			107
++//#define GCC_QUPV3_WRAP0_S2_CLK				108
++//#define GCC_QUPV3_WRAP0_S2_CLK_SRC			109
++//#define GCC_QUPV3_WRAP0_S3_CLK				110
++//#define GCC_QUPV3_WRAP0_S3_CLK_SRC			111
++//#define GCC_QUPV3_WRAP0_S4_CLK				112
++//#define GCC_QUPV3_WRAP0_S4_CLK_SRC			113
++//#define GCC_QUPV3_WRAP0_S5_CLK				114
++//#define GCC_QUPV3_WRAP0_S5_CLK_SRC			115
++//#define GCC_QUPV3_WRAP_0_M_AHB_CLK			116
++//#define GCC_QUPV3_WRAP_0_S_AHB_CLK			117
++//#define GCC_SDCC1_AHB_CLK				118
++//#define GCC_SDCC1_APPS_CLK				119
++//#define GCC_SDCC1_APPS_CLK_SRC				120
++//#define GCC_SDCC1_ICE_CORE_CLK				121
++//#define GCC_SDCC1_ICE_CORE_CLK_SRC			122
++//#define GCC_SDCC2_AHB_CLK				123
++//#define GCC_SDCC2_APPS_CLK				124
++//#define GCC_SDCC2_APPS_CLK_SRC				125
++//#define GCC_SYS_NOC_CPUSS_AHB_CLK			126
++//#define GCC_SYS_NOC_USB3_PRIM_AXI_CLK			127
++//#define GCC_USB30_PRIM_MASTER_CLK			128
++//#define GCC_USB30_PRIM_MASTER_CLK_SRC			129
++//#define GCC_USB30_PRIM_MOCK_UTMI_CLK			130
++//#define GCC_USB30_PRIM_MOCK_UTMI_CLK_SRC		131
++//#define GCC_USB30_PRIM_MOCK_UTMI_POSTDIV		132
++//#define GCC_USB30_PRIM_SLEEP_CLK			133
++//#define GCC_USB3_PRIM_CLKREF_CLK			134
++//#define GCC_USB3_PRIM_PHY_AUX_CLK_SRC			135
++//#define GCC_USB3_PRIM_PHY_COM_AUX_CLK			136
++//#define GCC_USB3_PRIM_PHY_PIPE_CLK			137
++//#define GCC_VCODEC0_AXI_CLK				138
++//#define GCC_VENUS_AHB_CLK				139
++//#define GCC_VENUS_CTL_AXI_CLK				140
++//#define GCC_VIDEO_AHB_CLK				141
++//#define GCC_VIDEO_AXI0_CLK				142
++//#define GCC_VIDEO_THROTTLE_CORE_CLK			143
++//#define GCC_VIDEO_VCODEC0_SYS_CLK			144
++//#define GCC_VIDEO_VENUS_CLK_SRC				145
++//#define GCC_VIDEO_VENUS_CTL_CLK				146
++//#define GCC_VIDEO_XO_CLK				147
++
++/* GCC resets */
++#define GCC_CAMSS_OPE_BCR				0
++#define GCC_CAMSS_TFE_BCR				1
++#define GCC_CAMSS_TOP_BCR				2
++#define GCC_GPU_BCR					3
++#define GCC_MMSS_BCR					4
++#define GCC_PDM_BCR					5
++#define GCC_QUPV3_WRAPPER_0_BCR				6
++#define GCC_SDCC1_BCR					7
++#define GCC_SDCC2_BCR					8
++#define GCC_USB30_PRIM_BCR				9
++#define GCC_USB_PHY_CFG_AHB2PHY_BCR			10
++#define GCC_VCODEC0_BCR					11
++#define GCC_VENUS_BCR					12
++#define GCC_VIDEO_INTERFACE_BCR				13
++#define GCC_QUSB2PHY_PRIM_BCR				14
++#define GCC_USB3_PHY_PRIM_SP0_BCR			15
++#define GCC_USB3PHY_PHY_PRIM_SP0_BCR			16
++
++/* Indexes for GDSCs */
++#define GCC_CAMSS_TOP_GDSC				0
++#define GCC_USB30_PRIM_GDSC				1
++#define GCC_VCODEC0_GDSC				2
++#define GCC_VENUS_GDSC					3
++#define HLOS1_VOTE_TURING_MMU_TBU1_GDSC			4
++#define HLOS1_VOTE_TURING_MMU_TBU0_GDSC			5
++#define HLOS1_VOTE_MM_SNOC_MMU_TBU_RT_GDSC		6
++#define HLOS1_VOTE_MM_SNOC_MMU_TBU_NRT_GDSC		7
++
++#endif
+diff --git a/include/dt-bindings/clock/qcom,qcm2290-gpucc.h b/include/dt-bindings/clock/qcom,qcm2290-gpucc.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..31a2429767681686a4f60dff42939b63056315b3
+--- /dev/null
++++ b/include/dt-bindings/clock/qcom,qcm2290-gpucc.h
+@@ -0,0 +1,33 @@
++/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause) */
++/*
++ * Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
++ * Copyright (c) 2024, Linaro Limited
++ */
++
++#ifndef _DT_BINDINGS_CLK_QCOM_GPU_CC_QCM2290_H
++#define _DT_BINDINGS_CLK_QCOM_GPU_CC_QCM2290_H
++
++/* GPU_CC clocks */
++#define GPU_CC_PLL0			0
++#define GPU_CC_AHB_CLK			4
++#define GPU_CC_CRC_AHB_CLK		5
++#define GPU_CC_CX_GFX3D_CLK		6
++#define GPU_CC_CX_GMU_CLK		7
++#define GPU_CC_CX_SNOC_DVM_CLK		8
++#define GPU_CC_CXO_AON_CLK		9
++#define GPU_CC_CXO_CLK			10
++#define GPU_CC_GMU_CLK_SRC		11
++#define GPU_CC_GX_CXO_CLK		12
++#define GPU_CC_GX_GFX3D_CLK		13
++#define GPU_CC_GX_GFX3D_CLK_SRC		14
++#define GPU_CC_SLEEP_CLK		15
++#define GPU_CC_HLOS1_VOTE_GPU_SMMU_CLK	16
++
++/* Resets */
++#define GPU_GX_BCR			0
++
++/* GDSCs */
++#define GPU_CX_GDSC			0
++#define GPU_GX_GDSC			1
++
++#endif
+diff --git a/include/dt-bindings/firmware/qcom,scm.h b/include/dt-bindings/firmware/qcom,scm.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..6de8b08e1e799b2915588c2e74f686a7defcf173
+--- /dev/null
++++ b/include/dt-bindings/firmware/qcom,scm.h
+@@ -0,0 +1,39 @@
++/* SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause */
++/*
++ * Copyright (c) 2010-2015, 2018-2019 The Linux Foundation. All rights reserved.
++ * Copyright (C) 2015 Linaro Ltd.
++ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
++ */
++
++#ifndef _DT_BINDINGS_FIRMWARE_QCOM_SCM_H
++#define _DT_BINDINGS_FIRMWARE_QCOM_SCM_H
++
++#define QCOM_SCM_VMID_TZ		0x1
++#define QCOM_SCM_VMID_HLOS		0x3
++#define QCOM_SCM_VMID_SSC_Q6		0x5
++#define QCOM_SCM_VMID_ADSP_Q6		0x6
++#define QCOM_SCM_VMID_CP_TOUCH		0x8
++#define QCOM_SCM_VMID_CP_BITSTREAM	0x9
++#define QCOM_SCM_VMID_CP_PIXEL		0xA
++#define QCOM_SCM_VMID_CP_NON_PIXEL	0xB
++#define QCOM_SCM_VMID_CP_CAMERA		0xD
++#define QCOM_SCM_VMID_HLOS_FREE		0xE
++#define QCOM_SCM_VMID_MSS_MSA		0xF
++#define QCOM_SCM_VMID_MSS_NONMSA	0x10
++#define QCOM_SCM_VMID_CP_SEC_DISPLAY	0x11
++#define QCOM_SCM_VMID_CP_APP		0x12
++#define QCOM_SCM_VMID_LPASS		0x16
++#define QCOM_SCM_VMID_WLAN		0x18
++#define QCOM_SCM_VMID_WLAN_CE		0x19
++#define QCOM_SCM_VMID_CP_SPSS_SP	0x1A
++#define QCOM_SCM_VMID_CP_CAMERA_PREVIEW 0x1D
++#define QCOM_SCM_VMID_CDSP		0x1E
++#define QCOM_SCM_VMID_CP_SPSS_SP_SHARED 0x22
++#define QCOM_SCM_VMID_CP_SPSS_HLOS_SHARED 0x24
++#define QCOM_SCM_VMID_ADSP_HEAP		0x25
++#define QCOM_SCM_VMID_CP_CDSP		0x2A
++#define QCOM_SCM_VMID_NAV		0x2B
++#define QCOM_SCM_VMID_TVM		0x2D
++#define QCOM_SCM_VMID_OEMVM		0x31
++
++#endif
+diff --git a/include/dt-bindings/interconnect/qcom,qcm2290.h b/include/dt-bindings/interconnect/qcom,qcm2290.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..af660072d0f8f9031470254e125936eaaf1d531b
+--- /dev/null
++++ b/include/dt-bindings/interconnect/qcom,qcm2290.h
+@@ -0,0 +1,94 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/* QCM2290 interconnect IDs */
++
++#ifndef __DT_BINDINGS_INTERCONNECT_QCOM_QCM2290_H
++#define __DT_BINDINGS_INTERCONNECT_QCOM_QCM2290_H
++
++/* BIMC */
++#define MASTER_APPSS_PROC		0
++//#define MASTER_SNOC_BIMC_RT		1
++//#define MASTER_SNOC_BIMC_NRT		2
++//#define MASTER_SNOC_BIMC		3
++//#define MASTER_TCU_0			4
++//#define MASTER_GFX3D			5
++//#define SLAVE_EBI1			6
++//#define SLAVE_BIMC_SNOC			7
++
++/* CNOC */
++//#define MASTER_SNOC_CNOC		0
++//#define MASTER_QDSS_DAP			1
++//#define SLAVE_BIMC_CFG			2
++//#define SLAVE_CAMERA_NRT_THROTTLE_CFG	3
++//#define SLAVE_CAMERA_RT_THROTTLE_CFG	4
++//#define SLAVE_CAMERA_CFG		5
++//#define SLAVE_CLK_CTL			6
++//#define SLAVE_CRYPTO_0_CFG		7
++//#define SLAVE_DISPLAY_CFG		8
++//#define SLAVE_DISPLAY_THROTTLE_CFG	9
++//#define SLAVE_GPU_CFG			10
++//#define SLAVE_HWKM			11
++//#define SLAVE_IMEM_CFG			12
++//#define SLAVE_IPA_CFG			13
++//#define SLAVE_LPASS			14
++//#define SLAVE_MESSAGE_RAM		15
++//#define SLAVE_PDM			16
++//#define SLAVE_PIMEM_CFG			17
++//#define SLAVE_PKA_WRAPPER		18
++//#define SLAVE_PMIC_ARB			19
++//#define SLAVE_PRNG			20
++//#define SLAVE_QDSS_CFG			21
++//#define SLAVE_QM_CFG			22
++//#define SLAVE_QM_MPU_CFG		23
++//#define SLAVE_QPIC			24
++//#define SLAVE_QUP_0			25
++//#define SLAVE_SDCC_1			26
++//#define SLAVE_SDCC_2			27
++//#define SLAVE_SNOC_CFG			28
++//#define SLAVE_TCSR			29
++//#define SLAVE_USB3			30
++//#define SLAVE_VENUS_CFG			31
++//#define SLAVE_VENUS_THROTTLE_CFG	32
++//#define SLAVE_VSENSE_CTRL_CFG		33
++//#define SLAVE_SERVICE_CNOC		34
++
++/* SNOC */
++//#define MASTER_CRYPTO_CORE0		0
++//#define MASTER_SNOC_CFG			1
++//#define MASTER_TIC			2
++//#define MASTER_ANOC_SNOC		3
++//#define MASTER_BIMC_SNOC		4
++//#define MASTER_PIMEM			5
++//#define MASTER_QDSS_BAM			6
++//#define MASTER_QUP_0			7
++//#define MASTER_IPA			8
++//#define MASTER_QDSS_ETR			9
++//#define MASTER_SDCC_1			10
++//#define MASTER_SDCC_2			11
++//#define MASTER_QPIC			12
++//#define MASTER_USB3_0			13
++//#define SLAVE_APPSS			14
++//#define SLAVE_SNOC_CNOC			15
++//#define SLAVE_IMEM			16
++//#define SLAVE_PIMEM			17
++//#define SLAVE_SNOC_BIMC			18
++//#define SLAVE_SERVICE_SNOC		19
++//#define SLAVE_QDSS_STM			20
++//#define SLAVE_TCU			21
++//#define SLAVE_ANOC_SNOC			22
++
++/* QUP Virtual */
++//#define MASTER_QUP_CORE_0		0
++//#define SLAVE_QUP_CORE_0		1
++
++/* MMNRT Virtual */
++//#define MASTER_CAMNOC_SF		0
++//#define MASTER_VIDEO_P0			1
++//#define MASTER_VIDEO_PROC		2
++//#define SLAVE_SNOC_BIMC_NRT		3
++
++/* MMRT Virtual */
++//#define MASTER_CAMNOC_HF		0
++#define MASTER_MDP0			1
++//#define SLAVE_SNOC_BIMC_RT		2
++
++#endif
+diff --git a/include/dt-bindings/interconnect/qcom,rpm-icc.h b/include/dt-bindings/interconnect/qcom,rpm-icc.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..2cd56f91e5c5235bd6907c8ccbed09eeaaa9769d
+--- /dev/null
++++ b/include/dt-bindings/interconnect/qcom,rpm-icc.h
+@@ -0,0 +1,13 @@
++/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause) */
++/*
++ * Copyright (c) 2023, Linaro Limited
++ */
++
++#ifndef __DT_BINDINGS_INTERCONNECT_QCOM_RPM_ICC_H
++#define __DT_BINDINGS_INTERCONNECT_QCOM_RPM_ICC_H
++
++#define RPM_ACTIVE_TAG		(1 << 0)
++#define RPM_SLEEP_TAG		(1 << 1)
++#define RPM_ALWAYS_TAG		(RPM_ACTIVE_TAG | RPM_SLEEP_TAG)
++
++#endif
+diff --git a/include/dt-bindings/interconnect/qcom,scuba.h b/include/dt-bindings/interconnect/qcom,scuba.h
+index 600d266c7c7b614779860283471421bddd866569..793e182b46652c0d7017c9d9021d2a6e73e55004 100644
+--- a/include/dt-bindings/interconnect/qcom,scuba.h
++++ b/include/dt-bindings/interconnect/qcom,scuba.h
+@@ -11,6 +11,7 @@
+ #define MASTER_SNOC_BIMC_NRT				2
+ #define SNOC_BIMC_MAS				3
+ #define MASTER_GRAPHICS_3D				4
++#define MASTER_GFX3D                    4
+ #define MASTER_TCU_0				5
+ #define MASTER_QUP_CORE_0				6
+ #define MASTER_CRYPTO_CORE0				7
+@@ -37,6 +38,7 @@
+ #define MASTER_SDCC_2				28
+ #define MASTER_USB3				29
+ #define SLAVE_EBI_CH0				512
++#define SLAVE_EBI1        			512
+ #define BIMC_SNOC_SLV				513
+ #define SLAVE_QUP_CORE_0				514
+ #define SLAVE_CRVIRT_A1NOC				515
+diff --git a/include/dt-bindings/interconnect/qcom,sm6115.h b/include/dt-bindings/interconnect/qcom,sm6115.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..21090e585f05fd6b6267d66869f5ff05af898ddf
+--- /dev/null
++++ b/include/dt-bindings/interconnect/qcom,sm6115.h
+@@ -0,0 +1,111 @@
++/* SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause */
++/*
++ * Copyright (c) 2020, The Linux Foundation. All rights reserved.
++ * Copyright (c) 2023, Linaro Limited
++ */
++
++#ifndef __DT_BINDINGS_INTERCONNECT_QCOM_SM6115_H
++#define __DT_BINDINGS_INTERCONNECT_QCOM_SM6115_H
++
++/* BIMC */
++#define MASTER_AMPSS_M0				0
++#define MASTER_SNOC_BIMC_RT			1
++#define MASTER_SNOC_BIMC_NRT			2
++#define SNOC_BIMC_MAS				3
++#define MASTER_GRAPHICS_3D			4
++#define MASTER_TCU_0				5
++#define SLAVE_EBI_CH0				6
++#define BIMC_SNOC_SLV				7
++
++/* CNOC */
++#define SNOC_CNOC_MAS				0
++#define MASTER_QDSS_DAP				1
++#define SLAVE_AHB2PHY_USB			2
++#define SLAVE_APSS_THROTTLE_CFG			3
++#define SLAVE_BIMC_CFG				4
++#define SLAVE_BOOT_ROM				5
++#define SLAVE_CAMERA_NRT_THROTTLE_CFG		6
++#define SLAVE_CAMERA_RT_THROTTLE_CFG		7
++#define SLAVE_CAMERA_CFG			8
++#define SLAVE_CLK_CTL				9
++#define SLAVE_RBCPR_CX_CFG			10
++#define SLAVE_RBCPR_MX_CFG			11
++#define SLAVE_CRYPTO_0_CFG			12
++#define SLAVE_DCC_CFG				13
++#define SLAVE_DDR_PHY_CFG			14
++#define SLAVE_DDR_SS_CFG			15
++#define SLAVE_DISPLAY_CFG			16
++#define SLAVE_DISPLAY_THROTTLE_CFG		17
++#define SLAVE_GPU_CFG				18
++#define SLAVE_GPU_THROTTLE_CFG			19
++#define SLAVE_HWKM_CORE				20
++#define SLAVE_IMEM_CFG				21
++#define SLAVE_IPA_CFG				22
++#define SLAVE_LPASS				23
++#define SLAVE_MAPSS				24
++#define SLAVE_MDSP_MPU_CFG			25
++#define SLAVE_MESSAGE_RAM			26
++#define SLAVE_CNOC_MSS				27
++#define SLAVE_PDM				28
++#define SLAVE_PIMEM_CFG				29
++#define SLAVE_PKA_CORE				30
++#define SLAVE_PMIC_ARB				31
++#define SLAVE_QDSS_CFG				32
++#define SLAVE_QM_CFG				33
++#define SLAVE_QM_MPU_CFG			34
++#define SLAVE_QPIC				35
++#define SLAVE_QUP_0				36
++#define SLAVE_RPM				37
++#define SLAVE_SDCC_1				38
++#define SLAVE_SDCC_2				39
++#define SLAVE_SECURITY				40
++#define SLAVE_SNOC_CFG				41
++#define SLAVE_TCSR				42
++#define SLAVE_TLMM				43
++#define SLAVE_USB3				44
++#define SLAVE_VENUS_CFG				45
++#define SLAVE_VENUS_THROTTLE_CFG		46
++#define SLAVE_VSENSE_CTRL_CFG			47
++#define SLAVE_SERVICE_CNOC			48
++
++/* SNOC */
++#define MASTER_CRYPTO_CORE0			0
++#define MASTER_SNOC_CFG				1
++#define MASTER_TIC				2
++#define MASTER_ANOC_SNOC			3
++#define BIMC_SNOC_MAS				4
++#define MASTER_PIMEM				5
++#define MASTER_QDSS_BAM				6
++#define MASTER_QPIC				7
++#define MASTER_QUP_0				8
++#define MASTER_IPA				9
++#define MASTER_QDSS_ETR				10
++#define MASTER_SDCC_1				11
++#define MASTER_SDCC_2				12
++#define MASTER_USB3				13
++#define SLAVE_APPSS				14
++#define SNOC_CNOC_SLV				15
++#define SLAVE_OCIMEM				16
++#define SLAVE_PIMEM				17
++#define SNOC_BIMC_SLV				18
++#define SLAVE_SERVICE_SNOC			19
++#define SLAVE_QDSS_STM				20
++#define SLAVE_TCU				21
++#define SLAVE_ANOC_SNOC				22
++
++/* CLK Virtual */
++#define MASTER_QUP_CORE_0			0
++#define SLAVE_QUP_CORE_0			1
++
++/* MMRT Virtual */
++#define MASTER_CAMNOC_HF			0
++#define MASTER_MDP_PORT0			1
++#define SLAVE_SNOC_BIMC_RT			2
++
++/* MMNRT Virtual */
++#define MASTER_CAMNOC_SF			0
++#define MASTER_VIDEO_P0				1
++#define MASTER_VIDEO_PROC			2
++#define SLAVE_SNOC_BIMC_NRT			3
++
++#endif
+diff --git a/include/linux/firmware/qcom/qcom_qseecom.h b/include/linux/firmware/qcom/qcom_qseecom.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..5c28298a98bec8146e8b2dad45aa946aff780f03
+--- /dev/null
++++ b/include/linux/firmware/qcom/qcom_qseecom.h
+@@ -0,0 +1,52 @@
++/* SPDX-License-Identifier: GPL-2.0-or-later */
++/*
++ * Driver for Qualcomm Secure Execution Environment (SEE) interface (QSEECOM).
++ * Responsible for setting up and managing QSEECOM client devices.
++ *
++ * Copyright (C) 2023 Maximilian Luz <luzmaximilian@gmail.com>
++ */
++
++#ifndef __QCOM_QSEECOM_H
++#define __QCOM_QSEECOM_H
++
++#include <linux/auxiliary_bus.h>
++#include <linux/types.h>
++
++#include <linux/firmware/qcom/qcom_scm.h>
++
++/**
++ * struct qseecom_client - QSEECOM client device.
++ * @aux_dev: Underlying auxiliary device.
++ * @app_id: ID of the loaded application.
++ */
++struct qseecom_client {
++	struct auxiliary_device aux_dev;
++	u32 app_id;
++};
++
++/**
++ * qcom_qseecom_app_send() - Send to and receive data from a given QSEE app.
++ * @client:   The QSEECOM client associated with the target app.
++ * @req:      Request buffer sent to the app (must be DMA-mappable).
++ * @req_size: Size of the request buffer.
++ * @rsp:      Response buffer, written to by the app (must be DMA-mappable).
++ * @rsp_size: Size of the response buffer.
++ *
++ * Sends a request to the QSEE app associated with the given client and read
++ * back its response. The caller must provide two DMA memory regions, one for
++ * the request and one for the response, and fill out the @req region with the
++ * respective (app-specific) request data. The QSEE app reads this and returns
++ * its response in the @rsp region.
++ *
++ * Note: This is a convenience wrapper around qcom_scm_qseecom_app_send().
++ * Clients should prefer to use this wrapper.
++ *
++ * Return: Zero on success, nonzero on failure.
++ */
++static inline int qcom_qseecom_app_send(struct qseecom_client *client, void *req, size_t req_size,
++					void *rsp, size_t rsp_size)
++{
++	return qcom_scm_qseecom_app_send(client->app_id, req, req_size, rsp, rsp_size);
++}
++
++#endif /* __QCOM_QSEECOM_H */
+diff --git a/include/linux/firmware/qcom/qcom_scm.h b/include/linux/firmware/qcom/qcom_scm.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..ccaf288460546a8617a9c7efc5132de8d5fca4e7
+--- /dev/null
++++ b/include/linux/firmware/qcom/qcom_scm.h
+@@ -0,0 +1,140 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/* Copyright (c) 2010-2015, 2018-2019 The Linux Foundation. All rights reserved.
++ * Copyright (C) 2015 Linaro Ltd.
++ */
++#ifndef __QCOM_SCM_H
++#define __QCOM_SCM_H
++
++#include <linux/err.h>
++#include <linux/types.h>
++#include <linux/cpumask.h>
++
++#include <dt-bindings/firmware/qcom,scm.h>
++
++#define QCOM_SCM_VERSION(major, minor)	(((major) << 16) | ((minor) & 0xFF))
++#define QCOM_SCM_CPU_PWR_DOWN_L2_ON	0x0
++#define QCOM_SCM_CPU_PWR_DOWN_L2_OFF	0x1
++#define QCOM_SCM_HDCP_MAX_REQ_CNT	5
++
++struct qcom_scm_hdcp_req {
++	u32 addr;
++	u32 val;
++};
++
++struct qcom_scm_vmperm {
++	int vmid;
++	int perm;
++};
++
++enum qcom_scm_ocmem_client {
++	QCOM_SCM_OCMEM_UNUSED_ID = 0x0,
++	QCOM_SCM_OCMEM_GRAPHICS_ID,
++	QCOM_SCM_OCMEM_VIDEO_ID,
++	QCOM_SCM_OCMEM_LP_AUDIO_ID,
++	QCOM_SCM_OCMEM_SENSORS_ID,
++	QCOM_SCM_OCMEM_OTHER_OS_ID,
++	QCOM_SCM_OCMEM_DEBUG_ID,
++};
++
++enum qcom_scm_sec_dev_id {
++	QCOM_SCM_MDSS_DEV_ID    = 1,
++	QCOM_SCM_OCMEM_DEV_ID   = 5,
++	QCOM_SCM_PCIE0_DEV_ID   = 11,
++	QCOM_SCM_PCIE1_DEV_ID   = 12,
++	QCOM_SCM_GFX_DEV_ID     = 18,
++	QCOM_SCM_UFS_DEV_ID     = 19,
++	QCOM_SCM_ICE_DEV_ID     = 20,
++};
++
++enum qcom_scm_ice_cipher {
++	QCOM_SCM_ICE_CIPHER_AES_128_XTS = 0,
++	QCOM_SCM_ICE_CIPHER_AES_128_CBC = 1,
++	QCOM_SCM_ICE_CIPHER_AES_256_XTS = 3,
++	QCOM_SCM_ICE_CIPHER_AES_256_CBC = 4,
++};
++
++#define QCOM_SCM_PERM_READ       0x4
++#define QCOM_SCM_PERM_WRITE      0x2
++#define QCOM_SCM_PERM_EXEC       0x1
++#define QCOM_SCM_PERM_RW (QCOM_SCM_PERM_READ | QCOM_SCM_PERM_WRITE)
++#define QCOM_SCM_PERM_RWX (QCOM_SCM_PERM_RW | QCOM_SCM_PERM_EXEC)
++
++bool qcom_scm_is_available(void);
++
++int qcom_scm_set_cold_boot_addr(void *entry);
++int qcom_scm_set_warm_boot_addr(void *entry);
++void qcom_scm_cpu_power_down(u32 flags);
++int qcom_scm_set_remote_state(u32 state, u32 id);
++
++struct qcom_scm_pas_metadata {
++	void *ptr;
++	dma_addr_t phys;
++	ssize_t size;
++};
++
++int qcom_scm_pas_init_image(u32 peripheral, const void *metadata, size_t size,
++			    struct qcom_scm_pas_metadata *ctx);
++void qcom_scm_pas_metadata_release(struct qcom_scm_pas_metadata *ctx);
++int qcom_scm_pas_mem_setup(u32 peripheral, phys_addr_t addr, phys_addr_t size);
++int qcom_scm_pas_auth_and_reset(u32 peripheral);
++int qcom_scm_pas_shutdown(u32 peripheral);
++bool qcom_scm_pas_supported(u32 peripheral);
++
++int qcom_scm_io_readl(phys_addr_t addr, unsigned int *val);
++int qcom_scm_io_writel(phys_addr_t addr, unsigned int val);
++
++bool qcom_scm_restore_sec_cfg_available(void);
++int qcom_scm_restore_sec_cfg(u32 device_id, u32 spare);
++int qcom_scm_iommu_secure_ptbl_size(u32 spare, size_t *size);
++int qcom_scm_iommu_secure_ptbl_init(u64 addr, u32 size, u32 spare);
++int qcom_scm_iommu_set_cp_pool_size(u32 spare, u32 size);
++int qcom_scm_mem_protect_video_var(u32 cp_start, u32 cp_size,
++				   u32 cp_nonpixel_start, u32 cp_nonpixel_size);
++int qcom_scm_assign_mem(phys_addr_t mem_addr, size_t mem_sz, u64 *src,
++			const struct qcom_scm_vmperm *newvm,
++			unsigned int dest_cnt);
++
++bool qcom_scm_ocmem_lock_available(void);
++int qcom_scm_ocmem_lock(enum qcom_scm_ocmem_client id, u32 offset, u32 size,
++			u32 mode);
++int qcom_scm_ocmem_unlock(enum qcom_scm_ocmem_client id, u32 offset, u32 size);
++
++bool qcom_scm_ice_available(void);
++int qcom_scm_ice_invalidate_key(u32 index);
++int qcom_scm_ice_set_key(u32 index, const u8 *key, u32 key_size,
++			 enum qcom_scm_ice_cipher cipher, u32 data_unit_size);
++
++bool qcom_scm_hdcp_available(void);
++int qcom_scm_hdcp_req(struct qcom_scm_hdcp_req *req, u32 req_cnt, u32 *resp);
++
++int qcom_scm_iommu_set_pt_format(u32 sec_id, u32 ctx_num, u32 pt_fmt);
++int qcom_scm_qsmmu500_wait_safe_toggle(bool en);
++
++int qcom_scm_lmh_dcvsh(u32 payload_fn, u32 payload_reg, u32 payload_val,
++		       u64 limit_node, u32 node_id, u64 version);
++int qcom_scm_lmh_profile_change(u32 profile_id);
++bool qcom_scm_lmh_dcvsh_available(void);
++
++#ifdef CONFIG_QCOM_QSEECOM
++
++int qcom_scm_qseecom_app_get_id(const char *app_name, u32 *app_id);
++int qcom_scm_qseecom_app_send(u32 app_id, void *req, size_t req_size, void *rsp,
++			      size_t rsp_size);
++
++#else /* CONFIG_QCOM_QSEECOM */
++
++static inline int qcom_scm_qseecom_app_get_id(const char *app_name, u32 *app_id)
++{
++	return -EINVAL;
++}
++
++static inline int qcom_scm_qseecom_app_send(u32 app_id, void *req,
++					    size_t req_size, void *rsp,
++					    size_t rsp_size)
++{
++	return -EINVAL;
++}
++
++#endif /* CONFIG_QCOM_QSEECOM */
++
++#endif
+diff --git a/include/linux/soc/qcom/ubwc.h b/include/linux/soc/qcom/ubwc.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..f052e241736c4bf92b3f3a603542082c5b608a51
+--- /dev/null
++++ b/include/linux/soc/qcom/ubwc.h
+@@ -0,0 +1,77 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Copyright (c) 2018, The Linux Foundation
++ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
++ */
++
++#ifndef __QCOM_UBWC_H__
++#define __QCOM_UBWC_H__
++
++#include <linux/bits.h>
++#include <linux/printk.h>
++#include <linux/types.h>
++
++struct qcom_ubwc_cfg_data {
++	u32 ubwc_enc_version;
++	/* Can be read from MDSS_BASE + 0x58 */
++	u32 ubwc_dec_version;
++
++	/**
++	 * @ubwc_swizzle: Whether to enable level 1, 2 & 3 bank swizzling.
++	 *
++	 * UBWC 1.0 always enables all three levels.
++	 * UBWC 2.0 removes level 1 bank swizzling, leaving levels 2 & 3.
++	 * UBWC 4.0 adds the optional ability to disable levels 2 & 3.
++	 */
++	u32 ubwc_swizzle;
++#define UBWC_SWIZZLE_ENABLE_LVL1	BIT(0)
++#define UBWC_SWIZZLE_ENABLE_LVL2	BIT(1)
++#define UBWC_SWIZZLE_ENABLE_LVL3	BIT(2)
++
++	/**
++	 * @highest_bank_bit: Highest Bank Bit
++	 *
++	 * The Highest Bank Bit value represents the bit of the highest
++	 * DDR bank.  This should ideally use DRAM type detection.
++	 */
++	int highest_bank_bit;
++	bool ubwc_bank_spread;
++
++	/**
++	 * @macrotile_mode: Macrotile Mode
++	 *
++	 * Whether to use 4-channel macrotiling mode or the newer
++	 * 8-channel macrotiling mode introduced in UBWC 3.1. 0 is
++	 * 4-channel and 1 is 8-channel.
++	 */
++	bool macrotile_mode;
++};
++
++#define UBWC_1_0 0x10000000
++#define UBWC_2_0 0x20000000
++#define UBWC_3_0 0x30000000
++#define UBWC_4_0 0x40000000
++#define UBWC_4_3 0x40030000
++#define UBWC_5_0 0x50000000
++#define UBWC_6_0 0x60000000
++
++#if IS_ENABLED(CONFIG_QCOM_UBWC_CONFIG)
++const struct qcom_ubwc_cfg_data *qcom_ubwc_config_get_data(void);
++#else
++static inline const struct qcom_ubwc_cfg_data *qcom_ubwc_config_get_data(void)
++{
++	return ERR_PTR(-EOPNOTSUPP);
++}
++#endif
++
++static inline bool qcom_ubwc_get_ubwc_mode(const struct qcom_ubwc_cfg_data *cfg)
++{
++	bool ret = cfg->ubwc_enc_version == UBWC_1_0;
++
++	if (ret && !(cfg->ubwc_swizzle & UBWC_SWIZZLE_ENABLE_LVL1))
++		pr_err("UBWC config discrepancy - level 1 swizzling disabled on UBWC 1.0\n");
++
++	return ret;
++}
++
++#endif /* __QCOM_UBWC_H__ */
+diff --git a/include/trace/trace-gdsc.h b/include/trace/trace-gdsc.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..e5314df67d506daafdd8df9581c340f2ebbe4981
+--- /dev/null
++++ b/include/trace/trace-gdsc.h
+@@ -0,0 +1,49 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
++ */
++
++#undef TRACE_SYSTEM
++#define TRACE_SYSTEM clk_gdsc
++
++#if !defined(_TRACE_CLOCK_GDSC_H) || defined(TRACE_HEADER_MULTI_READ)
++#define _TRACE_CLOCK_GDSC
++
++#include <linux/tracepoint.h>
++
++TRACE_EVENT(gdsc_time,
++
++	TP_PROTO(const char *name, u32 enabling, u32 time_us, u32 timed_out),
++
++	TP_ARGS(name, enabling, time_us, timed_out),
++
++	TP_STRUCT__entry(
++		__string(name,		name)
++		__field(unsigned int,	enabling)
++		__field(unsigned int,	time_us)
++		__field(unsigned int,	timed_out)
++	),
++
++	TP_fast_assign(
++		__assign_str(name, name);
++		__entry->enabling = enabling;
++		__entry->time_us = time_us;
++		__entry->timed_out = timed_out;
++	),
++
++	TP_printk("%s enabling:%d time_us:%d timed_out:%d",
++		__get_str(name), __entry->enabling,
++		__entry->time_us, __entry->timed_out)
++);
++
++#endif /* _TRACE_CLOCK_GDSC */
++
++/* This part must be outside protection */
++
++#undef TRACE_INCLUDE_PATH
++#define TRACE_INCLUDE_PATH .
++
++#undef TRACE_INCLUDE_FILE
++#define TRACE_INCLUDE_FILE trace-gdsc
++
++#include <trace/define_trace.h>

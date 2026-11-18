@@ -1,0 +1,2395 @@
+diff --git a/arch/arm64/configs/generic_bengal_defconfig b/arch/arm64/configs/generic_bengal_defconfig
+index 9f99f19953421502061f12a374f91dc174afc1b2..9ca6295a041df00fefdc6624309bf6a759d48753 100644
+--- a/arch/arm64/configs/generic_bengal_defconfig
++++ b/arch/arm64/configs/generic_bengal_defconfig
+@@ -501,7 +501,7 @@ CONFIG_USB_EHCI_ROOT_HUB_TT=y
+ CONFIG_USB_EHCI_HCD_PLATFORM=y
+ CONFIG_USB_ACM=y
+ CONFIG_USB_STORAGE=y
+-CONFIG_USB_UAS=y
++# CONFIG_USB_UAS is not set
+ CONFIG_USB_DWC3=y
+ CONFIG_USB_GADGET=y
+ CONFIG_USB_CONFIGFS=y
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index 518fa2583b3d20b5cb9544cfaaca10e937ad3974..aca7e990fc9e02e3f79db241a3ebb61e0b5ddb8b 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -502,7 +502,7 @@ CONFIG_USB_EHCI_ROOT_HUB_TT=y
+ CONFIG_USB_EHCI_HCD_PLATFORM=y
+ CONFIG_USB_ACM=y
+ CONFIG_USB_STORAGE=y
+-CONFIG_USB_UAS=y
++# CONFIG_USB_UAS is not set
+ CONFIG_USB_DWC3=y
+ CONFIG_USB_GADGET=y
+ CONFIG_USB_CONFIGFS=y
+diff --git a/arch/arm64/configs/vendor/bengal_GKI.config b/arch/arm64/configs/vendor/bengal_GKI.config
+index b4badbb1a5e505306ce84e0782f22e30f6802432..1997ff9589506554c89d0a2645fc5cc988c16308 100644
+--- a/arch/arm64/configs/vendor/bengal_GKI.config
++++ b/arch/arm64/configs/vendor/bengal_GKI.config
+@@ -60,6 +60,8 @@ CONFIG_MMC_BLOCK_MINORS=32
+ CONFIG_MMC_CRYPTO_QTI=m
+ CONFIG_MMC_SDHCI_MSM=m
+ CONFIG_MMC_SDHCI_MSM_SCALING=m
++# CONFIG_HWMON_DEBUG_CHIP is not set
++CONFIG_HWMON=m
+ # CONFIG_MODULE_SIG_ALL is not set
+ CONFIG_MSM_ADSPRPC=m
+ CONFIG_MSM_BOOT_STATS=m
+@@ -249,6 +251,7 @@ CONFIG_RTC_DRV_PM8XXX=m
+ CONFIG_SCHED_WALT=m
+ CONFIG_SCSI_UFS_CRYPTO_QTI=m
+ CONFIG_SCSI_UFS_QCOM=m
++CONFIG_SENSORS_PWM_FAN=m
+ CONFIG_SERIAL_MSM_GENI=m
+ # CONFIG_SERIO_SERPORT is not set
+ CONFIG_SLIMBUS=m
+@@ -305,3 +308,4 @@ CONFIG_ZRAM=m
+ CONFIG_ZRAM_DEF_COMP="lzo-rle"
+ CONFIG_ZRAM_DEF_COMP_LZORLE=y
+ CONFIG_ZSMALLOC=m
++CONFIG_LEDS_QTI_FLASH_DBG=m
+diff --git a/arch/arm64/configs/vendor/bengal_consolidate.config b/arch/arm64/configs/vendor/bengal_consolidate.config
+index 508765d42f86a1531de92ab85b756887cce8364f..e6be3121b4326c47fc1adb39cdbb4e37e3170dba 100644
+--- a/arch/arm64/configs/vendor/bengal_consolidate.config
++++ b/arch/arm64/configs/vendor/bengal_consolidate.config
+@@ -25,3 +25,4 @@ CONFIG_RUNTIME_TESTING_MENU=y
+ CONFIG_SDHCI_MSM_DBG=y
+ CONFIG_SLUB_DEBUG_ON=y
+ CONFIG_TEST_USER_COPY=m
++CONFIG_LEDS_QTI_FLASH_DBG=m
+diff --git a/arch/arm64/configs/vendor/bengal_le_GKI.config b/arch/arm64/configs/vendor/bengal_le_GKI.config
+index 28dd14195ffe4b5cf612401085e27fbe9fa8b858..16a3fa278dfade53028f1e63ef1445aac783765b 100644
+--- a/arch/arm64/configs/vendor/bengal_le_GKI.config
++++ b/arch/arm64/configs/vendor/bengal_le_GKI.config
+@@ -60,6 +60,8 @@ CONFIG_MMC_BLOCK_MINORS=32
+ CONFIG_MMC_CRYPTO_QTI=m
+ CONFIG_MMC_SDHCI_MSM=m
+ CONFIG_MMC_SDHCI_MSM_SCALING=m
++# CONFIG_HWMON_DEBUG_CHIP is not set
++CONFIG_HWMON=m
+ # CONFIG_MODULE_SIG_ALL is not set
+ CONFIG_MSM_ADSPRPC=m
+ CONFIG_MSM_BOOT_STATS=m
+@@ -245,6 +247,7 @@ CONFIG_RTC_DRV_PM8XXX=m
+ CONFIG_SCHED_WALT=m
+ CONFIG_SCSI_UFS_CRYPTO_QTI=m
+ CONFIG_SCSI_UFS_QCOM=m
++CONFIG_SENSORS_PWM_FAN=m
+ CONFIG_SERIAL_MSM_GENI=m
+ # CONFIG_SERIO_SERPORT is not set
+ CONFIG_SLIMBUS=m
+@@ -300,8 +303,94 @@ CONFIG_ZRAM=m
+ CONFIG_ZRAM_DEF_COMP="lzo-rle"
+ CONFIG_ZRAM_DEF_COMP_LZORLE=y
+ CONFIG_ZSMALLOC=m
++CONFIG_LEDS_QTI_FLASH_DBG=m
+ CONFIG_WAVESHARE_DSI_PANEL_BL=m
+ CONFIG_TOUCHSCREEN_GOODIX=m
+ CONFIG_I2C=y
+ CONFIG_INPUT=y
+ CONFIG_INPUT_TOUCHSCREEN=y
++CONFIG_VIRTUAL_CHARGER=m
++CONFIG_DEBUG_GPIO=y
++CONFIG_GPIO_SYSFS=y
++CONFIG_LEDS_GPIO=y
++CONFIG_NEW_LEDS=y
++CONFIG_LEDS_TRIGGER_TIMER=y
++CONFIG_LEDS_TRIGGER_TRANSIENT=y
++CONFIG_LEDS_TRIGGER_HEARTBEAT=y
++CONFIG_LEDS_TRIGGER_CPU=y
++CONFIG_LEDS_TRIGGER_ACTIVITY=y
++CONFIG_LEDS_TRIGGER_NETDEV=y
++CONFIG_LEDS_TRIGGER_PATTERN=y
++CONFIG_LEDS_TRIGGER_DEFAULT_ON=y
++CONFIG_LEDS_TRIGGER_ONESHOT=y
++CONFIG_LEDS_TRIGGER_BACKLIGHT=y
++CONFIG_LEDS_TRIGGER_CAMERA=y
++CONFIG_LEDS_TRIGGER_PANIC=y
++CONFIG_LEDS_TRIGGER_AUDIO=y
++CONFIG_LEDS_TRIGGER_TTY=y
++CONFIG_LEDS_TRIGGER_GPIO=y
++CONFIG_SPI_SPIDEV=m
++
++CONFIG_USB_SERIAL=y
++CONFIG_USB_SERIAL_CONSOLE=y
++CONFIG_USB_SERIAL_GENERIC=y
++CONFIG_USB_SERIAL_SIMPLE=m
++CONFIG_USB_SERIAL_QCAUX=m
++CONFIG_USB_SERIAL_QUALCOMM=m
++CONFIG_USB_SERIAL_WWAN=m
++CONFIG_USB_SERIAL_OPTION=m
++
++CONFIG_PPPOE=y
++CONFIG_PPP_ASYNC=y
++CONFIG_PPP_SYNC_TTY=y
++
++CONFIG_USB_CONFIGFS_RNDIS=y
++CONFIG_USB_NET_RNDIS_HOST=m
++CONFIG_USB_WDM=m
++
++CONFIG_NFT_COMPAT=y
++CONFIG_NFT_CONNLIMIT=y
++CONFIG_NFT_COUNTER=y
++CONFIG_NFT_CT=y
++CONFIG_NFT_HASH=y
++CONFIG_NFT_LIMIT=y
++CONFIG_NFT_LOG=y
++CONFIG_NFT_MASQ=y
++CONFIG_NFT_NAT=y
++CONFIG_NFT_NUMGEN=y
++CONFIG_NFT_OBJREF=y
++CONFIG_NFT_OSF=y
++CONFIG_NFT_QUEUE=y
++CONFIG_NFT_QUOTA=y
++CONFIG_NFT_REDIR=y
++CONFIG_NFT_REJECT=y
++CONFIG_NFT_SOCKET=y
++CONFIG_NFT_SYNPROXY=y
++CONFIG_NFT_TPROXY=y
++CONFIG_NFT_TUNNEL=y
++CONFIG_NFT_XFRM=y
++CONFIG_NF_TABLES=y
++CONFIG_NF_TABLES_ARP=y
++CONFIG_NF_TABLES_BRIDGE=y
++CONFIG_NF_TABLES_INET=y
++CONFIG_NF_TABLES_IPV4=y
++CONFIG_NF_TABLES_IPV6=y
++CONFIG_NF_TABLES_NETDEV=y
++
++CONFIG_NF_CONNTRACK_BRIDGE=y
++CONFIG_NF_CONNTRACK_LABELS=y
++CONFIG_NF_CONNTRACK_SIP=y
++CONFIG_NF_CONNTRACK_SNMP=y
++CONFIG_NF_CONNTRACK_TIMEOUT=y
++CONFIG_NF_CONNTRACK_TIMESTAMP=y
++CONFIG_NF_CONNTRACK_ZONES=y
++CONFIG_NF_FLOW_TABLE=y
++
++CONFIG_NFT_BRIDGE_META=y
++CONFIG_NFT_BRIDGE_REJECT=y
++CONFIG_NFT_FIB_IPV4=y
++CONFIG_NFT_FIB_IPV6=y
++CONFIG_NFT_FWD_NETDEV=y
++CONFIG_NFT_REJECT_NETDEV=y
++
++CONFIG_SND_SOC_HDMI_CODEC=m
+diff --git a/arch/arm64/configs/vendor/bengal_le_consolidate.config b/arch/arm64/configs/vendor/bengal_le_consolidate.config
+index c763e86a2b6328127363344732ff2e46e1885175..7b5af7ec559e6555ddc31f249a4f514d0a03e097 100644
+--- a/arch/arm64/configs/vendor/bengal_le_consolidate.config
++++ b/arch/arm64/configs/vendor/bengal_le_consolidate.config
+@@ -39,8 +39,91 @@ CONFIG_SDHCI_MSM_DBG=y
+ CONFIG_SLUB_DEBUG_ON=y
+ # CONFIG_TC956X_PCIE_ETH is not set
+ CONFIG_TEST_USER_COPY=m
++CONFIG_LEDS_QTI_FLASH_DBG=m
+ CONFIG_WAVESHARE_DSI_PANEL_BL=m
+ CONFIG_TOUCHSCREEN_GOODIX=m
+ CONFIG_I2C=y
+ CONFIG_INPUT=y
+ CONFIG_INPUT_TOUCHSCREEN=y
++CONFIG_VIRTUAL_CHARGER=m
++CONFIG_DEBUG_GPIO=y
++CONFIG_GPIO_SYSFS=y
++CONFIG_LEDS_GPIO=y
++CONFIG_NEW_LEDS=y
++CONFIG_LEDS_TRIGGER_TIMER=y
++CONFIG_LEDS_TRIGGER_TRANSIENT=y
++CONFIG_LEDS_TRIGGER_HEARTBEAT=y
++CONFIG_LEDS_TRIGGER_CPU=y
++CONFIG_LEDS_TRIGGER_ACTIVITY=y
++CONFIG_LEDS_TRIGGER_NETDEV=y
++CONFIG_LEDS_TRIGGER_PATTERN=y
++CONFIG_LEDS_TRIGGER_DEFAULT_ON=y
++CONFIG_LEDS_TRIGGER_ONESHOT=y
++CONFIG_LEDS_TRIGGER_BACKLIGHT=y
++CONFIG_LEDS_TRIGGER_CAMERA=y
++CONFIG_LEDS_TRIGGER_PANIC=y
++CONFIG_LEDS_TRIGGER_AUDIO=y
++CONFIG_LEDS_TRIGGER_TTY=y
++CONFIG_LEDS_TRIGGER_GPIO=y
++CONFIG_SPI_SPIDEV=m
++
++CONFIG_USB_SERIAL=y
++CONFIG_USB_SERIAL_CONSOLE=y
++CONFIG_USB_SERIAL_GENERIC=y
++CONFIG_USB_SERIAL_SIMPLE=m
++CONFIG_USB_SERIAL_QCAUX=m
++CONFIG_USB_SERIAL_QUALCOMM=m
++CONFIG_USB_SERIAL_WWAN=m
++CONFIG_USB_SERIAL_OPTION=m
++
++CONFIG_PPPOE=y
++CONFIG_PPP_ASYNC=y
++CONFIG_PPP_SYNC_TTY=y
++
++CONFIG_USB_CONFIGFS_RNDIS=y
++CONFIG_USB_NET_RNDIS_HOST=m
++
++CONFIG_NFT_COMPAT=y
++CONFIG_NFT_CONNLIMIT=y
++CONFIG_NFT_COUNTER=y
++CONFIG_NFT_CT=y
++CONFIG_NFT_HASH=y
++CONFIG_NFT_LIMIT=y
++CONFIG_NFT_LOG=y
++CONFIG_NFT_MASQ=y
++CONFIG_NFT_NAT=y
++CONFIG_NFT_NUMGEN=y
++CONFIG_NFT_OBJREF=y
++CONFIG_NFT_OSF=y
++CONFIG_NFT_QUEUE=y
++CONFIG_NFT_QUOTA=y
++CONFIG_NFT_REDIR=y
++CONFIG_NFT_REJECT=y
++CONFIG_NFT_SOCKET=y
++CONFIG_NFT_SYNPROXY=y
++CONFIG_NFT_TPROXY=y
++CONFIG_NFT_TUNNEL=y
++CONFIG_NFT_XFRM=y
++CONFIG_NF_TABLES=y
++CONFIG_NF_TABLES_ARP=y
++CONFIG_NF_TABLES_BRIDGE=y
++CONFIG_NF_TABLES_INET=y
++CONFIG_NF_TABLES_IPV4=y
++CONFIG_NF_TABLES_IPV6=y
++CONFIG_NF_TABLES_NETDEV=y
++
++CONFIG_NF_CONNTRACK_BRIDGE=y
++CONFIG_NF_CONNTRACK_LABELS=y
++CONFIG_NF_CONNTRACK_SIP=y
++CONFIG_NF_CONNTRACK_SNMP=y
++CONFIG_NF_CONNTRACK_TIMEOUT=y
++CONFIG_NF_CONNTRACK_TIMESTAMP=y
++CONFIG_NF_CONNTRACK_ZONES=y
++CONFIG_NF_FLOW_TABLE=y
++
++CONFIG_NFT_BRIDGE_META=y
++CONFIG_NFT_BRIDGE_REJECT=y
++CONFIG_NFT_FIB_IPV4=y
++CONFIG_NFT_FIB_IPV6=y
++CONFIG_NFT_FWD_NETDEV=y
++CONFIG_NFT_REJECT_NETDEV=y
+diff --git a/arch/arm64/configs/vendor/qpi_debian.config b/arch/arm64/configs/vendor/qpi_debian.config
+index 306ce074542564716cbaca90e158d70de384d32b..20cc796ea9e4def2ec130565ee9a4494d73f3f76 100644
+--- a/arch/arm64/configs/vendor/qpi_debian.config
++++ b/arch/arm64/configs/vendor/qpi_debian.config
+@@ -8,6 +8,10 @@ CONFIG_VT_HW_CONSOLE_BINDING=y
+ #CONFIG_CONSOLE_TRANSLATIONS=y
+ #CONFIG_QCOM_RPMPD=y
+ #CONFIG_QCOM_SMD_RPM=y
++CONFIG_USB_SERIAL_PL2303=m
++CONFIG_USB_SERIAL_CH341=m
++CONFIG_USB_SERIAL_XR=m
++CONFIG_USB_SERIAL_QUALCOMM=m
+ CONFIG_DRM_SCHED=y
+ CONFIG_OF_OVERLAY=y
+ CONFIG_OF_CONFIGFS=y
+diff --git a/arch/arm64/configs/vendor/scuba_auto.config b/arch/arm64/configs/vendor/scuba_auto.config
+index c1b6dcc8701072ac7252a57faf8b41bee41d54dd..374450838c34aa29f53b629f63ed0c2e91407ca7 100644
+--- a/arch/arm64/configs/vendor/scuba_auto.config
++++ b/arch/arm64/configs/vendor/scuba_auto.config
+@@ -18,6 +18,7 @@ CONFIG_DMADEVICES=y
+ CONFIG_DMA_SHARED_BUFFER=y
+ CONFIG_DMA_VIRTUAL_CHANNELS=m
+ CONFIG_I2C_MSM_GENI=m
++CONFIG_I2C_QUP=m
+ CONFIG_IIO=y
+ CONFIG_IIO_BUFFER=y
+ CONFIG_IIO_CONFIGFS=y
+@@ -124,6 +125,7 @@ CONFIG_RTC_SYSTOHC_DEVICE="rtc0"
+ CONFIG_SERIAL_MSM_GENI=y
+ CONFIG_SERIAL_QCOM_GENI=y
+ CONFIG_SERIAL_QCOM_GENI_CONSOLE=y
++CONFIG_SPI_SPIDEV=m
+ CONFIG_SM_DEBUGCC_SCUBA=y
+ CONFIG_SM_DISPCC_SCUBA=y
+ CONFIG_SM_GCC_SCUBA=y
+diff --git a/arch/arm64/configs/vendor/scuba_auto_debug.config b/arch/arm64/configs/vendor/scuba_auto_debug.config
+index 9c4870949a30d2eb41d792ad05a5cb7df7049319..3c522135fa0baa8e52d9dc29c6a88aa3317e3eef 100644
+--- a/arch/arm64/configs/vendor/scuba_auto_debug.config
++++ b/arch/arm64/configs/vendor/scuba_auto_debug.config
+@@ -14,6 +14,8 @@ CONFIG_FAIL_PAGE_ALLOC=y
+ CONFIG_FAULT_INJECTION=y
+ CONFIG_FAULT_INJECTION_DEBUG_FS=y
+ CONFIG_FAULT_INJECTION_STACKTRACE_FILTER=y
++CONFIG_I2C_QUP=m
++CONFIG_SPI_SPIDEV=m
+ CONFIG_QCOM_IOMMU_DEBUG=y
+ CONFIG_REGULATOR_DEBUG=y
+ CONFIG_REGULATOR_DEBUG_CONTROL=y
+diff --git a/drivers/bluetooth/hci_ldisc.c b/drivers/bluetooth/hci_ldisc.c
+index be51528afed9df61bd47fa2eabbf6091f1149467..4e341b7e7098b3c38fa723a873063e5ab993050d 100644
+--- a/drivers/bluetooth/hci_ldisc.c
++++ b/drivers/bluetooth/hci_ldisc.c
+@@ -392,31 +392,44 @@ static int hci_uart_setup(struct hci_dev *hdev)
+ 	struct hci_rp_read_local_version *ver;
+ 	struct sk_buff *skb;
+ 	unsigned int speed;
++	unsigned int tty_ispeed = 0, tty_ospeed = 0;
+ 	int err;
+ 
+-	/* Init speed if any */
+-	if (hu->init_speed)
+-		speed = hu->init_speed;
+-	else if (hu->proto->init_speed)
+-		speed = hu->proto->init_speed;
+-	else
+-		speed = 0;
++	if (test_bit(HCI_UART_SKIP_VENDOR_SETUP, &hu->hdev_flags)) {
++		if (hu->tty) {
++			tty_ispeed = hu->tty->termios.c_ispeed;
++			tty_ospeed = hu->tty->termios.c_ospeed;
++		}
++		bt_dev_info(hdev,
++			    "UART vendor speed setup skipped for %s; tty %u/%u init %u oper %u",
++			    hu->proto->name ? hu->proto->name : "unknown",
++			    tty_ispeed, tty_ospeed, hu->init_speed,
++			    hu->oper_speed);
++	} else {
++		/* Init speed if any */
++		if (hu->init_speed)
++			speed = hu->init_speed;
++		else if (hu->proto->init_speed)
++			speed = hu->proto->init_speed;
++		else
++			speed = 0;
+ 
+-	if (speed)
+-		hci_uart_set_baudrate(hu, speed);
++		if (speed)
++			hci_uart_set_baudrate(hu, speed);
+ 
+-	/* Operational speed if any */
+-	if (hu->oper_speed)
+-		speed = hu->oper_speed;
+-	else if (hu->proto->oper_speed)
+-		speed = hu->proto->oper_speed;
+-	else
+-		speed = 0;
++		/* Operational speed if any */
++		if (hu->oper_speed)
++			speed = hu->oper_speed;
++		else if (hu->proto->oper_speed)
++			speed = hu->proto->oper_speed;
++		else
++			speed = 0;
+ 
+-	if (hu->proto->set_baudrate && speed) {
+-		err = hu->proto->set_baudrate(hu, speed);
+-		if (!err)
+-			hci_uart_set_baudrate(hu, speed);
++		if (hu->proto->set_baudrate && speed) {
++			err = hu->proto->set_baudrate(hu, speed);
++			if (!err)
++				hci_uart_set_baudrate(hu, speed);
++		}
+ 	}
+ 
+ 	if (hu->proto->setup)
+@@ -722,7 +735,8 @@ static int hci_uart_set_flags(struct hci_uart *hu, unsigned long flags)
+ 				    BIT(HCI_UART_CREATE_AMP) |
+ 				    BIT(HCI_UART_INIT_PENDING) |
+ 				    BIT(HCI_UART_EXT_CONFIG) |
+-				    BIT(HCI_UART_VND_DETECT);
++				    BIT(HCI_UART_VND_DETECT) |
++				    BIT(HCI_UART_SKIP_VENDOR_SETUP);
+ 
+ 	if (flags & ~valid_flags)
+ 		return -EINVAL;
+diff --git a/drivers/bluetooth/hci_qca.c b/drivers/bluetooth/hci_qca.c
+index 4f87d4365dabac9e01c5bbd10cd7b268c5e8a937..ac4a1b41945277eb7e5249c4d11858c2e1ce8fbb 100644
+--- a/drivers/bluetooth/hci_qca.c
++++ b/drivers/bluetooth/hci_qca.c
+@@ -870,6 +870,20 @@ static int qca_enqueue(struct hci_uart *hu, struct sk_buff *skb)
+ {
+ 	unsigned long flags = 0, idle_delay;
+ 	struct qca_data *qca = hu->priv;
++	u8 pkt_type = hci_skb_pkt_type(skb);
++	u16 opcode = 0;
++	bool log_init_cmd;
++	bool log_wait_cmd = false;
++	bool ibs_disabled, suspending;
++	unsigned int txq_len = 0, waitq_len = 0;
++	u8 tx_state = 0;
++
++	if (pkt_type == HCI_COMMAND_PKT)
++		opcode = hci_skb_opcode(skb);
++
++	log_init_cmd = test_bit(HCI_UART_SKIP_VENDOR_SETUP, &hu->hdev_flags) &&
++		       pkt_type == HCI_COMMAND_PKT &&
++		       test_bit(HCI_INIT, &hu->hdev->flags);
+ 
+ 	BT_DBG("hu %p qca enq skb %p tx_ibs_state %d", hu, skb,
+ 	       qca->tx_ibs_state);
+@@ -882,7 +896,7 @@ static int qca_enqueue(struct hci_uart *hu, struct sk_buff *skb)
+ 	}
+ 
+ 	/* Prepend skb with frame type */
+-	memcpy(skb_push(skb, 1), &hci_skb_pkt_type(skb), 1);
++	memcpy(skb_push(skb, 1), &pkt_type, 1);
+ 
+ 	spin_lock_irqsave(&qca->hci_ibs_lock, flags);
+ 
+@@ -890,10 +904,21 @@ static int qca_enqueue(struct hci_uart *hu, struct sk_buff *skb)
+ 	 * Out-Of-Band(GPIOs control) sleep is selected.
+ 	 * Don't wake the device up when suspending.
+ 	 */
+-	if (test_bit(QCA_IBS_DISABLED, &qca->flags) ||
+-	    test_bit(QCA_SUSPENDING, &qca->flags)) {
++	ibs_disabled = test_bit(QCA_IBS_DISABLED, &qca->flags);
++	suspending = test_bit(QCA_SUSPENDING, &qca->flags);
++	if (ibs_disabled || suspending) {
+ 		skb_queue_tail(&qca->txq, skb);
++		if (log_init_cmd) {
++			tx_state = qca->tx_ibs_state;
++			txq_len = skb_queue_len(&qca->txq);
++			waitq_len = skb_queue_len(&qca->tx_wait_q);
++		}
+ 		spin_unlock_irqrestore(&qca->hci_ibs_lock, flags);
++		if (log_init_cmd)
++			bt_dev_info(hu->hdev,
++				    "QCA userspace init: cmd 0x%4.4x queued direct ibs_disabled=%d suspending=%d tx_state=%u txq=%u waitq=%u",
++				    opcode, ibs_disabled, suspending, tx_state,
++				    txq_len, waitq_len);
+ 		return 0;
+ 	}
+ 
+@@ -912,6 +937,7 @@ static int qca_enqueue(struct hci_uart *hu, struct sk_buff *skb)
+ 		skb_queue_tail(&qca->tx_wait_q, skb);
+ 
+ 		qca->tx_ibs_state = HCI_IBS_TX_WAKING;
++		log_wait_cmd = log_init_cmd;
+ 		/* Schedule a work queue to wake up device */
+ 		queue_work(qca->workqueue, &qca->ws_awake_device);
+ 		break;
+@@ -920,6 +946,7 @@ static int qca_enqueue(struct hci_uart *hu, struct sk_buff *skb)
+ 		BT_DBG("Device waking up, queueing packet");
+ 		/* Transient state; just keep packet for later */
+ 		skb_queue_tail(&qca->tx_wait_q, skb);
++		log_wait_cmd = log_init_cmd;
+ 		break;
+ 
+ 	default:
+@@ -929,8 +956,18 @@ static int qca_enqueue(struct hci_uart *hu, struct sk_buff *skb)
+ 		break;
+ 	}
+ 
++	if (log_wait_cmd) {
++		tx_state = qca->tx_ibs_state;
++		txq_len = skb_queue_len(&qca->txq);
++		waitq_len = skb_queue_len(&qca->tx_wait_q);
++	}
+ 	spin_unlock_irqrestore(&qca->hci_ibs_lock, flags);
+ 
++	if (log_wait_cmd)
++		bt_dev_warn(hu->hdev,
++			    "QCA userspace init: cmd 0x%4.4x waiting for IBS wake tx_state=%u txq=%u waitq=%u",
++			    opcode, tx_state, txq_len, waitq_len);
++
+ 	return 0;
+ }
+ 
+@@ -1163,6 +1200,7 @@ static int qca_recv_event(struct hci_dev *hdev, struct sk_buff *skb)
+ {
+ 	struct hci_uart *hu = hci_get_drvdata(hdev);
+ 	struct qca_data *qca = hu->priv;
++	u16 opcode = 0;
+ 
+ 	if (test_bit(QCA_DROP_VENDOR_EVENT, &qca->flags)) {
+ 		struct hci_event_hdr *hdr = (void *)skb->data;
+@@ -1184,6 +1222,25 @@ static int qca_recv_event(struct hci_dev *hdev, struct sk_buff *skb)
+ 
+ 		return 0;
+ 	}
++
++	if (test_bit(HCI_UART_SKIP_VENDOR_SETUP, &hu->hdev_flags) &&
++	    test_bit(HCI_INIT, &hdev->flags) &&
++	    skb->len >= HCI_EVENT_HDR_SIZE) {
++		struct hci_event_hdr *hdr = (void *)skb->data;
++
++		if (hdev->sent_cmd &&
++		    hdev->sent_cmd->len >= HCI_COMMAND_HDR_SIZE) {
++			struct hci_command_hdr *sent =
++				(void *)hdev->sent_cmd->data;
++
++			opcode = __le16_to_cpu(sent->opcode);
++		}
++
++		bt_dev_info(hdev,
++			    "QCA userspace init: event 0x%2.2x len %u for cmd 0x%4.4x",
++			    hdr->evt, hdr->plen, opcode);
++	}
++
+ 	/* We receive chip memory dump as an event packet, With a dedicated
+ 	 * handler followed by a hardware error event. When this event is
+ 	 * received we store dump into a file before closing hci. This
+@@ -1608,6 +1665,22 @@ static void qca_cmd_timeout(struct hci_dev *hdev)
+ {
+ 	struct hci_uart *hu = hci_get_drvdata(hdev);
+ 	struct qca_data *qca = hu->priv;
++	u16 opcode = 0;
++
++	if (hdev->sent_cmd && hdev->sent_cmd->len >= HCI_COMMAND_HDR_SIZE) {
++		struct hci_command_hdr *sent = (void *)hdev->sent_cmd->data;
++
++		opcode = __le16_to_cpu(sent->opcode);
++	}
++
++	if (test_bit(HCI_UART_SKIP_VENDOR_SETUP, &hu->hdev_flags))
++		bt_dev_err(hdev,
++			   "QCA userspace init: cmd timeout opcode=0x%4.4x init=%d ibs_disabled=%d tx_state=%u rx_state=%u txq=%u waitq=%u",
++			   opcode, test_bit(HCI_INIT, &hdev->flags),
++			   test_bit(QCA_IBS_DISABLED, &qca->flags),
++			   qca->tx_ibs_state, qca->rx_ibs_state,
++			   skb_queue_len(&qca->txq),
++			   skb_queue_len(&qca->tx_wait_q));
+ 
+ 	set_bit(QCA_SSR_TRIGGERED, &qca->flags);
+ 	if (qca->memdump_state == QCA_MEMDUMP_IDLE) {
+@@ -1792,14 +1865,32 @@ static int qca_setup(struct hci_uart *hu)
+ 		return ret;
+ 
+ 	clear_bit(QCA_ROM_FW, &qca->flags);
+-	/* Patch downloading has to be done without IBS mode */
+-	set_bit(QCA_IBS_DISABLED, &qca->flags);
++	qca->memdump_state = QCA_MEMDUMP_IDLE;
++	clear_bit(QCA_SSR_TRIGGERED, &qca->flags);
+ 
+ 	/* Enable controller to do both LE scan and BR/EDR inquiry
+ 	 * simultaneously.
+ 	 */
+ 	set_bit(HCI_QUIRK_SIMULTANEOUS_DISCOVERY, &hdev->quirks);
+ 
++	if (test_bit(HCI_UART_SKIP_VENDOR_SETUP, &hu->hdev_flags)) {
++		bt_dev_info(hdev,
++			    "QCA vendor setup skipped; userspace firmware init, IBS disabled for runtime");
++		set_bit(QCA_IBS_DISABLED, &qca->flags);
++		qca_debugfs_init(hdev);
++		hdev->hw_error = qca_hw_error;
++		hdev->cmd_timeout = qca_cmd_timeout;
++		hdev->prevent_wake = qca_prevent_wake;
++		if (soc_type == QCA_ROME)
++			hdev->set_bdaddr = qca_set_bdaddr_rome;
++		else
++			hdev->set_bdaddr = qca_set_bdaddr;
++		return 0;
++	}
++
++	/* Patch downloading has to be done without IBS mode */
++	set_bit(QCA_IBS_DISABLED, &qca->flags);
++
+ 	switch (soc_type) {
+ 	case QCA_QCA2066:
+ 		soc_name = "qca2066";
+@@ -1825,15 +1916,11 @@ static int qca_setup(struct hci_uart *hu)
+ 	}
+ 	bt_dev_info(hdev, "setting up %s", soc_name);
+ 
+-	qca->memdump_state = QCA_MEMDUMP_IDLE;
+-
+ retry:
+ 	ret = qca_power_on(hdev);
+ 	if (ret)
+ 		goto out;
+ 
+-	clear_bit(QCA_SSR_TRIGGERED, &qca->flags);
+-
+ 	switch (soc_type) {
+ 	case QCA_WCN3988:
+ 	case QCA_WCN3990:
+diff --git a/drivers/bluetooth/hci_uart.h b/drivers/bluetooth/hci_uart.h
+index fb4a2d0d8cc802d918948bd4392926e4c372bd6a..b53de0ff5bf0b3b2f8955db9ed3824d3b20b301c 100644
+--- a/drivers/bluetooth/hci_uart.h
++++ b/drivers/bluetooth/hci_uart.h
+@@ -41,6 +41,7 @@
+ #define HCI_UART_INIT_PENDING	3
+ #define HCI_UART_EXT_CONFIG	4
+ #define HCI_UART_VND_DETECT	5
++#define HCI_UART_SKIP_VENDOR_SETUP	6
+ 
+ struct hci_uart;
+ struct serdev_device;
+diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
+index a36afb47a63342ddd2bb0fa6ff78de897485af2f..46b96c6004466223698f5a553f6d780eaed35b4d 100644
+--- a/drivers/gpio/Kconfig
++++ b/drivers/gpio/Kconfig
+@@ -60,6 +60,7 @@ config DEBUG_GPIO
+ 
+ config GPIO_SYSFS
+ 	bool "/sys/class/gpio/... (sysfs interface)" if EXPERT
++	default y
+ 	depends on SYSFS
+ 	select GPIO_CDEV # We need to encourage the new ABI
+ 	help
+diff --git a/drivers/leds/Kconfig b/drivers/leds/Kconfig
+index 7484c4aa25f0228360d2475d516abb76989d34dc..835ed292dd9d2fc27472142031123179ad510897 100644
+--- a/drivers/leds/Kconfig
++++ b/drivers/leds/Kconfig
+@@ -286,6 +286,12 @@ config LEDS_QTI_FLASH
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called leds-qti-flash.
+ 
++config LEDS_QTI_FLASH_DBG
++       tristate "Support for QTI Flash LEDs for FCT TEST"
++       depends on LEDS_CLASS_FLASH
++       help
++         This driver supports flash LED for FCT TEST
++
+ config LEDS_QPNP_FLASH_V2
+ 	tristate "Support for QPNP V2 Flash LEDs"
+ 	depends on LEDS_CLASS && MFD_SPMI_PMIC
+diff --git a/drivers/power/Kconfig b/drivers/power/Kconfig
+index 696bf77a70420e8307156f97d6662557df910eff..89ac469f54bdefc487990382eb097d20381e3011 100644
+--- a/drivers/power/Kconfig
++++ b/drivers/power/Kconfig
+@@ -1,3 +1,4 @@
+ # SPDX-License-Identifier: GPL-2.0-only
+ source "drivers/power/reset/Kconfig"
+ source "drivers/power/supply/Kconfig"
++source "drivers/power/quectel/Kconfig"
+diff --git a/drivers/power/Makefile b/drivers/power/Makefile
+index effbf0377f3218a86cb0b07514cbe6051f4c0b68..f670c0e72ad96f58727feba2dbcfad9d51391761 100644
+--- a/drivers/power/Makefile
++++ b/drivers/power/Makefile
+@@ -1,3 +1,4 @@
+ # SPDX-License-Identifier: GPL-2.0-only
+ obj-$(CONFIG_POWER_RESET)	+= reset/
+ obj-$(CONFIG_POWER_SUPPLY)	+= supply/
++obj-y	+= quectel/
+diff --git a/drivers/power/quectel/Kconfig b/drivers/power/quectel/Kconfig
+new file mode 100644
+index 0000000000000000000000000000000000000000..130c09f627d4753c686c484895dd0be9d498861f
+--- /dev/null
++++ b/drivers/power/quectel/Kconfig
+@@ -0,0 +1,4 @@
++config QUEC_POWER_CTRL
++	bool "quectel power ctrl driver"
++	help
++	  This driver supports set device Power config by gpio.
+diff --git a/drivers/power/quectel/Makefile b/drivers/power/quectel/Makefile
+new file mode 100644
+index 0000000000000000000000000000000000000000..2e4ce610602ca46a0d440bd73eee7c65535b9de2
+--- /dev/null
++++ b/drivers/power/quectel/Makefile
+@@ -0,0 +1 @@
++obj-m += quec_power_ctrl.o
+diff --git a/drivers/power/quectel/quec_power_ctrl.c b/drivers/power/quectel/quec_power_ctrl.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..0598120d3b675b81e5b71f3d40e6e7b2694f937c
+--- /dev/null
++++ b/drivers/power/quectel/quec_power_ctrl.c
+@@ -0,0 +1,612 @@
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/of.h>
++#include <linux/gpio/consumer.h>
++#include <linux/device.h>
++#include <linux/slab.h>
++#include <linux/delay.h>
++#include <linux/jiffies.h>
++#include <linux/workqueue.h>
++#include <linux/usb.h>
++#include <linux/atomic.h>
++#include <linux/bitops.h>
++#include <linux/extcon.h>
++#include <linux/notifier.h>
++
++/*
++ * GPIO Polarity Reference:
++ * ========================
++ *   usbhub1_en: ACTIVE LOW  - 0=power on, 1=power off
++ *   usbhub2_en: ACTIVE HIGH - 0=off, 1=on
++ *   port_pw_en: ACTIVE HIGH - 0=off, 1=on
++ *   mode_sw:    logic       - 0=host mode, 1=device mode
++ *   eth_en:     ACTIVE HIGH - 0=off, 1=on
++ */
++
++/* Hub check phases */
++enum {
++    CHECK_PHASE_SCAN1 = 0,      /* 1st scan: check 4 hub entities */
++    CHECK_PHASE_SCAN2,          /* 2nd scan: verify recovery */
++    CHECK_PHASE_HUB1_CYCLE,     /* hub1 power cycle if needed */
++    CHECK_PHASE_DONE,           /* check complete */
++};
++
++struct quec_power_ctrl_data {
++    struct gpio_desc *usbhub1_en;   // hub1: 0=on, 1=off (active low)
++    struct gpio_desc *usbhub2_en;   // hub2: 0=off, 1=on (active high)
++    struct gpio_desc *port_pw_en;   // port: 0=off, 1=on
++    struct gpio_desc *mode_sw;      // 0=host, 1=device
++    struct gpio_desc *eth_en;       // eth: 0=off, 1=on
++
++    // extcon monitoring (hw switch/CC path)
++    struct extcon_dev *extcon;      // EXTCON_USB_HOST producer
++    struct notifier_block port_pw_nb;
++
++    // hub async check
++    struct device      *dev;
++    struct workqueue_struct *wq;    // dedicated workqueue
++    struct delayed_work check_work;
++    atomic_t            in_host;     // 1=in host mode
++    atomic_t            check_phase; // current phase
++    struct mutex        mode_lock;   // mode switch mutex
++};
++
++/* Onboard Hub Detection: 2 USB3.0 hubs x (HS+SS) = 4 entities */
++#define CHECK_DELAY_MS    6000   // check delay after host switch (ms)
++#define HUB2_RESTART_MS   500    // hub2 power-off duration (ms)
++
++struct quec_hub_expect {
++    int         bus;
++    const char *devpath;
++    u16         vid;
++    u16         pid;
++    const char *name;
++};
++
++static const struct quec_hub_expect quec_hub_expects[] = {
++    { 1, "1",   0x1a86, 0x80a0, "hub1 HS (1-1)"   },
++    { 2, "1",   0x1a86, 0x80a1, "hub1 SS (2-1)"   },
++    { 1, "1.2", 0x1a86, 0x80a0, "hub2 HS (1-1.2)" },
++    { 2, "1.2", 0x1a86, 0x80a1, "hub2 SS (2-1.2)" },
++};
++#define QUEC_HUB_EXPECT_COUNT \
++    (sizeof(quec_hub_expects) / sizeof(quec_hub_expects[0]))
++
++static ssize_t usbhub1_en_show(struct device *dev,
++                              struct device_attribute *attr, char *buf)
++{
++    struct quec_power_ctrl_data *data = dev_get_drvdata(dev);
++
++    if (!data->usbhub1_en)
++        return sprintf(buf, "no-gpio\n");
++    return sprintf(buf, "%d\n", gpiod_get_value_cansleep(data->usbhub1_en));
++}
++
++static ssize_t usbhub1_en_store(struct device *dev,
++                               struct device_attribute *attr,
++                               const char *buf, size_t count)
++{
++    struct quec_power_ctrl_data *data = dev_get_drvdata(dev);
++    int val;
++
++    if (!data->usbhub1_en)
++        return -ENODEV;
++
++    if (kstrtoint(buf, 0, &val))
++        return -EINVAL;
++
++    gpiod_set_value_cansleep(data->usbhub1_en, val ? 1 : 0);
++    return count;
++}
++static DEVICE_ATTR_RW(usbhub1_en);
++
++static ssize_t usbhub2_en_show(struct device *dev,
++                              struct device_attribute *attr, char *buf)
++{
++    struct quec_power_ctrl_data *data = dev_get_drvdata(dev);
++
++    if (!data->usbhub2_en)
++        return sprintf(buf, "no-gpio\n");
++    return sprintf(buf, "%d\n", gpiod_get_value_cansleep(data->usbhub2_en));
++}
++
++static ssize_t usbhub2_en_store(struct device *dev,
++                               struct device_attribute *attr,
++                               const char *buf, size_t count)
++{
++    struct quec_power_ctrl_data *data = dev_get_drvdata(dev);
++    int val;
++
++    if (!data->usbhub2_en)
++        return -ENODEV;
++
++    if (kstrtoint(buf, 0, &val))
++        return -EINVAL;
++
++    gpiod_set_value_cansleep(data->usbhub2_en, val ? 1 : 0);
++    return count;
++}
++static DEVICE_ATTR_RW(usbhub2_en);
++
++static ssize_t port_pw_en_show(struct device *dev,
++    struct device_attribute *attr, char *buf)
++{
++    struct quec_power_ctrl_data *data = dev_get_drvdata(dev);
++
++    if (!data->port_pw_en)
++        return sprintf(buf, "no-gpio\n");
++    return sprintf(buf, "%d\n", gpiod_get_value_cansleep(data->port_pw_en));
++}
++
++static ssize_t port_pw_en_store(struct device *dev,
++     struct device_attribute *attr,
++     const char *buf, size_t count)
++{
++    struct quec_power_ctrl_data *data = dev_get_drvdata(dev);
++    int val;
++
++    if (!data->port_pw_en)
++        return -ENODEV;
++
++    if (kstrtoint(buf, 0, &val))
++        return -EINVAL;
++
++    gpiod_set_value_cansleep(data->port_pw_en, val ? 1 : 0);
++    return count;
++}
++static DEVICE_ATTR_RW(port_pw_en);
++
++static int quec_port_pw_extcon_notifier(struct notifier_block *nb,
++                                        unsigned long event, void *ptr)
++{
++    struct quec_power_ctrl_data *data =
++        container_of(nb, struct quec_power_ctrl_data, port_pw_nb);
++
++    dev_info(data->dev, "extcon: EXTCON_USB_HOST=%lu -> port_pw_en=%d\n",
++             event, event > 0 ? 1 : 0);
++
++    if (data->port_pw_en)
++        gpiod_set_value_cansleep(data->port_pw_en, event > 0 ? 1 : 0);
++
++    return NOTIFY_OK;
++}
++
++static ssize_t mode_sw_show(struct device *dev,
++                           struct device_attribute *attr, char *buf)
++{
++    struct quec_power_ctrl_data *data = dev_get_drvdata(dev);
++
++    if (!data->mode_sw)
++        return sprintf(buf, "no-gpio\n");
++    return sprintf(buf, "%d\n", gpiod_get_value_cansleep(data->mode_sw));
++}
++
++/* Hub scan result: found_mask tracks which hubs are present */
++struct quec_hub_scan {
++    unsigned int found_mask;
++};
++
++static int quec_hub_match(struct usb_device *udev, void *data)
++{
++    struct quec_hub_scan *scan = data;
++    int i;
++
++    for (i = 0; i < (int)QUEC_HUB_EXPECT_COUNT; i++) {
++        if (udev->bus->busnum == quec_hub_expects[i].bus &&
++            strcmp(udev->devpath, quec_hub_expects[i].devpath) == 0 &&
++            le16_to_cpu(udev->descriptor.idVendor) == quec_hub_expects[i].vid &&
++            le16_to_cpu(udev->descriptor.idProduct) == quec_hub_expects[i].pid) {
++            scan->found_mask |= (1u << i);
++        }
++    }
++    return 0;
++}
++
++static void quec_power_cycle_hub(struct quec_power_ctrl_data *ctrl,
++                                 struct gpio_desc *gpio, const char *name,
++                                 int off_val, int on_val)
++{
++    gpiod_set_value_cansleep(gpio, off_val);
++    usleep_range(HUB2_RESTART_MS * 1000, HUB2_RESTART_MS * 1000 + 100000);
++    gpiod_set_value_cansleep(gpio, on_val);
++}
++
++// run USB scan, return found_mask
++static unsigned int __scan_usb_hubs(void)
++{
++    struct quec_hub_scan scan;
++
++    scan.found_mask = 0;
++    usb_for_each_dev(&scan, quec_hub_match);
++    return scan.found_mask;
++}
++
++// step-by-step host check (avoid long blocking)
++static void quec_host_check_work(struct work_struct *work)
++{
++    struct quec_power_ctrl_data *ctrl =
++        container_of(to_delayed_work(work),
++                     struct quec_power_ctrl_data, check_work);
++    unsigned int found_mask;
++    int present_cnt;
++    int phase;
++    int i;
++
++    if (!atomic_read(&ctrl->in_host)) {
++        dev_err(ctrl->dev, "host check: skipped (not in host mode)\n");
++        return;
++    }
++
++    phase = atomic_read(&ctrl->check_phase);
++    dev_info(ctrl->dev, "host check: phase=%d run\n", phase);
++
++    switch (phase) {
++
++    case CHECK_PHASE_SCAN1:
++        // 1st scan: check all 4 hubs
++        found_mask = __scan_usb_hubs();
++        present_cnt = hweight32(found_mask);
++
++        for (i = 0; i < (int)QUEC_HUB_EXPECT_COUNT; i++) {
++            bool present = !!(found_mask & (1u << i));
++            dev_info(ctrl->dev, "host check: %s present=%d\n",
++                    quec_hub_expects[i].name, present);
++        }
++
++        if (present_cnt == QUEC_HUB_EXPECT_COUNT) {
++            dev_info(ctrl->dev, "host check: all 4 hubs ok, no action\n");
++            atomic_set(&ctrl->check_phase, CHECK_PHASE_DONE);
++            return;
++        }
++
++        // need to cycle hub2
++        if (ctrl->usbhub2_en) {
++            dev_info(ctrl->dev, "host check: %d/4 hubs, power-cycle hub2\n",
++                present_cnt);
++            quec_power_cycle_hub(ctrl, ctrl->usbhub2_en, "hub2", 0, 1);
++            // schedule 2nd scan after hub2 recovery
++            atomic_set(&ctrl->check_phase, CHECK_PHASE_SCAN2);
++            queue_delayed_work(ctrl->wq, &ctrl->check_work,
++                              msecs_to_jiffies(2500));
++        } else {
++            // no hub2 GPIO, try hub1
++            atomic_set(&ctrl->check_phase, CHECK_PHASE_HUB1_CYCLE);
++            queue_delayed_work(ctrl->wq, &ctrl->check_work,
++                              msecs_to_jiffies(0));
++        }
++        break;
++
++    case CHECK_PHASE_SCAN2:
++        // 2nd scan: verify hub2 recovery
++        found_mask = __scan_usb_hubs();
++        present_cnt = hweight32(found_mask);
++
++        for (i = 0; i < (int)QUEC_HUB_EXPECT_COUNT; i++) {
++            bool present = !!(found_mask & (1u << i));
++            dev_info(ctrl->dev, "host check: %s present=%d (after hub2 cycle)\n",
++                    quec_hub_expects[i].name, present);
++        }
++
++        if (present_cnt == QUEC_HUB_EXPECT_COUNT) {
++            dev_info(ctrl->dev, "host check: hub2 power-cycle recovered, "
++                                "all 4 hubs ok\n");
++            atomic_set(&ctrl->check_phase, CHECK_PHASE_DONE);
++            return;
++        }
++
++        // hub2 cycle failed, try hub1
++        atomic_set(&ctrl->check_phase, CHECK_PHASE_HUB1_CYCLE);
++        queue_delayed_work(ctrl->wq, &ctrl->check_work,
++                          msecs_to_jiffies(0));
++        break;
++
++    case CHECK_PHASE_HUB1_CYCLE:
++        // hub1 power cycle (last resort)
++        if (ctrl->usbhub1_en) {
++            dev_info(ctrl->dev, "host check: power-cycle hub1\n");
++            quec_power_cycle_hub(ctrl, ctrl->usbhub1_en, "hub1", 1, 0);
++        }
++        atomic_set(&ctrl->check_phase, CHECK_PHASE_DONE);
++        break;
++
++    default:
++        dev_warn(ctrl->dev, "host check: unknown phase %d\n", phase);
++        atomic_set(&ctrl->check_phase, CHECK_PHASE_DONE);
++        break;
++    }
++}
++
++static ssize_t mode_sw_store(struct device *dev,
++                            struct device_attribute *attr,
++                            const char *buf, size_t count)
++{
++    struct quec_power_ctrl_data *data = dev_get_drvdata(dev);
++    int val;
++
++    if (!data->mode_sw)
++        return -ENODEV;
++
++    if (kstrtoint(buf, 0, &val))
++        return -EINVAL;
++
++    /* run switch sequence only on real GPIO change */
++    if (gpiod_get_value_cansleep(data->mode_sw) != (val ? 1 : 0)) {
++        mutex_lock(&data->mode_lock);
++
++        if (data->usbhub1_en)
++            gpiod_set_value_cansleep(data->usbhub1_en, 1);  // hub1 off
++        if (data->eth_en)
++            gpiod_set_value_cansleep(data->eth_en, 0);
++
++        // wait for discharge settle
++        usleep_range(40000, 60000);
++
++        // switch USB mode
++        gpiod_set_value_cansleep(data->mode_sw, val ? 1 : 0);
++
++        // wait for mode switch
++        usleep_range(30000, 50000);
++
++        if (data->usbhub1_en) {
++            gpiod_set_value_cansleep(data->usbhub1_en, 0);
++            usleep_range(150000, 200000);
++        }
++        if (data->eth_en) {
++            gpiod_set_value_cansleep(data->eth_en, 1);
++        }
++
++        mutex_unlock(&data->mode_lock);
++    }
++
++    /* hub check triggers only here (sw path); extcon only drives port_pw_en */
++    if (val == 0) {
++        atomic_set(&data->in_host, 1);
++        atomic_set(&data->check_phase, CHECK_PHASE_SCAN1);
++        dev_info(data->dev, "mode_sw: switch to HOST, schedule check_work "
++                            "in %dms\n", CHECK_DELAY_MS);
++        queue_delayed_work(data->wq, &data->check_work,
++                          msecs_to_jiffies(CHECK_DELAY_MS));
++    } else {
++        cancel_delayed_work_sync(&data->check_work);
++        atomic_set(&data->in_host, 0);
++        atomic_set(&data->check_phase, CHECK_PHASE_DONE);
++        dev_info(data->dev, "mode_sw: switch to DEVICE\n");
++    }
++
++    /* no extcon fallback: drive port_pw_en directly */
++    if (!data->extcon && data->port_pw_en)
++        gpiod_set_value_cansleep(data->port_pw_en, val == 0 ? 1 : 0);
++
++    return count;
++}
++static DEVICE_ATTR_RW(mode_sw);
++
++static ssize_t eth_en_show(struct device *dev,
++                           struct device_attribute *attr, char *buf)
++{
++    struct quec_power_ctrl_data *data = dev_get_drvdata(dev);
++
++    if (!data->eth_en)
++        return sprintf(buf, "no-gpio\n");
++    return sprintf(buf, "%d\n", gpiod_get_value_cansleep(data->eth_en));
++}
++
++static ssize_t eth_en_store(struct device *dev,
++                            struct device_attribute *attr,
++                            const char *buf, size_t count)
++{
++    struct quec_power_ctrl_data *data = dev_get_drvdata(dev);
++    int val;
++
++    if (!data->eth_en)
++        return -ENODEV;
++
++    if (kstrtoint(buf, 0, &val))
++        return -EINVAL;
++
++    gpiod_set_value_cansleep(data->eth_en, val ? 1 : 0);
++    return count;
++}
++static DEVICE_ATTR_RW(eth_en);
++
++static struct attribute *quec_power_attrs[] = {
++    &dev_attr_usbhub1_en.attr,
++    &dev_attr_usbhub2_en.attr,
++    &dev_attr_port_pw_en.attr,
++    &dev_attr_mode_sw.attr,
++    &dev_attr_eth_en.attr,
++    NULL,
++};
++
++static const struct attribute_group quec_power_group = {
++    .attrs = quec_power_attrs,
++};
++
++static int quec_power_ctrl_probe(struct platform_device *pdev)
++{
++    struct quec_power_ctrl_data *data;
++    int ret;
++
++    data = devm_kzalloc(&pdev->dev, sizeof(*data), GFP_KERNEL);
++    if (!data)
++        return -ENOMEM;
++
++    data->dev = &pdev->dev;
++
++    data->usbhub1_en = devm_gpiod_get_optional(&pdev->dev, "usbhub1-en", GPIOD_OUT_HIGH);
++    data->usbhub2_en = devm_gpiod_get_optional(&pdev->dev, "usbhub2-en", GPIOD_OUT_LOW);
++    data->port_pw_en = devm_gpiod_get_optional(&pdev->dev, "port-pw-en", GPIOD_OUT_LOW);
++    data->mode_sw    = devm_gpiod_get_optional(&pdev->dev, "mode-sw", GPIOD_OUT_LOW);
++    data->eth_en     = devm_gpiod_get_optional(&pdev->dev, "eth-en", GPIOD_OUT_LOW);
++
++    platform_set_drvdata(pdev, data);
++
++    data->extcon = NULL;
++    if (of_property_read_bool(pdev->dev.of_node, "extcon")) {
++        data->extcon = extcon_get_edev_by_phandle(&pdev->dev, 0);
++        if (IS_ERR(data->extcon)) {
++            ret = PTR_ERR(data->extcon);
++            data->extcon = NULL;
++            if (ret == -ENODEV) {
++                dev_info(&pdev->dev,
++                         "quec_power_ctrl: extcon phandle resolve failed, "
++                         "skip hw-switch monitoring\n");
++            } else {
++                // real error (-EPROBE_DEFER etc): return
++                dev_info(&pdev->dev,
++                         "quec_power_ctrl: get extcon failed ret=%d\n", ret);
++                return ret;
++            }
++        }
++    } else {
++        dev_info(&pdev->dev,
++                 "quec_power_ctrl: no extcon property, "
++                 "skip hw-switch monitoring\n");
++    }
++
++    // init mutex for mode switch (before sysfs expose to avoid race)
++    mutex_init(&data->mode_lock);
++
++    // init work + atomic state before sysfs expose
++    atomic_set(&data->in_host, 0);
++    atomic_set(&data->check_phase, CHECK_PHASE_DONE);  // default: done
++    INIT_DELAYED_WORK(&data->check_work, quec_host_check_work);
++
++    // create dedicated ordered workqueue
++    data->wq = alloc_ordered_workqueue("quec_power_ctrl",
++                                       WQ_MEM_RECLAIM | WQ_FREEZABLE);
++    if (!data->wq) {
++        dev_err(&pdev->dev, "quec_power_ctrl: failed to alloc workqueue\n");
++        return -ENOMEM;
++    }
++
++    // sysfs last: only expose after mutex/work/wq all ready
++    ret = sysfs_create_group(&pdev->dev.kobj, &quec_power_group);
++    if (ret) {
++        dev_err(&pdev->dev, "quec_power_ctrl failed to create sysfs, ret: %d\n", ret);
++        destroy_workqueue(data->wq);
++        data->wq = NULL;
++        return ret;
++    }
++
++    if (data->usbhub1_en) {
++        /* GPIOD_OUT_HIGH already set it to 1(off), just turn on */
++        usleep_range(15000, 25000);                       // wait for GPIO stable
++        gpiod_set_value_cansleep(data->usbhub1_en, 0);   // on (active low)
++    }
++
++    if (data->usbhub2_en) {
++        /* Wait for hub1 stable before powering hub2 */
++        usleep_range(80000, 100000);                      // hub1 init time
++        gpiod_set_value_cansleep(data->usbhub2_en, 1);
++    }
++
++    if (data->eth_en) {
++        /* ETH PHY power-up settle time */
++        usleep_range(40000, 60000);                       // PHY init time
++        gpiod_set_value_cansleep(data->eth_en, 1);
++    }
++
++    if (data->mode_sw) {
++        gpiod_set_value_cansleep(data->mode_sw, 0);
++    }
++
++    /* sync initial port_pw_en from extcon state (notifier fires on change only) */
++    if (data->extcon) {
++        int host;
++
++        data->port_pw_nb.notifier_call = quec_port_pw_extcon_notifier;
++        ret = extcon_register_notifier(data->extcon, EXTCON_USB_HOST,
++                                       &data->port_pw_nb);
++        if (ret) {
++            dev_err(&pdev->dev,
++                    "quec_power_ctrl: register extcon notifier failed %d\n",
++                    ret);
++            data->extcon = NULL;   /* avoid unregister on unregistered nb */
++        } else {
++            host = extcon_get_state(data->extcon, EXTCON_USB_HOST);
++            dev_info(&pdev->dev,
++                     "quec_power_ctrl: extcon initial state=%d (%s)\n",
++                     host, host > 0 ? "host" : "device");
++            if (data->port_pw_en)
++                gpiod_set_value_cansleep(data->port_pw_en, host > 0 ? 1 : 0);
++        }
++    }
++
++    /* no extcon (or register failed): default port_pw_en to host */
++    if (!data->extcon && data->port_pw_en)
++        gpiod_set_value_cansleep(data->port_pw_en, 1);
++
++    dev_info(&pdev->dev, "quec_power_ctrl driver loaded\n");
++    return 0;
++}
++
++static int quec_power_ctrl_remove(struct platform_device *pdev)
++{
++    struct quec_power_ctrl_data *data = platform_get_drvdata(pdev);
++
++    if (data->extcon)
++        extcon_unregister_notifier(data->extcon, EXTCON_USB_HOST,
++                                   &data->port_pw_nb);
++
++    /* remove sysfs first so no store callback can reach wq afterwards */
++    sysfs_remove_group(&pdev->dev.kobj, &quec_power_group);
++
++    cancel_delayed_work_sync(&data->check_work);
++
++    if (data->wq)
++        destroy_workqueue(data->wq);
++
++    return 0;
++}
++
++static void quec_power_ctrl_shutdown(struct platform_device *pdev)
++{
++    struct quec_power_ctrl_data *data = platform_get_drvdata(pdev);
++
++    if (!data)
++        return;
++
++    if (data->extcon)
++        extcon_unregister_notifier(data->extcon, EXTCON_USB_HOST,
++                                   &data->port_pw_nb);
++
++    cancel_delayed_work_sync(&data->check_work);
++    atomic_set(&data->in_host, 0);
++    atomic_set(&data->check_phase, CHECK_PHASE_DONE);
++
++    if (data->eth_en)
++        gpiod_set_value_cansleep(data->eth_en, 0);      // eth off
++
++    if (data->port_pw_en)
++        gpiod_set_value_cansleep(data->port_pw_en, 0);  // port off
++
++    if (data->usbhub2_en)
++        gpiod_set_value_cansleep(data->usbhub2_en, 0);  // hub2 off
++
++    if (data->usbhub1_en)
++        gpiod_set_value_cansleep(data->usbhub1_en, 1);  // hub1 off (active low)
++
++    dev_info(&pdev->dev, "quec_power_ctrl powered off on shutdown\n");
++}
++
++static const struct of_device_id quec_power_ctrl_of_match[] = {
++    { .compatible = "quectel,gpio-ctrl" },
++    { /* sentinel */ }
++};
++MODULE_DEVICE_TABLE(of, quec_power_ctrl_of_match);
++
++static struct platform_driver quec_power_ctrl_driver = {
++    .probe  = quec_power_ctrl_probe,
++    .remove = quec_power_ctrl_remove,
++    .shutdown = quec_power_ctrl_shutdown,
++    .driver = {
++        .name           = "quec_power_ctrl",
++        .of_match_table = quec_power_ctrl_of_match,
++    },
++};
++module_platform_driver(quec_power_ctrl_driver);
++
++MODULE_LICENSE("GPL");
++MODULE_AUTHOR("Igni Li");
++MODULE_DESCRIPTION("Multi-GPIO control driver with independent sysfs callbacks");
+diff --git a/drivers/power/supply/Kconfig b/drivers/power/supply/Kconfig
+index 949734d59e48878d15a8ae24d63c7b4ad323410f..6f4722c39728efea6d61e2048bcdf69125fd8169 100644
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -134,6 +134,11 @@ config BATTERY_CW2015
+ 	  This driver can also be built as a module. If so, the module will be
+ 	  called cw2015_battery.
+ 
++config VIRTUAL_CHARGER
++	tristate "virtual charger driver"
++	help
++	  Say Y here to enable support for the virtual chips. No PMI hardware used.
++
+ config BATTERY_DS2760
+ 	tristate "DS2760 battery driver (HP iPAQ & others)"
+ 	depends on W1
+diff --git a/drivers/power/supply/Makefile b/drivers/power/supply/Makefile
+index b3bb26e33c3f3025864e4d5d9925596a56c0ac25..e33c96cae76c08aa63ac0412cd9e36ebce722d10 100644
+--- a/drivers/power/supply/Makefile
++++ b/drivers/power/supply/Makefile
+@@ -106,4 +106,5 @@ obj-$(CONFIG_BATTERY_ACER_A500)	+= acer_a500_battery.o
+ obj-$(CONFIG_BATTERY_SURFACE)	+= surface_battery.o
+ obj-$(CONFIG_CHARGER_SURFACE)	+= surface_charger.o
+ obj-$(CONFIG_QTI_BATTERY_CHARGER)	+= qti_battery_charger.o
++obj-$(CONFIG_VIRTUAL_CHARGER)	+= virtual_charger.o
+ obj-$(CONFIG_QCOM_POWER_SUPPLY)	+= qcom/
+diff --git a/drivers/power/supply/qcom/qpnp-smblite.c b/drivers/power/supply/qcom/qpnp-smblite.c
+index 5eb277a7402869f4b0c2ff155bb98fba7b9832d8..c1d5d390df99b7a7c9af5a3db31d22f2b47774eb 100644
+--- a/drivers/power/supply/qcom/qpnp-smblite.c
++++ b/drivers/power/supply/qcom/qpnp-smblite.c
+@@ -594,6 +594,9 @@ static int smblite_usb_set_prop(struct power_supply *psy,
+ 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
+ 		rc = smblite_lib_set_prop_current_max(chg, val);
+ 		break;
++	case POWER_SUPPLY_PROP_USB_TYPE:
++		rc = smblite_lib_set_prop_usb_type(chg, val->intval);
++		break;
+ 	default:
+ 		pr_err("usb set prop %d is not supported\n", psp);
+ 		rc = -EINVAL;
+@@ -608,6 +611,7 @@ static int smblite_usb_prop_is_writeable(struct power_supply *psy,
+ {
+ 	switch (psp) {
+ 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
++	case POWER_SUPPLY_PROP_USB_TYPE:
+ 		return 1;
+ 	default:
+ 		break;
+@@ -712,7 +716,11 @@ static int smblite_batt_get_prop(struct power_supply *psy,
+ 					      BATT_PROFILE_VOTER);
+ 		break;
+ 	case POWER_SUPPLY_PROP_CURRENT_NOW:
+-		rc = smblite_lib_get_batt_current_now(chg, &val->intval);
++		if (container_of(chg, struct smblite, chg)->dt.no_battery) {
++			val->intval = 0;
++		} else {
++			rc = smblite_lib_get_batt_current_now(chg, &val->intval);
++		}
+ 		break;
+ 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
+ 		val->intval = get_client_vote(chg->fcc_votable,
+@@ -1466,7 +1474,7 @@ static struct smb_irq_info smblite_irqs[] = {
+ 	/* DCDC IRQs */
+ 	[OTG_FAIL_IRQ] = {
+ 		.name		= "otg-fail",
+-		.handler	= smblite_default_irq_handler,
++		.handler	= smblite_otg_fail_irq_handler,
+ 	},
+ 	[OTG_FAULT_IRQ] = {
+ 		.name		= "otg-fault",
+@@ -1767,8 +1775,9 @@ static void smblite_free_interrupts(struct smb_charger *chg)
+ static int force_batt_psy_update_write(void *data, u64 val)
+ {
+ 	struct smb_charger *chg = data;
+-
+-	power_supply_changed(chg->batt_psy);
++	if (chg->batt_psy) {
++		power_supply_changed(chg->batt_psy);
++	}
+ 	return 0;
+ }
+ DEFINE_DEBUGFS_ATTRIBUTE(force_batt_psy_update_ops, NULL,
+@@ -1784,6 +1793,22 @@ static int force_usb_psy_update_write(void *data, u64 val)
+ DEFINE_DEBUGFS_ATTRIBUTE(force_usb_psy_update_ops, NULL,
+ 			force_usb_psy_update_write, "0x%02llx\n");
+ 
++static int force_vbus_state_write(void *data, u64 val)
++{
++	struct smb_charger *chg = data;
++	if (chg != NULL) {
++	    if (val == 1) {
++		smblite_lib_set_vbus_state(chg, true);
++		pr_err("enable vbus\n");
++	    } else if (val == 0) {
++		smblite_lib_set_vbus_state(chg, false);
++		pr_err("disable vbus\n");
++	    }
++	}
++	return 0;
++}
++DEFINE_DEBUGFS_ATTRIBUTE(force_vbus_state_fops, NULL,
++			force_vbus_state_write, "0x%02llx\n");
+ 
+ static ssize_t smblite_debug_mask_read(struct file *filp, char __user *buffer,
+ 		size_t count, loff_t *ppos)
+@@ -1850,11 +1875,14 @@ static void smblite_create_debugfs(struct smblite *chip)
+ 		return;
+ 	}
+ 
++	if (chip->chg.batt_psy) {
+ 	file = debugfs_create_file("force_batt_psy_update", 0600,
+-			    chip->dfs_root, chip, &force_batt_psy_update_ops);
++				   chip->dfs_root, chip,
++				   &force_batt_psy_update_ops);
+ 	if (IS_ERR_OR_NULL(file))
+ 		pr_err("Couldn't create force_batt_psy_update file rc=%ld\n",
+-			(long)file);
++		       (long)file);
++	}
+ 
+ 	file = debugfs_create_file("force_usb_psy_update", 0600,
+ 			    chip->dfs_root, chip, &force_usb_psy_update_ops);
+@@ -1866,6 +1894,11 @@ static void smblite_create_debugfs(struct smblite *chip)
+ 			&smblite_debug_mask_fops);
+ 	if (IS_ERR_OR_NULL(file))
+ 		pr_err("Couldn't create debug_mask file rc=%ld\n", (long)file);
++	file = debugfs_create_file("force_vbus_state", 0600,
++			    chip->dfs_root, chip, &force_vbus_state_fops);
++	if (IS_ERR_OR_NULL(file))
++		pr_err("Couldn't create force_vbus_state file rc=%ld\n",
++			(long)file);
+ }
+ 
+ #else
+@@ -2125,6 +2158,8 @@ static int smblite_probe(struct platform_device *pdev)
+ 	chg->debug_mask = &__debug_mask;
+ 	chg->weak_chg_icl_ua = 500000;
+ 	chg->mode = PARALLEL_MASTER;
++	chg->disable_parallel_charging = of_property_read_bool(pdev->dev.of_node,
++						"qcom,disable-parallel-charging");
+ 	chg->irq_info = smblite_irqs;
+ 	chg->otg_present = false;
+ 	chg->step_chg_enabled = true;
+@@ -2135,6 +2170,11 @@ static int smblite_probe(struct platform_device *pdev)
+ 		return -EINVAL;
+ 	}
+ 
++	chg->usb_vbus_ctrl = devm_gpiod_get_optional(&pdev->dev, "vbus-ctrl", GPIOD_OUT_LOW);
++	if (chg->usb_vbus_ctrl) {
++		gpiod_set_value_cansleep(chg->usb_vbus_ctrl, 0);
++	}
++
+ 	rc = smblite_iio_init(chip, pdev, indio_dev);
+ 	if (rc < 0)
+ 		return rc;
+@@ -2189,10 +2229,12 @@ static int smblite_probe(struct platform_device *pdev)
+ 		goto cleanup;
+ 	}
+ 
+-	rc = smblite_init_batt_psy(chip);
+-	if (rc < 0) {
+-		pr_err("Couldn't initialize batt psy rc=%d\n", rc);
+-		goto cleanup;
++	if (!chip->dt.no_battery) {
++		rc = smblite_init_batt_psy(chip);
++		if (rc < 0) {
++			pr_err("Couldn't initialize batt psy rc=%d\n", rc);
++			goto cleanup;
++		}
+ 	}
+ 
+ 	rc = smblite_init_typec_class(chip);
+diff --git a/drivers/power/supply/qcom/smblite-iio.c b/drivers/power/supply/qcom/smblite-iio.c
+index 839e983d6acd0ff7fc70beff7f7d899404bb0750..a9f42b7dc2afbc125e0982b585a40c5cbab4436b 100644
+--- a/drivers/power/supply/qcom/smblite-iio.c
++++ b/drivers/power/supply/qcom/smblite-iio.c
+@@ -208,7 +208,9 @@ int smblite_iio_set_prop(struct smb_charger *chg, int channel, int val)
+ 		chg->fcc_stepper_enable = val;
+ 		break;
+ 	case PSY_IIO_DIE_HEALTH:
+-		power_supply_changed(chg->batt_psy);
++		if (chg->batt_psy) {
++			power_supply_changed(chg->batt_psy);
++		}
+ 		break;
+ 	case PSY_IIO_SYS_SOC:
+ 		rc = smblite_lib_set_prop_batt_sys_soc(chg, val);
+diff --git a/drivers/power/supply/qcom/smblite-lib.c b/drivers/power/supply/qcom/smblite-lib.c
+index 4902f79dcbc7a41123a696a77ae57f2da7c1fea0..0a7d13c6bcd83d794288e8ed0ec4f139ff6126bd 100644
+--- a/drivers/power/supply/qcom/smblite-lib.c
++++ b/drivers/power/supply/qcom/smblite-lib.c
+@@ -14,6 +14,7 @@
+ #include <linux/iio/consumer.h>
+ #include <dt-bindings/iio/qti_power_supply_iio.h>
+ #include <linux/nvmem-consumer.h>
++#include <linux/of.h>
+ #include <linux/pmic-voter.h>
+ #include <linux/ktime.h>
+ #include <linux/usb/typec.h>
+@@ -256,6 +257,11 @@ static void smblite_lib_notify_usb_host(struct smb_charger *chg, bool enable)
+ 	chg->otg_present = enable;
+ }
+ 
++void smblite_lib_set_vbus_state(struct smb_charger *chg, bool enable)
++{
++	smblite_lib_notify_usb_host(chg, enable);
++}
++
+ /********************
+  * REGISTER GETTERS *
+  ********************/
+@@ -1385,7 +1391,9 @@ int smblite_lib_set_prop_input_suspend(struct smb_charger *chg,
+ 		return rc;
+ 	}
+ 
+-	power_supply_changed(chg->batt_psy);
++	if (chg->batt_psy) {
++		power_supply_changed(chg->batt_psy);
++	}
+ 	return rc;
+ }
+ 
+@@ -1394,7 +1402,9 @@ int smblite_lib_set_prop_batt_capacity(struct smb_charger *chg,
+ {
+ 	chg->fake_capacity = val->intval;
+ 
+-	power_supply_changed(chg->batt_psy);
++	if (chg->batt_psy) {
++		power_supply_changed(chg->batt_psy);
++	}
+ 
+ 	return 0;
+ }
+@@ -1430,14 +1440,14 @@ int smblite_lib_set_prop_batt_sys_soc(struct smb_charger *chg, int val)
+ int smblite_lib_set_prop_batt_status(struct smb_charger *chg,
+ 				  const union power_supply_propval *val)
+ {
+-	/* Faking battery full */
+-	if (val->intval == POWER_SUPPLY_STATUS_FULL)
+-		chg->fake_batt_status = val->intval;
+-	else
+-		chg->fake_batt_status = -EINVAL;
+-
+-	power_supply_changed(chg->batt_psy);
+-
++		/* Faking battery full */
++		if (val->intval == POWER_SUPPLY_STATUS_FULL)
++			chg->fake_batt_status = val->intval;
++		else
++			chg->fake_batt_status = -EINVAL;
++		if (chg->batt_psy) {
++		power_supply_changed(chg->batt_psy);
++	}
+ 	return 0;
+ }
+ 
+@@ -2361,8 +2371,9 @@ int smblite_lib_set_prop_usb_type(struct smb_charger *chg,
+ 	smblite_lib_update_usb_type(chg, val);
+ 
+ 	/* For SDP rely on USB enumeration based reported the current */
+-	if ((chg->real_charger_type == POWER_SUPPLY_TYPE_USB)
+-		|| (chg->real_charger_type == POWER_SUPPLY_TYPE_UNKNOWN))
++	//if ((chg->real_charger_type == POWER_SUPPLY_TYPE_USB)
++	//	|| (chg->real_charger_type == POWER_SUPPLY_TYPE_UNKNOWN))
++	if (chg->real_charger_type == POWER_SUPPLY_TYPE_UNKNOWN)
+ 		return 0;
+ 
+ 	vote(chg->usb_icl_votable, USB_PSY_VOTER, false, 0);
+@@ -2753,6 +2764,20 @@ irqreturn_t smblite_default_irq_handler(int irq, void *data)
+ 	return IRQ_HANDLED;
+ }
+ 
++irqreturn_t smblite_otg_fail_irq_handler(int irq, void *data)
++{
++	struct smb_irq_data *irq_data = data;
++	struct smb_charger *chg = irq_data->parent_data;
++
++	smblite_lib_masked_write(chg, DCDC_CMD_OTG_REG(chg->base),
++						OTG_EN_BIT, 0);
++	schedule_timeout_uninterruptible(HZ * 2);
++	smblite_lib_masked_write(chg, DCDC_CMD_OTG_REG(chg->base),
++						OTG_EN_BIT, OTG_EN_BIT);
++
++	return IRQ_HANDLED;
++}
++
+ irqreturn_t smblite_chg_state_change_irq_handler(int irq, void *data)
+ {
+ 	struct smb_irq_data *irq_data = data;
+@@ -2810,7 +2835,9 @@ irqreturn_t smblite_chg_state_change_irq_handler(int irq, void *data)
+ 		}
+ 	}
+ 
+-	power_supply_changed(chg->batt_psy);
++	if (chg->batt_psy) {
++		power_supply_changed(chg->batt_psy);
++	}
+ 
+ failure:
+ 	return IRQ_HANDLED;
+@@ -2843,7 +2870,9 @@ irqreturn_t smblite_batt_psy_changed_irq_handler(int irq, void *data)
+ 	struct smb_charger *chg = irq_data->parent_data;
+ 
+ 	smblite_lib_dbg(chg, PR_INTERRUPT, "IRQ: %s\n", irq_data->name);
+-	power_supply_changed(chg->batt_psy);
++	if (chg->batt_psy) {
++		power_supply_changed(chg->batt_psy);
++	}
+ 	return IRQ_HANDLED;
+ }
+ 
+@@ -3189,10 +3218,12 @@ static void smblite_lib_usb_plugin_locked(struct smb_charger *chg)
+ 		if (rc < 0)
+ 			smblite_lib_err(chg, "Couldn't to enable DPDM rc=%d\n", rc);
+ 
+-		/* Schedule work to enable parallel charger */
+-		vote(chg->awake_votable, PL_DELAY_VOTER, true, 0);
+-		schedule_delayed_work(&chg->pl_enable_work,
++		if (!chg->disable_parallel_charging) {
++			/* Schedule work to enable parallel charger */
++			vote(chg->awake_votable, PL_DELAY_VOTER, true, 0);
++			schedule_delayed_work(&chg->pl_enable_work,
+ 					msecs_to_jiffies(PL_DELAY_MS));
++		}
+ 	} else {
+ 		smblite_lib_update_usb_type(chg, POWER_SUPPLY_TYPE_UNKNOWN);
+ 		if (chg->wa_flags & BOOST_BACK_WA) {
+@@ -3295,9 +3326,9 @@ static void update_sw_icl_max(struct smb_charger *chg,
+ 		if (!is_client_vote_enabled(chg->usb_icl_votable,
+ 						USB_PSY_VOTER)) {
+ 			/* if flash is active force 500mA */
+-			vote(chg->usb_icl_votable, USB_PSY_VOTER, true,
+-					is_flashlite_active(chg) ?
+-					USBIN_500UA : USBIN_100UA);
++			vote(chg->usb_icl_votable, USB_PSY_VOTER, true, SDP_CURRENT_UA);
++				//	is_flashlite_active(chg) ?
++				//	USBIN_500UA : USBIN_100UA);
+ 		}
+ 		vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, false, 0);
+ 		break;
+@@ -3320,7 +3351,7 @@ static void update_sw_icl_max(struct smb_charger *chg,
+ 	case POWER_SUPPLY_TYPE_UNKNOWN:
+ 	default:
+ 		vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, true,
+-					USBIN_100UA);
++					USBIN_500UA);
+ 		break;
+ 	}
+ 
+@@ -3994,7 +4025,9 @@ irqreturn_t smblite_wdog_bark_irq_handler(int irq, void *data)
+ 	if (rc < 0)
+ 		smblite_lib_err(chg, "Couldn't pet the dog rc=%d\n", rc);
+ 
+-	power_supply_changed(chg->batt_psy);
++	if (chg->batt_psy) {
++		power_supply_changed(chg->batt_psy);
++	}
+ 
+ 	return IRQ_HANDLED;
+ }
+@@ -4170,9 +4203,9 @@ static void smblite_lib_icl_change_work(struct work_struct *work)
+ 		smblite_lib_err(chg, "Couldn't get ICL status rc=%d\n", rc);
+ 		return;
+ 	}
+-
+-	power_supply_changed(chg->batt_psy);
+-
++	if (chg->batt_psy) {
++		power_supply_changed(chg->batt_psy);
++	}
+ 	smblite_lib_dbg(chg, PR_INTERRUPT, "icl_settled=%d\n", settled_ua);
+ }
+ 
+@@ -4276,41 +4309,49 @@ static void jeita_update_work(struct work_struct *work)
+ 	struct smb_charger *chg = container_of(work, struct smb_charger,
+ 						jeita_update_work);
+ 	struct device_node *node = chg->dev->of_node;
+-	struct device_node *batt_node, *pnode;
++	struct device_node *batt_node = NULL, *pnode = NULL;
+ 	union power_supply_propval val;
+ 	int rc, tmp[2], max_fcc_ma, max_fv_uv;
+ 	u32 jeita_hard_thresholds[2];
+ 	u16 addr;
+ 	u8 buff[2];
+ 
+-	batt_node = of_find_node_by_name(node, "qcom,battery-data");
++	batt_node = of_get_child_by_name(node, "qcom,battery-data");
+ 	if (!batt_node) {
+ 		smblite_lib_err(chg, "Batterydata not available\n");
+-		goto out;
++		goto err;
+ 	}
+ 
+ 	/* if BMS is not ready and remote FG does not exist, defer the work */
+ 	if ((IS_ERR_OR_NULL(chg->iio_chan_list_qg)) && (!chg->is_fg_remote))
+-		return;
++		goto done;
+ 
+ 	rc = smblite_lib_get_prop_from_bms(chg,
+ 			SMB5_QG_RESISTANCE_ID, &val.intval);
+ 	if (rc < 0) {
+ 		smblite_lib_err(chg, "Couldn't to get batt-id rc=%d\n", rc);
+-		goto out;
++		goto err;
+ 	}
+ 
+ 	/* if BMS hasn't read out the batt_id yet, defer the work */
+ 	if (val.intval <= 0)
+-		return;
++		goto done;
+ 
+ 	pnode = of_batterydata_get_best_profile(batt_node,
+ 					val.intval / 1000, NULL);
+ 	if (IS_ERR(pnode)) {
+ 		rc = PTR_ERR(pnode);
++		pnode = NULL;
+ 		smblite_lib_err(chg, "Couldn't to detect valid battery profile %d\n",
+ 				rc);
+-		goto out;
++		goto err;
++	}
++
++	if (!pnode) {
++		rc = -ENODEV;
++		smblite_lib_err(chg, "Couldn't to detect valid battery profile %d\n",
++				rc);
++		goto err;
+ 	}
+ 
+ 	rc = of_property_read_u32_array(pnode, "qcom,jeita-hard-thresholds",
+@@ -4321,7 +4362,7 @@ static void jeita_update_work(struct work_struct *work)
+ 		if (rc < 0) {
+ 			smblite_lib_err(chg, "Couldn't configure Hard Jeita rc=%d\n",
+ 					rc);
+-			goto out;
++			goto err;
+ 		}
+ 	}
+ 
+@@ -4333,7 +4374,7 @@ static void jeita_update_work(struct work_struct *work)
+ 		if (rc < 0) {
+ 			smblite_lib_err(chg, "Couldn't configure Soft Jeita rc=%d\n",
+ 					rc);
+-			goto out;
++			goto err;
+ 		}
+ 
+ 		rc = of_property_read_u32_array(pnode,
+@@ -4342,7 +4383,7 @@ static void jeita_update_work(struct work_struct *work)
+ 		if (rc < 0) {
+ 			smblite_lib_err(chg, "Couldn't get Soft Jeita hysteresis thresholds rc=%d\n",
+ 					rc);
+-			goto out;
++			goto err;
+ 		}
+ 	} else {
+ 		/* Populate the jeita-soft-thresholds */
+@@ -4350,14 +4391,14 @@ static void jeita_update_work(struct work_struct *work)
+ 		rc = smblite_lib_batch_read(chg, addr, buff, 2);
+ 		if (rc < 0) {
+ 			pr_err("Couldn't to read 0x%4X, rc=%d\n", addr, rc);
+-			goto out;
++			goto err;
+ 		}
+ 		chg->jeita_soft_thlds[0] = buff[1] | buff[0] << 8;
+ 
+ 		rc = smblite_lib_batch_read(chg, addr + 2, buff, 2);
+ 		if (rc < 0) {
+ 			pr_err("Couldn't to read 0x%4X, rc=%d\n", addr + 2, rc);
+-			goto out;
++			goto err;
+ 		}
+ 		chg->jeita_soft_thlds[1] = buff[1] | buff[0] << 8;
+ 
+@@ -4381,7 +4422,7 @@ static void jeita_update_work(struct work_struct *work)
+ 
+ 	if (max_fcc_ma <= 0 || max_fv_uv <= 0) {
+ 		smblite_lib_err(chg, "Incorrect fastchg-current-ma or max-voltage-uv\n");
+-		goto out;
++		goto err;
+ 	}
+ 
+ 	rc = of_property_read_u32_array(pnode, "qcom,jeita-soft-fcc-ua",
+@@ -4389,14 +4430,14 @@ static void jeita_update_work(struct work_struct *work)
+ 	if (rc < 0) {
+ 		smblite_lib_err(chg, "Couldn't get fcc values for soft JEITA rc=%d\n",
+ 				rc);
+-		goto out;
++		goto err;
+ 	}
+ 
+ 	max_fcc_ma *= 1000;
+ 	if (tmp[0] > max_fcc_ma || tmp[1] > max_fcc_ma) {
+ 		smblite_lib_err(chg, "Incorrect FCC value [%d %d] max: %d\n",
+ 					tmp[0], tmp[1], max_fcc_ma);
+-		goto out;
++		goto err;
+ 	}
+ 	chg->jeita_soft_fcc[0] = tmp[0];
+ 	chg->jeita_soft_fcc[1] = tmp[1];
+@@ -4406,13 +4447,13 @@ static void jeita_update_work(struct work_struct *work)
+ 	if (rc < 0) {
+ 		smblite_lib_err(chg, "Couldn't get fv values for soft JEITA rc=%d\n",
+ 				rc);
+-		goto out;
++		goto err;
+ 	}
+ 
+ 	if (tmp[0] > max_fv_uv || tmp[1] > max_fv_uv) {
+ 		smblite_lib_err(chg, "Incorrect FV value [%d %d] max: %d\n",
+ 					tmp[0], tmp[1], max_fv_uv);
+-		goto out;
++		goto err;
+ 	}
+ 	chg->jeita_soft_fv[0] = tmp[0];
+ 	chg->jeita_soft_fv[1] = tmp[1];
+@@ -4421,14 +4462,16 @@ static void jeita_update_work(struct work_struct *work)
+ 	if (rc < 0) {
+ 		smblite_lib_err(chg, "Couldn't fix soft jeita arb rc=%d\n",
+ 				rc);
+-		goto out;
++		goto err;
+ 	}
+ 
+ 	chg->jeita_configured = JEITA_CFG_COMPLETE;
+-	return;
++	goto done;
+ 
+-out:
++err:
+ 	chg->jeita_configured = JEITA_CFG_FAILURE;
++done:
++	of_node_put(batt_node);
+ }
+ 
+ static int smblite_lib_create_votables(struct smb_charger *chg)
+@@ -4483,6 +4526,8 @@ static int smblite_lib_create_votables(struct smb_charger *chg)
+ 	}
+ 
+ 	vote(chg->pl_disable_votable, PL_DELAY_VOTER, true, 0);
++	if (chg->disable_parallel_charging)
++		vote(chg->pl_disable_votable, USER_VOTER, true, 0);
+ 
+ 	chg->awake_votable = create_votable("AWAKE", VOTE_SET_ANY,
+ 					smblite_lib_awake_vote_callback,
+diff --git a/drivers/power/supply/qcom/smblite-lib.h b/drivers/power/supply/qcom/smblite-lib.h
+index 5b88b1d24add78e3d7716ed3bf89115fb04266ec..d9c518c02e0385e3642f4735be14afcbf30a3ecd 100644
+--- a/drivers/power/supply/qcom/smblite-lib.h
++++ b/drivers/power/supply/qcom/smblite-lib.h
+@@ -347,6 +347,7 @@ struct smb_charger {
+ 	int			*thermal_mitigation;
+ 	int			fake_capacity;
+ 	int			fake_batt_status;
++	bool			disable_parallel_charging;
+ 	bool			step_chg_enabled;
+ 	bool			typec_legacy_use_rp_icl;
+ 	int			connector_type;
+@@ -408,6 +409,7 @@ struct smb_charger {
+ 	bool			flash_active;
+ 	u32			irq_status;
+ 	bool			is_fg_remote;
++	struct gpio_desc *usb_vbus_ctrl;
+ };
+ 
+ int smblite_lib_read(struct smb_charger *chg, u16 addr, u8 *val);
+@@ -425,6 +427,7 @@ int smblite_lib_set_charge_param(struct smb_charger *chg,
+ 				struct smb_chg_param *param, int val_u);
+ 
+ irqreturn_t smblite_default_irq_handler(int irq, void *data);
++irqreturn_t smblite_otg_fail_irq_handler(int irq, void *data);
+ irqreturn_t smblite_chg_state_change_irq_handler(int irq, void *data);
+ irqreturn_t smblite_batt_temp_changed_irq_handler(int irq, void *data);
+ irqreturn_t smblite_batt_psy_changed_irq_handler(int irq, void *data);
+@@ -531,6 +534,7 @@ int smblite_lib_icl_override(struct smb_charger *chg,
+ int smblite_lib_set_prop_usb_type(struct smb_charger *chg,
+ 				const int val);
+ const struct apsd_result *smblite_lib_get_apsd_result(struct smb_charger *chg);
++void smblite_lib_set_vbus_state(struct smb_charger *chg, bool enable);
+ void smblite_update_usb_desc(struct smb_charger *chg);
+ int smblite_lib_init(struct smb_charger *chg);
+ int smblite_lib_deinit(struct smb_charger *chg);
+diff --git a/drivers/power/supply/virtual_charger.c b/drivers/power/supply/virtual_charger.c
+new file mode 100755
+index 0000000000000000000000000000000000000000..82f5826fd26a8806d1158ebdc16656c817f4f81c
+--- /dev/null
++++ b/drivers/power/supply/virtual_charger.c
+@@ -0,0 +1,164 @@
++
++#include <linux/of.h>
++#include <linux/types.h>
++#include <linux/module.h>
++#include <linux/power_supply.h>
++#include <linux/platform_device.h>
++
++static struct power_supply *usb_psy;
++static struct power_supply *bat_psy;
++
++static int virtual_usb_get_prop(struct power_supply *psy,
++					     enum power_supply_property psp,
++					     union power_supply_propval *val)
++{
++	switch (psp) {
++	case POWER_SUPPLY_PROP_ONLINE:
++	case POWER_SUPPLY_PROP_PRESENT:
++		val->intval = 0;
++		break;
++	case POWER_SUPPLY_PROP_TYPE:
++		val->intval = POWER_SUPPLY_TYPE_USB;
++		break;
++	default:
++		pr_err("get prop %d is not supported in usb\n", psp);
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++static char *virtual_usb_supplied_to[] = { "battery" };
++
++static enum power_supply_property virtual_usb_props[] = {
++	POWER_SUPPLY_PROP_TYPE,
++	POWER_SUPPLY_PROP_ONLINE,
++	POWER_SUPPLY_PROP_PRESENT,
++};
++
++static const struct power_supply_desc virtual_usb_psy_desc = {
++	.name = "usb",
++	.type = POWER_SUPPLY_TYPE_USB,
++	.properties = virtual_usb_props,
++	.num_properties = ARRAY_SIZE(virtual_usb_props),
++	.get_property = virtual_usb_get_prop,
++};
++
++static int virtual_battery_get_property(struct power_supply *psy,
++					enum power_supply_property psp,
++					union power_supply_propval *val)
++{
++	switch (psp) {
++	case POWER_SUPPLY_PROP_STATUS:
++		val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
++		break;
++	case POWER_SUPPLY_PROP_PRESENT:
++		val->intval = 1;
++		break;
++	case POWER_SUPPLY_PROP_CAPACITY:
++		val->intval = 50;
++		break;
++    case POWER_SUPPLY_PROP_VOLTAGE_NOW:
++        val->intval = 4000000;
++        break;
++	case POWER_SUPPLY_PROP_TEMP:
++		val->intval = 250;
++		break;
++	default:
++		pr_err("get prop %d is not supported in battery\n", psp);
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++static int virtual_battery_set_property(
++			struct power_supply *psy,
++			enum power_supply_property psp,
++			const union power_supply_propval *val)
++{
++	return 0;
++}
++
++static enum power_supply_property virtual_battery_props[] = {
++	POWER_SUPPLY_PROP_STATUS,
++	POWER_SUPPLY_PROP_PRESENT,
++	POWER_SUPPLY_PROP_CAPACITY,
++	POWER_SUPPLY_PROP_VOLTAGE_NOW,
++	POWER_SUPPLY_PROP_TEMP,
++};
++
++static const struct power_supply_desc virtual_bat_psy_desc = {
++	.name = "battery",
++	.type = POWER_SUPPLY_TYPE_BATTERY,
++	.properties = virtual_battery_props,
++	.num_properties = ARRAY_SIZE(virtual_battery_props),
++	.get_property = virtual_battery_get_property,
++	.set_property = virtual_battery_set_property,
++};
++
++static int virtual_probe(struct platform_device *pdev)
++{
++	struct power_supply_config usb_cfg;
++	struct power_supply_config bat_cfg = {
++		.of_node = pdev->dev.of_node,
++	};
++
++	usb_cfg.of_node = pdev->dev.of_node;
++	usb_cfg.supplied_to = virtual_usb_supplied_to;
++	usb_cfg.num_supplicants = ARRAY_SIZE(virtual_usb_supplied_to);
++	usb_psy = devm_power_supply_register(&pdev->dev,
++						  &virtual_usb_psy_desc,
++						  &usb_cfg);
++	if (IS_ERR_OR_NULL(usb_psy)) {
++		pr_err("register usb power supply failed\n");
++		return PTR_ERR(usb_psy);
++	}
++
++	bat_psy = devm_power_supply_register(&pdev->dev, &virtual_bat_psy_desc, &bat_cfg);
++	if (IS_ERR_OR_NULL(bat_psy)) {
++		pr_err("register battery psy failed\n");
++		return PTR_ERR(bat_psy);
++	}
++
++	power_supply_changed(usb_psy);
++	power_supply_changed(bat_psy);
++
++	return 0;
++}
++
++static int virtual_remove(struct platform_device *pdev)
++{
++	power_supply_unregister(usb_psy);
++	power_supply_unregister(bat_psy);
++
++	return 0;
++}
++
++static const struct of_device_id virtual_of_match[] = {
++	{ .compatible = "virtual_battery", },
++	{ },
++};
++
++static struct platform_driver virtual_driver = {
++	.driver = {
++		.name = "virtual-charge",
++		.of_match_table = virtual_of_match,
++	},
++	.probe = virtual_probe,
++	.remove = virtual_remove,
++};
++
++static int virtual_init(void)
++{
++	return platform_driver_register(&virtual_driver);
++}
++
++static void virtual_exit(void)
++{
++	platform_driver_unregister(&virtual_driver);
++}
++
++late_initcall(virtual_init);
++module_exit(virtual_exit);
++MODULE_LICENSE("GPL");
+diff --git a/drivers/scsi/scsi_scan.c b/drivers/scsi/scsi_scan.c
+index 8e36d2e53fb4cd7c38e802ba0fcf021372927c31..b5673f3b0f97a96599962d4f900ce2b337a840b4 100644
+--- a/drivers/scsi/scsi_scan.c
++++ b/drivers/scsi/scsi_scan.c
+@@ -813,6 +813,33 @@ static int scsi_probe_lun(struct scsi_device *sdev, unsigned char *inq_result,
+ 	return 0;
+ }
+ 
++#define QUECTEL_QDEVINFO_CMD
++
++#ifdef  QUECTEL_QDEVINFO_CMD
++static char quec_ufs_vendor_info[32] = { '\0' };
++static char quec_ufs_model_info[32] = { '\0' };
++
++void quectel_get_ufs_vendor_info(char *buf, int size)
++{
++    size = (size < sizeof(quec_ufs_vendor_info)) ? size : sizeof(quec_ufs_vendor_info);
++    snprintf(buf, size, "%s", quec_ufs_vendor_info);
++
++    return;
++}
++
++EXPORT_SYMBOL(quectel_get_ufs_vendor_info);
++
++void quectel_get_ufs_model_info(char *buf, int size)
++{
++    size = (size < sizeof(quec_ufs_model_info)) ? size : sizeof(quec_ufs_model_info);
++    snprintf(buf, size, "%s", quec_ufs_model_info);
++    return;
++}
++
++EXPORT_SYMBOL(quectel_get_ufs_model_info);
++
++#endif /* QUECTEL_QDEVINFO_CMD */
++
+ /**
+  * scsi_add_lun - allocate and fully initialze a scsi_device
+  * @sdev:	holds information to be stored in the new scsi_device
+diff --git a/drivers/tty/serial/msm_geni_serial.c b/drivers/tty/serial/msm_geni_serial.c
+index 8624c57bc0f78f5f1bb9666b83e42b33a1628625..e0fa51792669a30a7f3758fb442c7b983304469d 100644
+--- a/drivers/tty/serial/msm_geni_serial.c
++++ b/drivers/tty/serial/msm_geni_serial.c
+@@ -450,6 +450,7 @@ struct msm_geni_serial_port {
+ 	 * when runtime suspend was in progress
+ 	 */
+ 	struct mutex suspend_resume_lock;
++	bool bypass_flow_control;
+ };
+ 
+ static const struct uart_ops msm_geni_serial_pops;
+@@ -2889,7 +2890,8 @@ static int stop_rx_sequencer(struct uart_port *uport)
+ 		 * This is to prevent any rx data to come into the uart rx fifo
+ 		 * when stop_rx is being done.
+ 		 */
+-		msm_geni_serial_set_manual_flow(false, port);
++		if (!port->bypass_flow_control)
++			msm_geni_serial_set_manual_flow(false, port);
+ 		/*
+ 		 * Wait for the stale timeout to happen if there is any data
+ 		 * pending in the rx fifo.
+@@ -3064,7 +3066,7 @@ static int stop_rx_sequencer(struct uart_port *uport)
+ 	 * Do not override client requested manual_flow using set_mctrl
+ 	 * else driver can override client configured flow.
+ 	 */
+-	if (!uart_console(uport) && !port->manual_flow)
++	if (!uart_console(uport) && !port->manual_flow && !port->bypass_flow_control)
+ 		msm_geni_serial_set_manual_flow(true, port);
+ 
+ 	geni_status = geni_read_reg(uport->membase, SE_GENI_STATUS);
+@@ -4502,7 +4504,9 @@ static void msm_geni_serial_set_termios(struct uart_port *uport,
+ 		flush_workqueue(port->rx_wq);
+ 
+ 	reinit_completion(&port->xfer);
++	port->bypass_flow_control = true;
+ 	msm_geni_serial_stop_rx(uport);
++	port->bypass_flow_control = false;
+ 
+ 	if (!uart_console(uport)) {
+ 		poll_wait_time = msecs_to_jiffies(POLL_WAIT_TIMEOUT_MSEC);
+diff --git a/drivers/usb/dwc3/dwc3-msm-core.c b/drivers/usb/dwc3/dwc3-msm-core.c
+index eb3223c0212ccd793d65b456e7d30608ccc7d859..9b0e44177955048ef71b1675801f73fe66b14cdd 100644
+--- a/drivers/usb/dwc3/dwc3-msm-core.c
++++ b/drivers/usb/dwc3/dwc3-msm-core.c
+@@ -4960,6 +4960,8 @@ static bool dwc3_msm_role_allowed(struct dwc3_msm *mdwc, enum usb_role role)
+ static enum usb_role dwc3_msm_get_role(struct dwc3_msm *mdwc)
+ {
+ 	enum usb_role role;
++	struct extcon_dev *edev;
++	int state;
+ 
+ 	if (mdwc->vbus_active)
+ 		role = USB_ROLE_DEVICE;
+@@ -4968,6 +4970,32 @@ static enum usb_role dwc3_msm_get_role(struct dwc3_msm *mdwc)
+ 	else
+ 		role = USB_ROLE_NONE;
+ 
++	/*
++	 * On cold boot the cached vbus_active/id_state start as false/FLOAT
++	 * and are only updated by extcon notifiers. If the notifier has not
++	 * fired yet (or the initial sync in probe was skipped), role would
++	 * wrongly read NONE even when a cable is physically present.
++	 * Fall back to querying the extcon device directly in that case so
++	 * that sysfs 'mode' always reflects the real hardware state.
++	 */
++	if (role != USB_ROLE_NONE)
++		return role;
++
++	if (!mdwc->extcon)
++		return role;
++
++	edev = mdwc->extcon[mdwc->ext_idx].edev;
++	if (!edev)
++		return role;
++
++	state = extcon_get_state(edev, EXTCON_USB);
++	if (state > 0)
++		return USB_ROLE_DEVICE;
++
++	state = extcon_get_state(edev, EXTCON_USB_HOST);
++	if (state > 0)
++		return USB_ROLE_HOST;
++
+ 	return role;
+ }
+ 
+@@ -7063,6 +7091,9 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
+ 	struct dwc3 *dwc = platform_get_drvdata(mdwc->dwc3);
+ 	int timeout = 100;
+ 	int ret;
++	char *add_envp[] = {"USB_RSTART_ADB=add_usb_device", NULL};
++	char *remove_envp[] = {"USB_RSTART_ADB=remove_usb_device", NULL};
++	int ret_r;
+ 
+ 	ret = pm_runtime_resume_and_get(mdwc->dev);
+ 	if (ret < 0) {
+@@ -7140,6 +7171,8 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
+ 		}
+ 		mdwc->force_disconnect = false;
+ 
++		ret_r = kobject_uevent_env(&mdwc->dev->kobj, KOBJ_CHANGE, add_envp);
++		dev_dbg(mdwc->dev, "qusb-role: USB add event sent, ret=%d\n", ret_r);
+ 	} else {
+ 		dev_dbg(mdwc->dev, "%s: turn off gadget\n", __func__);
+ 		msm_dwc3_perf_vote_enable(mdwc, false);
+@@ -7157,6 +7190,8 @@ static int dwc3_otg_start_peripheral(struct dwc3_msm *mdwc, int on)
+ 		dwc3_msm_write_reg_field(mdwc->base, DWC3_GUSB3PIPECTL(0),
+ 				DWC3_GUSB3PIPECTL_SUSPHY, 0);
+ 
++		ret_r = kobject_uevent_env(&mdwc->dev->kobj, KOBJ_CHANGE, remove_envp);
++		dev_dbg(mdwc->dev, "qusb-role: USB remove event sent, ret=%d\n", ret_r);
+ 		/*
+ 		 * DWC3 core runtime PM may return an error during the put sync
+ 		 * and nothing else can trigger idle after this point.  If any
+diff --git a/drivers/usb/host/xhci.c b/drivers/usb/host/xhci.c
+index 8fc54c453f5eb8b9b8f3492e316b627bdb2adaa5..16d2f8290aa0fb763ba6d130ee8c38dbe5235a31 100644
+--- a/drivers/usb/host/xhci.c
++++ b/drivers/usb/host/xhci.c
+@@ -936,6 +936,7 @@ static void xhci_disable_hub_port_wake(struct xhci_hcd *xhci,
+ 	u32 t1, t2, portsc;
+ 	int i;
+ 
++	return;
+ 	spin_lock_irqsave(&xhci->lock, flags);
+ 
+ 	for (i = 0; i < rhub->num_ports; i++) {
+diff --git a/drivers/usb/phy/phy-msm-qusb.c b/drivers/usb/phy/phy-msm-qusb.c
+index 675e33e7bd28c2d5528d507a275fc013379c35c8..95fb8a5cdb2d6a096ca9c8e407037a1f8d7c4e97 100644
+--- a/drivers/usb/phy/phy-msm-qusb.c
++++ b/drivers/usb/phy/phy-msm-qusb.c
+@@ -179,6 +179,7 @@ struct qusb_phy {
+ 	struct mutex		phy_lock;
+ 
+ 	struct extcon_dev	*usb_extcon;
++	bool			cc_role_only;
+ 	bool			vbus_active;
+ 	bool			id_state;
+ 	struct power_supply	*usb_psy;
+@@ -466,6 +467,7 @@ static int qusb_phy_init(struct usb_phy *phy)
+ 	bool pll_lock_fail = false;
+ 
+ 	qusb_phy_enable_clocks(qphy, true);
++	qusb_phy_enable_power(qphy, true);
+ 	if (qphy->eud_enable_reg && readl_relaxed(qphy->eud_enable_reg)) {
+ 		dev_err(qphy->phy.dev, "eud is enabled\n");
+ 		return 0;
+@@ -1045,7 +1047,7 @@ static int qusb_phy_vbus_notifier(struct notifier_block *nb,
+ 
+ 	qphy->vbus_active = !!event;
+ 	dev_dbg(qphy->phy.dev, "Got VBUS notification: %u\n", event);
+-	queue_delayed_work(system_freezable_wq, &qphy->port_det_w, 0);
++	queue_delayed_work(system_freezable_wq, &qphy->port_det_w, 200);
+ 
+ 	return NOTIFY_DONE;
+ }
+@@ -1218,7 +1220,7 @@ static void qusb_phy_chg_det_enable_seq(struct qusb_phy *qphy, int state)
+ 	}
+ }
+ 
+-#define CHG_DCD_TIMEOUT_MSEC		750
++#define CHG_DCD_TIMEOUT_MSEC		500
+ #define CHG_DCD_POLL_TIME_MSEC		50
+ #define CHG_PRIMARY_DET_TIME_MSEC	100
+ #define CHG_SECONDARY_DET_TIME_MSEC	100
+@@ -1266,6 +1268,9 @@ static void qusb_phy_port_state_work(struct work_struct *w)
+ 	int status, ret;
+ 
+ 	dev_dbg(qphy->phy.dev, "state: %d\n", qphy->port_state);
++	// dev_err(qphy->phy.dev, "state: %d\n", qphy->port_state);
++	// dev_err(qphy->phy.dev, "id_state %d \n", qphy->id_state);
++	// dev_err(qphy->phy.dev, "vbus_active %d \n", qphy->vbus_active);
+ 
+ 	switch (qphy->port_state) {
+ 	case PORT_UNKNOWN:
+@@ -1276,6 +1281,21 @@ static void qusb_phy_port_state_work(struct work_struct *w)
+ 		}
+ 
+ 		if (qphy->vbus_active) {
++			if (qphy->cc_role_only) {
++				// dev_err(qphy->phy.dev,
++				// 	"qusb-role: CC role only, reset PHY and notify USB peripheral without charger detection\n");
++
++				ret = qusb_phy_enable_phy(qphy);
++				if (ret)
++					return;
++
++				qusb_phy_disable_phy(qphy);
++				qusb_phy_notify_charger(qphy, POWER_SUPPLY_TYPE_USB);
++				qusb_phy_notify_extcon(qphy, EXTCON_USB, 1);
++				qphy->port_state = PORT_CHG_DET_DONE;
++				return;
++			}
++
+ 			/* Enable DCD sequence */
+ 			ret = qusb_phy_enable_phy(qphy);
+ 			if (ret)
+@@ -1352,9 +1372,14 @@ static void qusb_phy_port_state_work(struct work_struct *w)
+ 		qusb_phy_disable_phy(qphy);
+ 		qphy->port_state = PORT_CHG_DET_DONE;
+ 	case PORT_CHG_DET_DONE:
+-		if (!qphy->vbus_active) {
++		if (!qphy->vbus_active && qphy->id_state) {
++			qphy->port_state = PORT_UNKNOWN;
++			qusb_phy_notify_extcon(qphy, EXTCON_USB, 0);
++		} else if (!qphy->id_state) {
+ 			qphy->port_state = PORT_UNKNOWN;
+ 			qusb_phy_notify_extcon(qphy, EXTCON_USB, 0);
++			delay = 100;
++			break;
+ 		}
+ 
+ 		return;
+@@ -1621,6 +1646,7 @@ static int qusb_phy_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	hold_phy_reset = of_property_read_bool(dev->of_node, "qcom,hold-reset");
++	qphy->cc_role_only = of_property_read_bool(dev->of_node, "qcom,cc-role-only");
+ 
+ 	/* use default major revision as 2 */
+ 	qphy->major_rev = 2;
+diff --git a/drivers/usb/serial/option.c b/drivers/usb/serial/option.c
+index 715738d70cbf5ce571482aaab239774cf666f6d0..01a05a5bf4adef2d606bb753ed04461cf0443760 100644
+--- a/drivers/usb/serial/option.c
++++ b/drivers/usb/serial/option.c
+@@ -2609,7 +2609,7 @@ static void option_instat_callback(struct urb *urb)
+ 		dev_dbg(dev, "%s: error %d\n", __func__, status);
+ 
+ 	/* Resubmit urb so we continue receiving IRQ data */
+-	if (status != -ESHUTDOWN && status != -ENOENT) {
++	if (status != -ESHUTDOWN && status != -ENOENT && status != -EPROTO) {
+ 		usb_mark_last_busy(port->serial->dev);
+ 		err = usb_submit_urb(urb, GFP_ATOMIC);
+ 		if (err)
+diff --git a/drivers/usb/serial/usb_wwan.c b/drivers/usb/serial/usb_wwan.c
+index f21f25a8cf6fe1c0070d08609da53128fd747906..f5b471f027506952492e1cc345a0ec06937b2dc5 100644
+--- a/drivers/usb/serial/usb_wwan.c
++++ b/drivers/usb/serial/usb_wwan.c
+@@ -227,7 +227,7 @@ static void usb_wwan_indat_callback(struct urb *urb)
+ 			__func__, status, endpoint);
+ 
+ 		/* don't resubmit on fatal errors */
+-		if (status == -ESHUTDOWN || status == -ENOENT)
++		if (status == -ESHUTDOWN || status == -ENOENT || status == -EPROTO)
+ 			return;
+ 	} else {
+ 		if (urb->actual_length) {
+diff --git a/kernel/printk/printk.c b/kernel/printk/printk.c
+index 49d97f2049f70c82b43d740ee7397daa43529465..6ed6dd48f2d1763365cb4611c6dc0b922aa789ad 100644
+--- a/kernel/printk/printk.c
++++ b/kernel/printk/printk.c
+@@ -2411,6 +2411,14 @@ static int __add_preferred_console(char *name, int idx, char *options,
+ 	return 0;
+ }
+ 
++static void clear_preferred_consoles(void)
++{
++	memset(console_cmdline, 0, sizeof(console_cmdline));
++	preferred_console = -1;
++	has_preferred_console = false;
++	console_set_on_cmdline = 0;
++}
++
+ static int __init console_msg_format_setup(char *str)
+ {
+ 	if (!strcmp(str, "syslog"))
+@@ -2437,7 +2445,9 @@ static int __init console_setup(char *str)
+ 	 * for exactly this purpose.
+ 	 */
+ 	if (str[0] == 0 || strcmp(str, "null") == 0) {
++		clear_preferred_consoles();
+ 		__add_preferred_console("ttynull", 0, NULL, NULL, true);
++		console_set_on_cmdline = 1;
+ 		return 1;
+ 	}
+ 
+diff --git a/sound/soc/codecs/Kconfig b/sound/soc/codecs/Kconfig
+index a92918f2831a2c347dde082f6000495e7e041f51..33655df92d34c4bc6fa73d765b681aadb5752594 100644
+--- a/sound/soc/codecs/Kconfig
++++ b/sound/soc/codecs/Kconfig
+@@ -810,7 +810,7 @@ config SND_SOC_DMIC
+ 	  Select this if your sound card has DMICs.
+ 
+ config SND_SOC_HDMI_CODEC
+-	tristate
++	tristate "HDMI audio codec"
+ 	select SND_PCM_ELD
+ 	select SND_PCM_IEC958
+ 	select HDMI
+diff --git a/sound/soc/soc-ops.c b/sound/soc/soc-ops.c
+index d8d0a26a554de328fbd774141b0a268d97665a45..ca8e7958278eedb9655d3782b3ebddb871d2066c 100644
+--- a/sound/soc/soc-ops.c
++++ b/sound/soc/soc-ops.c
+@@ -317,7 +317,7 @@ int snd_soc_put_volsw(struct snd_kcontrol *kcontrol,
+ 		mask = BIT(sign_bit + 1) - 1;
+ 
+ 	val = ucontrol->value.integer.value[0];
+-	if (mc->platform_max && val > mc->platform_max)
++	if (mc->platform_max && ((int)val + min) > mc->platform_max)
+ 		return -EINVAL;
+ 	if (val > max - min)
+ 		return -EINVAL;
+@@ -330,7 +330,7 @@ int snd_soc_put_volsw(struct snd_kcontrol *kcontrol,
+ 	val = val << shift;
+ 	if (snd_soc_volsw_is_stereo(mc)) {
+ 		val2 = ucontrol->value.integer.value[1];
+-		if (mc->platform_max && val2 > mc->platform_max)
++		if (mc->platform_max && ((int)val2 + min) > mc->platform_max)
+ 			return -EINVAL;
+ 		if (val2 > max - min)
+ 			return -EINVAL;

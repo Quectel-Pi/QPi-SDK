@@ -1,0 +1,915 @@
+diff --git a/crypto/af_alg.c b/crypto/af_alg.c
+old mode 100644
+new mode 100755
+index aa93501e27b95369ac669b449455e2c57aac5bef..3145d7e37b48a5e737dfa60b07234421936d00c0
+--- a/crypto/af_alg.c
++++ b/crypto/af_alg.c
+@@ -527,15 +527,14 @@ static int af_alg_alloc_tsgl(struct sock *sk)
+ /**
+  * af_alg_count_tsgl - Count number of TX SG entries
+  *
+- * The counting starts from the beginning of the SGL to @bytes. If
+- * an @offset is provided, the counting of the SG entries starts at the @offset.
+- *
++ * The counting starts from the beginning of the SGL to @bytes.
++ * 
+  * @sk: socket of connection to user space
+  * @bytes: Count the number of SG entries holding given number of bytes.
+  * @offset: Start the counting of SG entries from the given offset.
+  * Return: Number of TX SG entries found given the constraints
+  */
+-unsigned int af_alg_count_tsgl(struct sock *sk, size_t bytes, size_t offset)
++unsigned int af_alg_count_tsgl(struct sock *sk, size_t bytes)
+ {
+ 	const struct alg_sock *ask = alg_sk(sk);
+ 	const struct af_alg_ctx *ctx = ask->private;
+@@ -550,25 +549,13 @@ unsigned int af_alg_count_tsgl(struct sock *sk, size_t bytes, size_t offset)
+ 		const struct scatterlist *sg = sgl->sg;
+ 
+ 		for (i = 0; i < sgl->cur; i++) {
+-			size_t bytes_count;
+-
+-			/* Skip offset */
+-			if (offset >= sg[i].length) {
+-				offset -= sg[i].length;
+-				bytes -= sg[i].length;
+-				continue;
+-			}
+-
+-			bytes_count = sg[i].length - offset;
+ 
+-			offset = 0;
+ 			sgl_count++;
+ 
+-			/* If we have seen requested number of bytes, stop */
+-			if (bytes_count >= bytes)
++			if (sg[i].length >= bytes)
+ 				return sgl_count;
+ 
+-			bytes -= bytes_count;
++			bytes -= sg[i].length;
+ 		}
+ 	}
+ 
+@@ -580,19 +567,15 @@ EXPORT_SYMBOL_GPL(af_alg_count_tsgl);
+  * af_alg_pull_tsgl - Release the specified buffers from TX SGL
+  *
+  * If @dst is non-null, reassign the pages to @dst. The caller must release
+- * the pages. If @dst_offset is given only reassign the pages to @dst starting
+- * at the @dst_offset (byte). The caller must ensure that @dst is large
+- * enough (e.g. by using af_alg_count_tsgl with the same offset).
++ * the pages.
+  *
+  * @sk: socket of connection to user space
+  * @used: Number of bytes to pull from TX SGL
+  * @dst: If non-NULL, buffer is reassigned to dst SGL instead of releasing. The
+  *	 caller must release the buffers in dst.
+- * @dst_offset: Reassign the TX SGL from given offset. All buffers before
+- *	        reaching the offset is released.
+  */
+-void af_alg_pull_tsgl(struct sock *sk, size_t used, struct scatterlist *dst,
+-		      size_t dst_offset)
++void af_alg_pull_tsgl(struct sock *sk, size_t used, struct scatterlist *dst)
++
+ {
+ 	struct alg_sock *ask = alg_sk(sk);
+ 	struct af_alg_ctx *ctx = ask->private;
+@@ -617,18 +600,10 @@ void af_alg_pull_tsgl(struct sock *sk, size_t used, struct scatterlist *dst,
+ 			 * SG entries in dst.
+ 			 */
+ 			if (dst) {
+-				if (dst_offset >= plen) {
+-					/* discard page before offset */
+-					dst_offset -= plen;
+-				} else {
+-					/* reassign page to dst after offset */
+-					get_page(page);
+-					sg_set_page(dst + j, page,
+-						    plen - dst_offset,
+-						    sg[i].offset + dst_offset);
+-					dst_offset = 0;
+-					j++;
+-				}
++				/* reassign page to dst after offset */
++				get_page(page);
++				sg_set_page(dst + j, page, plen, sg[i].offset);
++				j++;
+ 			}
+ 
+ 			sg[i].length -= plen;
+diff --git a/crypto/algif_aead.c b/crypto/algif_aead.c
+old mode 100644
+new mode 100755
+index 42493b4d8ce462a10719a3a24095326efd54dc68..562164fcc5b73946a904d891f9fc3cab0db1d262
+--- a/crypto/algif_aead.c
++++ b/crypto/algif_aead.c
+@@ -26,7 +26,6 @@
+ #include <crypto/internal/aead.h>
+ #include <crypto/scatterwalk.h>
+ #include <crypto/if_alg.h>
+-#include <crypto/skcipher.h>
+ #include <crypto/null.h>
+ #include <linux/init.h>
+ #include <linux/list.h>
+@@ -96,9 +95,8 @@ static int _aead_recvmsg(struct socket *sock, struct msghdr *msg,
+ 	struct aead_tfm *aeadc = pask->private;
+ 	struct crypto_aead *tfm = aeadc->aead;
+ 	struct crypto_sync_skcipher *null_tfm = aeadc->null_tfm;
+-	unsigned int i, as = crypto_aead_authsize(tfm);
++	unsigned int as = crypto_aead_authsize(tfm);
+ 	struct af_alg_async_req *areq;
+-	struct af_alg_tsgl *tsgl, *tmp;
+ 	struct scatterlist *rsgl_src, *tsgl_src = NULL;
+ 	int err = 0;
+ 	size_t used = 0;		/* [in]  TX bufs to be en/decrypted */
+@@ -178,24 +176,25 @@ static int _aead_recvmsg(struct socket *sock, struct msghdr *msg,
+ 		outlen -= less;
+ 	}
+ 
++	/*
++	 * Create a per request TX SGL for this request which tracks the
++	 * SG entries from the global TX SGL.
++	 */
++
+ 	processed = used + ctx->aead_assoclen;
+-	list_for_each_entry_safe(tsgl, tmp, &ctx->tsgl_list, list) {
+-		for (i = 0; i < tsgl->cur; i++) {
+-			struct scatterlist *process_sg = tsgl->sg + i;
+-
+-			if (!(process_sg->length) || !sg_page(process_sg))
+-				continue;
+-			tsgl_src = process_sg;
+-			break;
+-		}
+-		if (tsgl_src)
+-			break;
+-	}
+-	if (processed && !tsgl_src) {
+-		err = -EFAULT;
++	areq->tsgl_entries = af_alg_count_tsgl(sk, processed);
++	if (!areq->tsgl_entries)
++		areq->tsgl_entries = 1;
++	areq->tsgl = sock_kmalloc(sk, array_size(sizeof(*areq->tsgl),
++					         areq->tsgl_entries),
++				  GFP_KERNEL);
++	if (!areq->tsgl) {
++		err = -ENOMEM;
+ 		goto free;
+ 	}
+-
++	sg_init_table(areq->tsgl, areq->tsgl_entries);
++	af_alg_pull_tsgl(sk, processed, areq->tsgl);
++	tsgl_src = areq->tsgl;
+ 	/*
+ 	 * Copy of AAD from source to destination
+ 	 *
+@@ -203,81 +202,15 @@ static int _aead_recvmsg(struct socket *sock, struct msghdr *msg,
+ 	 * when user space uses an in-place cipher operation, the kernel
+ 	 * will copy the data as it does not see whether such in-place operation
+ 	 * is initiated.
+-	 *
+-	 * To ensure efficiency, the following implementation ensure that the
+-	 * ciphers are invoked to perform a crypto operation in-place. This
+-	 * is achieved by memory management specified as follows.
+ 	 */
+ 
+ 	/* Use the RX SGL as source (and destination) for crypto op. */
+ 	rsgl_src = areq->first_rsgl.sgl.sg;
+ 
+-	if (ctx->enc) {
+-		/*
+-		 * Encryption operation - The in-place cipher operation is
+-		 * achieved by the following operation:
+-		 *
+-		 * TX SGL: AAD || PT
+-		 *	    |	   |
+-		 *	    | copy |
+-		 *	    v	   v
+-		 * RX SGL: AAD || PT || Tag
+-		 */
+-		err = crypto_aead_copy_sgl(null_tfm, tsgl_src,
+-					   areq->first_rsgl.sgl.sg, processed);
+-		if (err)
+-			goto free;
+-		af_alg_pull_tsgl(sk, processed, NULL, 0);
+-	} else {
+-		/*
+-		 * Decryption operation - To achieve an in-place cipher
+-		 * operation, the following  SGL structure is used:
+-		 *
+-		 * TX SGL: AAD || CT || Tag
+-		 *	    |	   |	 ^
+-		 *	    | copy |	 | Create SGL link.
+-		 *	    v	   v	 |
+-		 * RX SGL: AAD || CT ----+
+-		 */
+-
+-		 /* Copy AAD || CT to RX SGL buffer for in-place operation. */
+-		err = crypto_aead_copy_sgl(null_tfm, tsgl_src,
+-					   areq->first_rsgl.sgl.sg, outlen);
+-		if (err)
+-			goto free;
+-
+-		/* Create TX SGL for tag and chain it to RX SGL. */
+-		areq->tsgl_entries = af_alg_count_tsgl(sk, processed,
+-						       processed - as);
+-		if (!areq->tsgl_entries)
+-			areq->tsgl_entries = 1;
+-		areq->tsgl = sock_kmalloc(sk, array_size(sizeof(*areq->tsgl),
+-							 areq->tsgl_entries),
+-					  GFP_KERNEL);
+-		if (!areq->tsgl) {
+-			err = -ENOMEM;
+-			goto free;
+-		}
+-		sg_init_table(areq->tsgl, areq->tsgl_entries);
+-
+-		/* Release TX SGL, except for tag data and reassign tag data. */
+-		af_alg_pull_tsgl(sk, processed, areq->tsgl, processed - as);
+-
+-		/* chain the areq TX SGL holding the tag with RX SGL */
+-		if (usedpages) {
+-			/* RX SGL present */
+-			struct af_alg_sgl *sgl_prev = &areq->last_rsgl->sgl;
+-
+-			sg_unmark_end(sgl_prev->sg + sgl_prev->npages - 1);
+-			sg_chain(sgl_prev->sg, sgl_prev->npages + 1,
+-				 areq->tsgl);
+-		} else
+-			/* no RX SGL present (e.g. authentication only) */
+-			rsgl_src = areq->tsgl;
+-	}
++	memcpy_sglist(rsgl_src, tsgl_src, ctx->aead_assoclen);
+ 
+ 	/* Initialize the crypto operation */
+-	aead_request_set_crypt(&areq->cra_u.aead_req, rsgl_src,
++	aead_request_set_crypt(&areq->cra_u.aead_req, tsgl_src,
+ 			       areq->first_rsgl.sgl.sg, used, ctx->iv);
+ 	aead_request_set_ad(&areq->cra_u.aead_req, ctx->aead_assoclen);
+ 	aead_request_set_tfm(&areq->cra_u.aead_req, tfm);
+@@ -526,7 +459,7 @@ static void aead_sock_destruct(struct sock *sk)
+ 	struct crypto_aead *tfm = aeadc->aead;
+ 	unsigned int ivlen = crypto_aead_ivsize(tfm);
+ 
+-	af_alg_pull_tsgl(sk, ctx->used, NULL, 0);
++	af_alg_pull_tsgl(sk, ctx->used, NULL);
+ 	sock_kzfree_s(sk, ctx->iv, ivlen);
+ 	sock_kfree_s(sk, ctx, ctx->len);
+ 	af_alg_release_parent(sk);
+diff --git a/crypto/algif_skcipher.c b/crypto/algif_skcipher.c
+old mode 100644
+new mode 100755
+index ee8890ee8f33294d9fa3d277255c5c05e4936f90..8b314260929fbbc6b2810752f6a4c0e89347dea9
+--- a/crypto/algif_skcipher.c
++++ b/crypto/algif_skcipher.c
+@@ -89,7 +89,7 @@ static int _skcipher_recvmsg(struct socket *sock, struct msghdr *msg,
+ 	 * Create a per request TX SGL for this request which tracks the
+ 	 * SG entries from the global TX SGL.
+ 	 */
+-	areq->tsgl_entries = af_alg_count_tsgl(sk, len, 0);
++	areq->tsgl_entries = af_alg_count_tsgl(sk, len);
+ 	if (!areq->tsgl_entries)
+ 		areq->tsgl_entries = 1;
+ 	areq->tsgl = sock_kmalloc(sk, array_size(sizeof(*areq->tsgl),
+@@ -100,7 +100,7 @@ static int _skcipher_recvmsg(struct socket *sock, struct msghdr *msg,
+ 		goto free;
+ 	}
+ 	sg_init_table(areq->tsgl, areq->tsgl_entries);
+-	af_alg_pull_tsgl(sk, len, areq->tsgl, 0);
++	af_alg_pull_tsgl(sk, len, areq->tsgl);
+ 
+ 	/* Initialize the crypto operation */
+ 	skcipher_request_set_tfm(&areq->cra_u.skcipher_req, tfm);
+@@ -313,7 +313,7 @@ static void skcipher_sock_destruct(struct sock *sk)
+ 	struct alg_sock *pask = alg_sk(psk);
+ 	struct crypto_skcipher *tfm = pask->private;
+ 
+-	af_alg_pull_tsgl(sk, ctx->used, NULL, 0);
++	af_alg_pull_tsgl(sk, ctx->used, NULL);
+ 	sock_kzfree_s(sk, ctx->iv, crypto_skcipher_ivsize(tfm));
+ 	sock_kfree_s(sk, ctx, ctx->len);
+ 	af_alg_release_parent(sk);
+diff --git a/crypto/essiv.c b/crypto/essiv.c
+old mode 100644
+new mode 100755
+index 3505b071e647139db18e9f60b5d7c93138fc3e48..365f3082ea04162d287ce2ccaf86f402e4f3e876
+--- a/crypto/essiv.c
++++ b/crypto/essiv.c
+@@ -186,9 +186,14 @@ static int essiv_aead_crypt(struct aead_request *req, bool enc)
+ 	const struct essiv_tfm_ctx *tctx = crypto_aead_ctx(tfm);
+ 	struct essiv_aead_request_ctx *rctx = aead_request_ctx(req);
+ 	struct aead_request *subreq = &rctx->aead_req;
++	int ivsize = crypto_aead_ivsize(tfm);
++	int ssize = req->assoclen - ivsize;
+ 	struct scatterlist *src = req->src;
+ 	int err;
+ 
++	if (ssize < 0)
++		return -EINVAL;
++
+ 	crypto_cipher_encrypt_one(tctx->essiv_cipher, req->iv, req->iv);
+ 
+ 	/*
+@@ -198,19 +203,12 @@ static int essiv_aead_crypt(struct aead_request *req, bool enc)
+ 	 */
+ 	rctx->assoc = NULL;
+ 	if (req->src == req->dst || !enc) {
+-		scatterwalk_map_and_copy(req->iv, req->dst,
+-					 req->assoclen - crypto_aead_ivsize(tfm),
+-					 crypto_aead_ivsize(tfm), 1);
++		scatterwalk_map_and_copy(req->iv, req->dst, ssize, ivsize, 1);
+ 	} else {
+ 		u8 *iv = (u8 *)aead_request_ctx(req) + tctx->ivoffset;
+-		int ivsize = crypto_aead_ivsize(tfm);
+-		int ssize = req->assoclen - ivsize;
+ 		struct scatterlist *sg;
+ 		int nents;
+ 
+-		if (ssize < 0)
+-			return -EINVAL;
+-
+ 		nents = sg_nents_for_len(req->src, ssize);
+ 		if (nents < 0)
+ 			return -EINVAL;
+diff --git a/fs/cifs/cifs_spnego.c b/fs/cifs/cifs_spnego.c
+old mode 100644
+new mode 100755
+index 66b4413b94f7f9a6d609b5c55f3a3ad8776a6208..acd990ebbfe366bb6df96efbe207382d97deafc1
+--- a/fs/cifs/cifs_spnego.c
++++ b/fs/cifs/cifs_spnego.c
+@@ -8,6 +8,7 @@
+  */
+ 
+ #include <linux/list.h>
++#include <linux/cred.h>
+ #include <linux/slab.h>
+ #include <linux/string.h>
+ #include <keys/user-type.h>
+@@ -46,12 +47,27 @@ cifs_spnego_key_destroy(struct key *key)
+ 	kfree(key->payload.data[0]);
+ }
+ 
++static int
++cifs_spnego_key_vet_description(const char *description)
++{
++	/*
++	 * cifs.spnego descriptions are authority-bearing inputs to cifs.upcall.
++	 * They are only valid when produced by CIFS while using the private
++	 * spnego_cred installed below.  Do not let userspace create this type
++	 * of key through request_key(2)/add_key(2), since the helper treats
++	 * pid/uid/creduid/upcall_target as kernel-originating fields.
++	 */
++	if (current_cred() != spnego_cred)
++		return -EPERM;
++	return 0;
++}
+ 
+ /*
+  * keytype for CIFS spnego keys
+  */
+ struct key_type cifs_spnego_key_type = {
+ 	.name		= "cifs.spnego",
++	.vet_description = cifs_spnego_key_vet_description,
+ 	.instantiate	= cifs_spnego_key_instantiate,
+ 	.destroy	= cifs_spnego_key_destroy,
+ 	.describe	= user_describe,
+diff --git a/fs/proc/generic.c b/fs/proc/generic.c
+old mode 100644
+new mode 100755
+index bf26fd08776ac14ad55aabd80b406cd535a2e75f..cdf94ecefa070f23ee9ae6dc643ee6b0beeafeeb
+--- a/fs/proc/generic.c
++++ b/fs/proc/generic.c
+@@ -688,6 +688,12 @@ void pde_put(struct proc_dir_entry *pde)
+ 	}
+ }
+ 
++static void pde_erase(struct proc_dir_entry *pde, struct proc_dir_entry *parent)
++{
++	rb_erase(&pde->subdir_node, &parent->subdir);
++	RB_CLEAR_NODE(&pde->subdir_node);
++}
++
+ /*
+  * Remove a /proc entry and free it if it's not currently in use.
+  */
+@@ -710,7 +716,7 @@ void remove_proc_entry(const char *name, struct proc_dir_entry *parent)
+ 			WARN(1, "removing permanent /proc entry '%s'", de->name);
+ 			de = NULL;
+ 		} else {
+-			rb_erase(&de->subdir_node, &parent->subdir);
++			pde_erase(de, parent);
+ 			if (S_ISDIR(de->mode))
+ 				parent->nlink--;
+ 		}
+@@ -754,7 +760,7 @@ int remove_proc_subtree(const char *name, struct proc_dir_entry *parent)
+ 			root->parent->name, root->name);
+ 		return -EINVAL;
+ 	}
+-	rb_erase(&root->subdir_node, &parent->subdir);
++	pde_erase(root, parent);
+ 
+ 	de = root;
+ 	while (1) {
+@@ -766,7 +772,7 @@ int remove_proc_subtree(const char *name, struct proc_dir_entry *parent)
+ 					next->parent->name, next->name);
+ 				return -EINVAL;
+ 			}
+-			rb_erase(&next->subdir_node, &de->subdir);
++			pde_erase(next, de);
+ 			de = next;
+ 			continue;
+ 		}
+diff --git a/include/crypto/if_alg.h b/include/crypto/if_alg.h
+old mode 100644
+new mode 100755
+index a406e281ae571e403d81701011644bef58f259d4..719a38d7e8bb4928161f41e4126b5c0ac8a6201d
+--- a/include/crypto/if_alg.h
++++ b/include/crypto/if_alg.h
+@@ -228,9 +228,8 @@ static inline bool af_alg_readable(struct sock *sk)
+ 	return PAGE_SIZE <= af_alg_rcvbuf(sk);
+ }
+ 
+-unsigned int af_alg_count_tsgl(struct sock *sk, size_t bytes, size_t offset);
+-void af_alg_pull_tsgl(struct sock *sk, size_t used, struct scatterlist *dst,
+-		      size_t dst_offset);
++unsigned int af_alg_count_tsgl(struct sock *sk, size_t bytes);
++void af_alg_pull_tsgl(struct sock *sk, size_t used, struct scatterlist *dst);
+ void af_alg_wmem_wakeup(struct sock *sk);
+ int af_alg_wait_for_data(struct sock *sk, unsigned flags, unsigned min);
+ int af_alg_sendmsg(struct socket *sock, struct msghdr *msg, size_t size,
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+old mode 100644
+new mode 100755
+index 9c315023a2f8d71f5fe049bebd1931dadd0ce094..7e6e708647921ac092ec9acbf04704d8df0b74a4
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -912,6 +912,9 @@ struct task_struct {
+ 	 */
+ 	unsigned			sched_remote_wakeup:1;
+ 
++	/* Save user-dumpable when mm goes away */
++	unsigned			user_dumpable:1;
++
+ 	/* Bit to tell LSMs we're in execve(): */
+ 	unsigned			in_execve:1;
+ 	unsigned			in_iowait:1;
+diff --git a/kernel/bpf/verifier.c b/kernel/bpf/verifier.c
+old mode 100644
+new mode 100755
+index c0e520a1384ecf0d5dccba046e19f4767cba05db..81ded142f1dad12202bf2d7d5226f767585f1f2c
+--- a/kernel/bpf/verifier.c
++++ b/kernel/bpf/verifier.c
+@@ -8419,6 +8419,9 @@ static int check_alu_op(struct bpf_verifier_env *env, struct bpf_insn *insn)
+ 							 insn->dst_reg);
+ 				}
+ 				zext_32_to_64(dst_reg);
++				__update_reg_bounds(dst_reg);
++				__reg_deduce_bounds(dst_reg);
++				__reg_bound_offset(dst_reg);
+ 				reg_bounds_sync(dst_reg);
+ 			}
+ 		} else {
+diff --git a/kernel/dma/swiotlb.c b/kernel/dma/swiotlb.c
+old mode 100644
+new mode 100755
+index b8ef2f9026cc161cce237d1092721a1e06c0b91c..4748f085418c7a64cdf782a5d19f11273825197e
+--- a/kernel/dma/swiotlb.c
++++ b/kernel/dma/swiotlb.c
+@@ -726,10 +726,13 @@ void swiotlb_tbl_unmap_single(struct device *dev, phys_addr_t tlb_addr,
+ void swiotlb_sync_single_for_device(struct device *dev, phys_addr_t tlb_addr,
+ 		size_t size, enum dma_data_direction dir)
+ {
+-	if (dir == DMA_TO_DEVICE || dir == DMA_BIDIRECTIONAL)
+-		swiotlb_bounce(dev, tlb_addr, size, DMA_TO_DEVICE);
+-	else
+-		BUG_ON(dir != DMA_FROM_DEVICE);
++	/*
++	 * Unconditional bounce is necessary to avoid corruption on
++	 * sync_*_for_cpu or dma_ummap_* when the device didn't overwrite
++	 * the whole lengt of the bounce buffer.
++	 */
++	swiotlb_bounce(dev, tlb_addr, size, DMA_TO_DEVICE);
++	BUG_ON(!valid_dma_direction(dir));
+ }
+ 
+ void swiotlb_sync_single_for_cpu(struct device *dev, phys_addr_t tlb_addr,
+diff --git a/kernel/exit.c b/kernel/exit.c
+old mode 100644
+new mode 100755
+index 2af83f6928d4cd67dc18c1ac2230b7ed2223511c..416f6b2f403daa2f86cb84d0c737fb2fe2789d01
+--- a/kernel/exit.c
++++ b/kernel/exit.c
+@@ -543,6 +543,7 @@ static void exit_mm(void)
+ 	 */
+ 	smp_mb__after_spinlock();
+ 	local_irq_disable();
++	current->user_dumpable = (get_dumpable(mm) == SUID_DUMP_USER);
+ 	current->mm = NULL;
+ 	membarrier_update_current_mm(NULL);
+ 	enter_lazy_tlb(mm, current);
+diff --git a/kernel/ptrace.c b/kernel/ptrace.c
+old mode 100644
+new mode 100755
+index 0cf547531ddf0aa62005f8fe6270fda803517617..8e949e40bfe3a1de48e1977db04be4e9085e56b1
+--- a/kernel/ptrace.c
++++ b/kernel/ptrace.c
+@@ -288,11 +288,24 @@ static bool ptrace_has_cap(struct user_namespace *ns, unsigned int mode)
+ 	return ns_capable(ns, CAP_SYS_PTRACE);
+ }
+ 
++static bool task_still_dumpable(struct task_struct *task, unsigned int mode)
++{
++	struct mm_struct *mm = task->mm;
++	if (mm) {
++		if (get_dumpable(mm) == SUID_DUMP_USER)
++			return true;
++		return ptrace_has_cap(mm->user_ns, mode);
++	}
++
++	if (task->user_dumpable)
++		return true;
++	return ptrace_has_cap(&init_user_ns, mode);
++}
++
+ /* Returns 0 on success, -errno on denial. */
+ static int __ptrace_may_access(struct task_struct *task, unsigned int mode)
+ {
+ 	const struct cred *cred = current_cred(), *tcred;
+-	struct mm_struct *mm;
+ 	kuid_t caller_uid;
+ 	kgid_t caller_gid;
+ 
+@@ -353,11 +366,8 @@ static int __ptrace_may_access(struct task_struct *task, unsigned int mode)
+ 	 * Pairs with a write barrier in commit_creds().
+ 	 */
+ 	smp_rmb();
+-	mm = task->mm;
+-	if (mm &&
+-	    ((get_dumpable(mm) != SUID_DUMP_USER) &&
+-	     !ptrace_has_cap(mm->user_ns, mode)))
+-	    return -EPERM;
++	if (!task_still_dumpable(task, mode))
++		return -EPERM;
+ 
+ 	return security_ptrace_access_check(task, mode);
+ }
+diff --git a/kernel/time/posix-cpu-timers.c b/kernel/time/posix-cpu-timers.c
+old mode 100644
+new mode 100755
+index 6b6271387de89c8701e32a1225b6208c6f3a4d85..02ac2fa89350f6af37f5d9836b4df257b15a084e
+--- a/kernel/time/posix-cpu-timers.c
++++ b/kernel/time/posix-cpu-timers.c
+@@ -1431,6 +1431,15 @@ void run_posix_cpu_timers(void)
+ 
+ 	lockdep_assert_irqs_disabled();
+ 
++	/*
++	 * Ensure that release_task(tsk) can't happen while
++	 * handle_posix_cpu_timers() is running. Otherwise, a concurrent
++	 * posix_cpu_timer_del() may fail to lock_task_sighand(tsk) and
++	 * miss timer->it.cpu.firing != 0.
++	 */
++	if (tsk->exit_state)
++		return;
++		
+ 	/*
+ 	 * If the actual expiry is deferred to task work context and the
+ 	 * work is already scheduled there is no point to do anything here.
+diff --git a/net/core/skbuff.c b/net/core/skbuff.c
+old mode 100644
+new mode 100755
+index 674cf8444cbb64f091e64c06b547573369f5eba6..6263da7e465e99878e882b6ea721e04aebe60418
+--- a/net/core/skbuff.c
++++ b/net/core/skbuff.c
+@@ -5537,6 +5537,9 @@ bool skb_try_coalesce(struct sk_buff *to, struct sk_buff *from,
+ 	       from_shinfo->nr_frags * sizeof(skb_frag_t));
+ 	to_shinfo->nr_frags += from_shinfo->nr_frags;
+ 
++	if (from_shinfo->nr_frags)
++		to_shinfo->flags |= from_shinfo->flags & SKBFL_SHARED_FRAG;
++
+ 	if (!skb_cloned(from))
+ 		from_shinfo->nr_frags = 0;
+ 
+@@ -6267,6 +6270,8 @@ static int pskb_carve_inside_header(struct sk_buff *skb, const u32 off,
+ 			kfree(data);
+ 			return -ENOMEM;
+ 		}
++		if (skb_zcopy(skb))
++			net_zcopy_get(skb_zcopy(skb));
+ 		for (i = 0; i < skb_shinfo(skb)->nr_frags; i++)
+ 			skb_frag_ref(skb, i);
+ 		if (skb_has_frag_list(skb))
+@@ -6415,6 +6420,8 @@ static int pskb_carve_inside_nonlinear(struct sk_buff *skb, const u32 off,
+ 		kfree(data);
+ 		return -ENOMEM;
+ 	}
++	if (skb_zcopy(skb))
++		net_zcopy_get(skb_zcopy(skb));
+ 	skb_release_data(skb);
+ 
+ 	skb->head = data;
+diff --git a/net/core/sock_map.c b/net/core/sock_map.c
+old mode 100644
+new mode 100755
+index 4a02beed98498de9e5991dccfe61900467903a66..ebde167c10afe52645ea5e36d85d3ababa5c57a5
+--- a/net/core/sock_map.c
++++ b/net/core/sock_map.c
+@@ -413,11 +413,12 @@ static int __sock_map_delete(struct bpf_stab *stab, struct sock *sk_test,
+ {
+ 	struct sock *sk = NULL;
+ 	int err = 0;
++	unsigned long flags;
+ 
+ 	if (irqs_disabled())
+ 		return -EOPNOTSUPP; /* locks here are hardirq-unsafe */
+ 
+-	raw_spin_lock_bh(&stab->lock);
++	raw_spin_lock_irqsave(&stab->lock, flags);
+ 	if (!sk_test || sk_test == *psk)
+ 		sk = xchg(psk, NULL);
+ 
+@@ -426,7 +427,7 @@ static int __sock_map_delete(struct bpf_stab *stab, struct sock *sk_test,
+ 	else
+ 		err = -EINVAL;
+ 
+-	raw_spin_unlock_bh(&stab->lock);
++	raw_spin_unlock_irqrestore(&stab->lock, flags);
+ 	return err;
+ }
+ 
+@@ -933,6 +934,7 @@ static int sock_hash_delete_elem(struct bpf_map *map, void *key)
+ 	struct bpf_shtab_bucket *bucket;
+ 	struct bpf_shtab_elem *elem;
+ 	int ret = -ENOENT;
++	unsigned long flags;
+ 
+ 	if (irqs_disabled())
+ 		return -EOPNOTSUPP; /* locks here are hardirq-unsafe */
+@@ -940,7 +942,7 @@ static int sock_hash_delete_elem(struct bpf_map *map, void *key)
+ 	hash = sock_hash_bucket_hash(key, key_size);
+ 	bucket = sock_hash_select_bucket(htab, hash);
+ 
+-	raw_spin_lock_bh(&bucket->lock);
++	raw_spin_lock_irqsave(&bucket->lock, flags);
+ 	elem = sock_hash_lookup_elem_raw(&bucket->head, hash, key, key_size);
+ 	if (elem) {
+ 		hlist_del_rcu(&elem->node);
+@@ -948,7 +950,7 @@ static int sock_hash_delete_elem(struct bpf_map *map, void *key)
+ 		sock_hash_free_elem(htab, elem);
+ 		ret = 0;
+ 	}
+-	raw_spin_unlock_bh(&bucket->lock);
++	raw_spin_unlock_irqrestore(&bucket->lock, flags);
+ 	return ret;
+ }
+ 
+diff --git a/net/ipv4/esp4.c b/net/ipv4/esp4.c
+old mode 100644
+new mode 100755
+index 662152b64a872c9c70f08ade15fb623d98f37148..ba5ecbd26ac6394aba8cfe26c45031904e2bba35
+--- a/net/ipv4/esp4.c
++++ b/net/ipv4/esp4.c
+@@ -916,7 +916,8 @@ static int esp_input(struct xfrm_state *x, struct sk_buff *skb)
+ 			nfrags = 1;
+ 
+ 			goto skip_cow;
+-		} else if (!skb_has_frag_list(skb)) {
++		} else if (!skb_has_frag_list(skb) &&
++			   !skb_has_shared_frag(skb)) {
+ 			nfrags = skb_shinfo(skb)->nr_frags;
+ 			nfrags++;
+ 
+diff --git a/net/ipv4/ip_output.c b/net/ipv4/ip_output.c
+old mode 100644
+new mode 100755
+index ee4e7e7a0992fb76212aa74c90e610108a468cdd..b27576eb3e99baf3488f5b1e8ed408deae63dd0c
+--- a/net/ipv4/ip_output.c
++++ b/net/ipv4/ip_output.c
+@@ -1437,6 +1437,8 @@ ssize_t	ip_append_page(struct sock *sk, struct flowi4 *fl4, struct page *page,
+ 			goto error;
+ 		}
+ 
++		skb_shinfo(skb)->tx_flags |= SKBFL_SHARED_FRAG;
++
+ 		if (skb->ip_summed == CHECKSUM_NONE) {
+ 			__wsum csum;
+ 			csum = csum_page(page, offset, len);
+diff --git a/net/ipv6/esp6.c b/net/ipv6/esp6.c
+old mode 100644
+new mode 100755
+index eae99162d0d9aa9fb8e694624b08a40b95a2f8c3..d556c4b42b80bcfed3c60e89dc5e63d7124a3de1
+--- a/net/ipv6/esp6.c
++++ b/net/ipv6/esp6.c
+@@ -963,7 +963,8 @@ static int esp6_input(struct xfrm_state *x, struct sk_buff *skb)
+ 			nfrags = 1;
+ 
+ 			goto skip_cow;
+-		} else if (!skb_has_frag_list(skb)) {
++		} else if (!skb_has_frag_list(skb) &&
++			   !skb_has_shared_frag(skb)) {
+ 			nfrags = skb_shinfo(skb)->nr_frags;
+ 			nfrags++;
+ 
+diff --git a/net/llc/af_llc.c b/net/llc/af_llc.c
+old mode 100644
+new mode 100755
+index 70973bf18ee333bcc736a0b711c4efd3f1d5a270..d3919207f525a1533915ed0eaff8a082484d24f4
+--- a/net/llc/af_llc.c
++++ b/net/llc/af_llc.c
+@@ -318,7 +318,10 @@ static int llc_ui_autobind(struct socket *sock, struct sockaddr_llc *addr)
+ 	sock_reset_flag(sk, SOCK_ZAPPED);
+ 	rc = 0;
+ out:
+-	dev_put(dev);
++	if (rc) {
++		dev_put(llc->dev);
++		llc->dev = NULL;
++	}
+ 	return rc;
+ }
+ 
+@@ -424,7 +427,10 @@ static int llc_ui_bind(struct socket *sock, struct sockaddr *uaddr, int addrlen)
+ out_put:
+ 	llc_sap_put(sap);
+ out:
+-	dev_put(dev);
++	if (rc) {
++		dev_put(llc->dev);
++		llc->dev = NULL;
++	}
+ 	release_sock(sk);
+ 	return rc;
+ }
+diff --git a/net/netfilter/nf_tables_api.c b/net/netfilter/nf_tables_api.c
+old mode 100644
+new mode 100755
+index 2ae174f654ecad74534c0d549a493d367b539aa3..5cee955b3f786268a3c883540b68e5b03858cf37
+--- a/net/netfilter/nf_tables_api.c
++++ b/net/netfilter/nf_tables_api.c
+@@ -5137,7 +5137,7 @@ static void nft_map_catchall_activate(const struct nft_ctx *ctx,
+ 
+ 	list_for_each_entry(catchall, &set->catchall_list, list) {
+ 		ext = nft_set_elem_ext(set, catchall->elem);
+-		if (!nft_set_elem_active(ext, genmask))
++		if (nft_set_elem_active(ext, genmask))
+ 			continue;
+ 
+ 		elem.priv = catchall->elem;
+diff --git a/net/sched/sch_cake.c b/net/sched/sch_cake.c
+old mode 100644
+new mode 100755
+index 8429d7f8aba4c2d51afd0e5eaaafbe2acd4cc122..95a61ead758e07f478f628cf83ba21ec809c4b84
+--- a/net/sched/sch_cake.c
++++ b/net/sched/sch_cake.c
+@@ -1608,7 +1608,6 @@ static unsigned int cake_drop(struct Qdisc *sch, struct sk_buff **to_free)
+ 
+ 	__qdisc_drop(skb, to_free);
+ 	sch->q.qlen--;
+-	qdisc_tree_reduce_backlog(sch, 1, len);
+ 
+ 	cake_heapify(q, 0);
+ 
+@@ -1755,13 +1754,12 @@ static s32 cake_enqueue(struct sk_buff *skb, struct Qdisc *sch,
+ 			struct sk_buff **to_free)
+ {
+ 	struct cake_sched_data *q = qdisc_priv(sch);
+-	int len = qdisc_pkt_len(skb);
+-	int ret;
++	int len = qdisc_pkt_len(skb), ret;
+ 	struct sk_buff *ack = NULL;
+ 	ktime_t now = ktime_get();
+ 	struct cake_tin_data *b;
+ 	struct cake_flow *flow;
+-	u32 idx;
++	bool same_flow = false;
+ 
+ 	/* choose flow to insert into */
+ 	idx = cake_classify(sch, &b, skb, q->flow_mode, &ret);
+@@ -1833,6 +1831,8 @@ static s32 cake_enqueue(struct sk_buff *skb, struct Qdisc *sch,
+ 		consume_skb(skb);
+ 	} else {
+ 		/* not splitting */
++		int ack_pkt_len = 0;
++
+ 		cobalt_set_enqueue_time(skb, now);
+ 		get_cobalt_cb(skb)->adjusted_len = cake_overhead(q, skb);
+ 		flow_queue_add(flow, skb);
+@@ -1843,13 +1843,13 @@ static s32 cake_enqueue(struct sk_buff *skb, struct Qdisc *sch,
+ 		if (ack) {
+ 			b->ack_drops++;
+ 			sch->qstats.drops++;
+-			b->bytes += qdisc_pkt_len(ack);
+-			len -= qdisc_pkt_len(ack);
++			ack_pkt_len = qdisc_pkt_len(ack);
++			b->bytes += ack_pkt_len;
+ 			q->buffer_used += skb->truesize - ack->truesize;
+ 			if (q->rate_flags & CAKE_FLAG_INGRESS)
+ 				cake_advance_shaper(q, b, ack, now, true);
+ 
+-			qdisc_tree_reduce_backlog(sch, 1, qdisc_pkt_len(ack));
++			qdisc_tree_reduce_backlog(sch, 1, ack_pkt_len);
+ 			consume_skb(ack);
+ 		} else {
+ 			sch->q.qlen++;
+@@ -1858,11 +1858,11 @@ static s32 cake_enqueue(struct sk_buff *skb, struct Qdisc *sch,
+ 
+ 		/* stats */
+ 		b->packets++;
+-		b->bytes	    += len;
+-		b->backlogs[idx]    += len;
+-		b->tin_backlog      += len;
+-		sch->qstats.backlog += len;
+-		q->avg_window_bytes += len;
++		b->bytes	    += len - ack_pkt_len;
++		b->backlogs[idx]    += len - ack_pkt_len;
++		b->tin_backlog      += len - ack_pkt_len;
++		sch->qstats.backlog += len - ack_pkt_len;
++		q->avg_window_bytes += len - ack_pkt_len;
+ 	}
+ 
+ 	if (q->overflow_timeout)
+@@ -1937,15 +1937,27 @@ static s32 cake_enqueue(struct sk_buff *skb, struct Qdisc *sch,
+ 	if (q->buffer_used > q->buffer_max_used)
+ 		q->buffer_max_used = q->buffer_used;
+ 
+-	if (q->buffer_used > q->buffer_limit) {
+-		u32 dropped = 0;
++	if (q->buffer_used <= q->buffer_limit)
++		return NET_XMIT_SUCCESS;
++	prev_qlen = sch->q.qlen;
++	prev_backlog = sch->qstats.backlog;
++	while (q->buffer_used > q->buffer_limit) {
++		drop_id = cake_drop(sch, to_free);
++		if ((drop_id >> 16) == tin &&
++		    (drop_id & 0xFFFF) == idx)
++			same_flow = true;
++	}
++
++	prev_qlen -= sch->q.qlen;
++	prev_backlog -= sch->qstats.backlog;
++	b->drop_overlimit += prev_qlen;
+ 
+-		while (q->buffer_used > q->buffer_limit) {
+-			dropped++;
+-			cake_drop(sch, to_free);
+-		}
+-		b->drop_overlimit += dropped;
++	if (same_flow) {
++		qdisc_tree_reduce_backlog(sch, prev_qlen - 1,
++					  prev_backlog - len);
++		return NET_XMIT_CN;
+ 	}
++	qdisc_tree_reduce_backlog(sch, prev_qlen, prev_backlog);
+ 	return NET_XMIT_SUCCESS;
+ }
+ 
+diff --git a/net/sched/sch_hfsc.c b/net/sched/sch_hfsc.c
+old mode 100644
+new mode 100755
+index 7ee945cee2ccda5b041784f0cefca4a96c0b417a..fa79af6d77a19444b4591a71157834e2a9798e93
+--- a/net/sched/sch_hfsc.c
++++ b/net/sched/sch_hfsc.c
+@@ -176,6 +176,11 @@ struct hfsc_sched {
+ 
+ #define	HT_INFINITY	0xffffffffffffffffULL	/* infinite time value */
+ 
++static bool cl_in_el_or_vttree(struct hfsc_class *cl)
++{
++	return ((cl->cl_flags & HFSC_FSC) && cl->cl_nactive) ||
++		((cl->cl_flags & HFSC_RSC) && !RB_EMPTY_NODE(&cl->el_node));
++}
+ 
+ /*
+  * eligible tree holds backlogged classes being sorted by their eligible times.
+@@ -1036,6 +1041,8 @@ hfsc_change_class(struct Qdisc *sch, u32 classid, u32 parentid,
+ 	cl = kzalloc(sizeof(struct hfsc_class), GFP_KERNEL);
+ 	if (cl == NULL)
+ 		return -ENOBUFS;
++	
++	RB_CLEAR_NODE(&cl->el_node);
+ 
+ 	err = tcf_block_get(&cl->block, &cl->filter_list, sch, extack);
+ 	if (err) {
+@@ -1571,7 +1578,10 @@ hfsc_enqueue(struct sk_buff *skb, struct Qdisc *sch, struct sk_buff **to_free)
+ 		return err;
+ 	}
+ 
+-	if (first) {
++	sch->qstats.backlog += len;
++	sch->q.qlen++;
++
++	if (first && !cl_in_el_or_vttree(cl)) {
+ 		if (cl->cl_flags & HFSC_RSC)
+ 			init_ed(cl, len);
+ 		if (cl->cl_flags & HFSC_FSC)
+@@ -1586,9 +1596,6 @@ hfsc_enqueue(struct sk_buff *skb, struct Qdisc *sch, struct sk_buff **to_free)
+ 
+ 	}
+ 
+-	sch->qstats.backlog += len;
+-	sch->q.qlen++;
+-
+ 	return NET_XMIT_SUCCESS;
+ }
+ 

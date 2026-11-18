@@ -1,0 +1,147 @@
+diff --git a/arch/arm64/configs/vendor/qpi_debian.config b/arch/arm64/configs/vendor/qpi_debian.config
+new file mode 100644
+index 0000000000000000000000000000000000000000..c4a8555d4789a2302d89534f7d5ea96f79015feb
+--- /dev/null
++++ b/arch/arm64/configs/vendor/qpi_debian.config
+@@ -0,0 +1,10 @@
++CONFIG_USER_NS=y
++CONFIG_TMPFS_POSIX_ACL=y
++CONFIG_SECURITY_LANDLOCK=y
++CONFIG_RFKILL_INPUT=y
++CONFIG_VT=y
++CONFIG_VT_CONSOLE=y
++CONFIG_VT_HW_CONSOLE_BINDING=y
++#CONFIG_CONSOLE_TRANSLATIONS=y
++#CONFIG_QCOM_RPMPD=y
++#CONFIG_QCOM_SMD_RPM=y
+diff --git a/build.config.msm.bengal.le b/build.config.msm.bengal.le
+index 2d635dec4cef7b3e5a7ea7fc706fbe4dd68f44b0..a789dba23b01d2399b63a0abcbe294cd9b7b2e39 100644
+--- a/build.config.msm.bengal.le
++++ b/build.config.msm.bengal.le
+@@ -13,7 +13,7 @@ if [ -e "${ROOT_DIR}/msm-kernel" ] && [ "${KERNEL_DIR}" = "common" ]; then
+ 	KERNEL_DIR="msm-kernel"
+ fi
+ 
+-ABL_SRC=bootable/bootloader/edk2
++: ${ABL_SRC=bootable/bootloader/edk2}
+ BOOT_IMAGE_HEADER_VERSION=2
+ BASE_ADDRESS=0x80000000
+ PAGE_SIZE=4096
+@@ -35,6 +35,9 @@ fi
+ DEFCONFIG="generic_bengal_defconfig"
+ function build_defconfig_fragments() {
+ 	if [[ "${VARIANT}" =~ ^(gki|consolidate)$ ]]; then
++		if [ -n "${QPI_DEBIAN_BUILD}" ] && [ "${QPI_DEBIAN_BUILD}" = "1" ]; then
++			apply_defconfig_fragment "${KERNEL_DIR}"/arch/"${ARCH}"/configs/vendor/qpi_debian.config
++		fi
+ 		apply_defconfig_fragment "${KERNEL_DIR}"/arch/"${ARCH}"/configs/vendor/"${MSM_ARCH}"_GKI.config vendor/${MSM_ARCH}-gki_defconfig
+ 		if [ "${VARIANT}" = gki ]; then
+ 			return
+diff --git a/build.config.msm.common b/build.config.msm.common
+index 8b85ff7360f1d58efe9f21b1a5763161e8cd4b39..ccbf7a427504b2bffc79513f2c4d583d0bc8d988 100644
+--- a/build.config.msm.common
++++ b/build.config.msm.common
+@@ -13,6 +13,7 @@ CONFIG_DIR=arch/${ARCH}/configs
+ 
+ BRANCH=msm-kernel
+ CONFIG_TARGET=msm.${MSM_ARCH}
++QPI_BUILD_DTBS=${QPI_BUILD_DTBS:-0}
+ 
+ 
+ GKI_KLEAF_SUPPRESS_BUILD_SH_DEPRECATION_WARNING=1
+@@ -35,15 +36,19 @@ function compile_external_dtc() {
+     make all install "${DTC_MAKE_ARGS[@]}" NO_PYTHON=1 PREFIX=${COMMON_OUT_DIR}/host
+   )
+ }
+-append_cmd PRE_DEFCONFIG_CMDS 'compile_external_dtc'
++if [ "${QPI_BUILD_DTBS}" = "1" ]; then
++  append_cmd PRE_DEFCONFIG_CMDS 'compile_external_dtc'
++fi
+ 
+ ################################################################################
+ ## DTB general support
+-DTB_DIR=vendor/qcom
+-DTC_OVERLAY_TEST_EXT=ufdt_apply_overlay
+-# Force /__symbols__ generation for all DTB[O]s
+-DTC_FLAGS="-@"
+-MAKE_GOALS+=" dtbs"
++if [ "${QPI_BUILD_DTBS}" = "1" ]; then
++  DTB_DIR=vendor/qcom
++  DTC_OVERLAY_TEST_EXT=ufdt_apply_overlay
++  # Force /__symbols__ generation for all DTB[O]s
++  DTC_FLAGS="-@"
++  MAKE_GOALS+=" dtbs"
++fi
+ 
+ function install_dtbs() {
+   local INSTALL_DTBS_PATH="${COMMON_OUT_DIR}/dtb_staging"
+@@ -57,8 +62,10 @@ function install_dtbs() {
+   (cd ${KERNEL_DIR} && make "${TOOL_ARGS[@]}" O=${OUT_DIR} "${MAKE_ARGS[@]}" INSTALL_DTBS_PATH="${INSTALL_DTBS_PATH}" DTB_TYPES="${dtb_types}" dtbs_install)
+   cp $(find ${INSTALL_DTBS_PATH} -type f \( -name "*.dtb" -o -name "*.dtbo" \)) ${DIST_DIR}
+ }
+-append_cmd DIST_CMDS 'install_dtbs'
+-ADDITIONAL_HOST_TOOLS+=" install"  # for scripts/Makefile.dtbinst
++if [ "${QPI_BUILD_DTBS}" = "1" ]; then
++  append_cmd DIST_CMDS 'install_dtbs'
++  ADDITIONAL_HOST_TOOLS+=" install"  # for scripts/Makefile.dtbinst
++fi
+ 
+ FILES+="
+ .config
+@@ -236,7 +243,7 @@ function make_dtbo_img() {
+   mkdir -p ${DIST_DIR}/
+   mkdtboimg.py create ${DIST_DIR}/dtbo.img --page_size=${PAGE_SIZE} ${DIST_DIR}/*.dtbo
+ }
+-if [ ! -z $DT_OVERLAY_SUPPORT ] && [ ! $DT_OVERLAY_SUPPORT -eq "0" ]; then
++if [ "${QPI_BUILD_DTBS}" = "1" ] && [ ! -z $DT_OVERLAY_SUPPORT ] && [ ! $DT_OVERLAY_SUPPORT -eq "0" ]; then
+   append_cmd DIST_CMDS 'make_dtbo_img'
+ fi
+ 
+@@ -246,7 +253,7 @@ function make_dtb_img() {
+   mkdir -p ${DIST_DIR}/
+   mkdtboimg.py create ${DIST_DIR}/${MSM_ARCH}-dtb.img --page_size=${PAGE_SIZE} ${DIST_DIR}/*.dtb
+ }
+-if [ ! -z "$DTB_IMG_CREATE" ] && [ ! "$DTB_IMG_CREATE" -eq "0" ]; then
++if [ "${QPI_BUILD_DTBS}" = "1" ] && [ ! -z "$DTB_IMG_CREATE" ] && [ ! "$DTB_IMG_CREATE" -eq "0" ]; then
+   append_cmd DIST_CMDS 'make_dtb_img'
+ fi
+ 
+@@ -264,7 +271,7 @@ function make_vm_dtb_img() {
+     fi
+   done
+ }
+-if [ -n "$VM_DTB_IMG_CREATE" ] && [ ! "$VM_DTB_IMG_CREATE" -eq "0" ]; then
++if [ "${QPI_BUILD_DTBS}" = "1" ] && [ -n "$VM_DTB_IMG_CREATE" ] && [ ! "$VM_DTB_IMG_CREATE" -eq "0" ]; then
+   append_cmd DIST_CMDS 'make_vm_dtb_img'
+ fi
+ 
+diff --git a/scripts/setlocalversion b/scripts/setlocalversion
+index e80fd64535d1c480143b9bc826ad86a2bea271ee..6f78023e4b621d70c9831fd83c09eb2ccfb2be3f 100755
+--- a/scripts/setlocalversion
++++ b/scripts/setlocalversion
+@@ -94,7 +94,7 @@ scm_version()
+ 			# Add -g and exactly 12 hex chars.
+ 			printf '%s%s' -g "$(echo $head | cut -c1-12)"
+ 		elif $save_tag; then
+-			printf '%s' - "$(echo $tag)"
++			printf '%s' - "$(echo $head | cut -c1-12)"
+ 		fi
+ 
+ 		# Check for uncommitted changes.
+@@ -170,12 +170,12 @@ elif [ "${LOCALVERSION+set}" != "set" ]; then
+ 	# If the variable LOCALVERSION is set (including being set
+ 	# to an empty string), we don't want to append a plus sign.
+ 	scm=$(scm_version --short)
+-	res="$res${scm:++}"
++	res="$res${scm:+}"
+ fi
+ 
+ # finally, add the abXXX number if BUILD_NUMBER is set
+-if test -n "${BUILD_NUMBER}"; then
+-	res="$res-ab${BUILD_NUMBER}"
+-fi
++#if test -n "${BUILD_NUMBER}"; then
++#	res="$res-ab${BUILD_NUMBER}"
++#fi
+ 
+ echo "$res"

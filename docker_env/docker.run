@@ -1,0 +1,76 @@
+#!/bin/bash
+# 运行容器，挂载上一级目录和宿主机的 .ssh 目录
+#
+# ⚠️ 这里【故意不给构建加 -t】（2026-09-14 事故，见下）
+#
+#   -t 让 docker 申请一个 pty，并反复 ioctl(TCSETS) 把 pty 设成 raw 模式。
+#   当本进程在【后台进程组】里时，这个 ioctl 会被内核用 SIGTTOU 打断
+#   （strace 实测：ioctl ... TCSETS = ERESTARTSYS / --- SIGTTOU --- 无限循环），
+#   docker CLI 于是烧满一个核自旋，不再排空 pty。
+#   容器内是 make -j32，几百个 sh 抢着往 pty 写日志，pty 一满就全卡在
+#   `file_tty_write`（实测 16 个进程同时阻塞），表现为「构建卡住、日志不动」。
+#
+#   触发条件很普通：在 VS Code 的集成终端里 `nohup ./tools/compat/one_key_rebuild_kernel.sh &`
+#   —— 集成终端是 pty 且不是前台进程组，正好命中。
+#
+#   实测（本机）：
+#     docker run --rm  <img> echo OK     → OK            ✅
+#     docker run -it --rm <img> echo OK  → 挂死，timeout 才退 ❌
+#     docker run -t  --rm <img> echo OK  → OK（但没必要）
+#
+#   输出不需要 tty：构建日志本来就重定向到 .tmp/*.log，容器里程序按
+#   isatty()==false 走全缓冲，反而比 pty + 逐行刷 + 高频 write 更快。
+#
+#   要交互调试就单独开一个：docker run -it --rm <img> bash
+#
+#   ── 关于 --user ─────────────────────────────────────────────────────────
+#   加 --user $(id -u):$(id -g) 让容器内进程就是宿主那个 uid，产出的
+#   stage/ out-* 等属主直接是宿主用户，不必再来一遍 sudo rm -rf。
+#   镜像里预建了 q1000..q1020（Dockerfile），宿主 uid 落在这个区间就能被
+#   正确解析出用户名，也就享有 NOPASSWD sudo —— 这正是那 20 个账户的用途。
+#   故意【不】设 --env HOME=<宿主家目录>：那样 $HOME 会指向 docker 为挂载点
+#   新建的 root 属主目录，往 $HOME 写东西会失败；不设时 HOME=/home/q<uid>，
+#   是随机镜像预建的、可写的家目录。
+#   （构建本身不用 git/ssh，所以 ~/.ssh、~/.gitconfig 两个挂载点指到哪都不影响）
+
+INTERACTIVE_ARGS=()
+if [ "${1:-}" = "--interactive" ]; then
+        shift
+        if [ ! -t 0 ] || [ ! -t 1 ]; then
+                echo "ERROR: --interactive 需要前台终端 TTY，不能在后台或非交互环境运行。" >&2
+                exit 1
+        fi
+        INTERACTIVE_ARGS=(-i -t --env "TERM=${TERM:-xterm-256color}")
+fi
+
+# 透传档位相关变量。容器里 build.sh 会重新跑 dt_platform_set_env 把派生变量
+# 全部算出来，所以只有下面几类需要透传：
+#   DT_FW_DIR               固件包不在 ./fw/ 时手工指路
+#   *_OVERRIDE              派生变量的显式覆盖（换 distro / 换 kernel out 目录名时用）
+# 空值也照传：容器里判断的是「非空」，传空等于没传，无副作用。
+DT_FORWARD=()
+for v in DT_FW_DIR DT_KOUT_OVERRIDE; do
+        DT_FORWARD+=(--env "$v=${!v:-}")
+done
+
+docker run --rm \
+		"${INTERACTIVE_ARGS[@]}" \
+        --privileged \
+        --user "$(id -u):$(id -g)" \
+        --name $(date +%Y%m%d%H%M%S) \
+        --shm-size 32G \
+        --ulimit memlock=-1 \
+        --tmpfs /tmp:exec,rw,size=32G \
+        -v "/opt:/opt" \
+		-v $(cd .. && pwd):$(cd .. && pwd) \
+		-v /etc/timezone:/etc/timezone \
+		-v /etc/localtime:/etc/localtime:ro \
+		-v ~/.ssh:/home/$(whoami)/.ssh \
+		-v ~/.gitconfig:/home/$(whoami)/.gitconfig \
+        --workdir $(cd .. && pwd) \
+        --env WORKDIR=$(cd .. && pwd) \
+        --env SCRIPTSNAME=$SCRIPTSNAME \
+        --env NO_ADD_NEW=${NO_ADD_NEW:-} \
+        "${DT_FORWARD[@]}" \
+        ${IMAGENAME} \
+        /bin/bash -c "$*"
