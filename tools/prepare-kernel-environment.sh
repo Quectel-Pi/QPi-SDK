@@ -220,19 +220,26 @@ ensure_cache_dirs() {
 git_cache_path() { printf '%s/git/%s.git\n' "$CACHE_ROOT" "$1"; }
 
 ensure_git_cache() {
-	local component=$1 cache temp actual rc
+	local component=$1 cache temp actual rc missing
 	cache=$(git_cache_path "$component")
+	if [ -d "$cache" ] &&
+		[ "$(git -C "$cache" config --get remote.origin.promisor 2>/dev/null || true)" = true ]; then
+		# 旧版用 --filter=blob:none 建的是 partial clone：blob 按需从网络抓取，
+		# git archive 会退化成数万次小请求（内核仓库可卡住数小时）。丢弃重建。
+		component_status Downloading "discarding legacy partial clone $cache"
+		rm -rf -- "$cache"
+	fi
 	if [ ! -d "$cache" ]; then
-		component_status Downloading "Git clone"
+		component_status Downloading "Git init"
 		temp=$(mktemp -d "$CACHE_ROOT/git/.${component}.XXXXXX")
-		local -a clone_progress=(--progress)
-		if git clone "${clone_progress[@]}" --filter=blob:none --no-checkout "${URL[$component]}" "$temp/repo"; then
+		if git init -q "$temp/repo" &&
+			git -C "$temp/repo" remote add origin "${URL[$component]}"; then
 			:
 		else
 			rc=$?
 			rm -rf -- "$temp"
 			command_failed "$component" Downloading "$rc" \
-				"Git clone 失败；请检查 DNS、网络、代理和官方仓库可用性" "${URL[$component]}"
+				"Git 仓库初始化失败；请检查缓存目录写权限" "$CACHE_ROOT/git"
 			return 1
 		fi
 		mv "$temp/repo" "$cache"
@@ -246,6 +253,8 @@ ensure_git_cache() {
 	fi
 	component_status Downloading "fetching locked revision ${REV[$component]}"
 	local -a fetch_progress=(--progress)
+	# --depth=1 只取锁定 revision 单个 commit 的完整对象（含全部 blob），一次 pack 完成；
+	# 不再使用 partial clone，后续 git archive 全部走本地。
 	if git -C "$cache" fetch "${fetch_progress[@]}" --no-tags --depth=1 origin "${REV[$component]}"; then
 		:
 	else
@@ -257,15 +266,14 @@ ensure_git_cache() {
 	component_status Verifying "revision and cached Git objects"
 	actual=$(git -C "$cache" rev-parse FETCH_HEAD)
 	[ "$actual" = "${REV[$component]}" ] || die "revision 校验失败: $component"
-	# A promisor cache is not complete merely because the commit object exists.
-	# Materialize every tree/blob reachable from the locked revision, then repeat
-	# the archive with promisor fetching disabled. Only the latter proves that a
-	# future stage can be created from this cache without network access.
+	# commit 存在不代表缓存完整；只枚举锁定 revision 这棵树的缺失对象。
+	# --no-walk 必须保留：否则 rev-list 会沿父提交遍历整个历史，
+	# 对全历史缓存（如 gcc-host-sysroot）会枚举成千上万提交的对象，表现为卡死。
 	echo "校验 Git 缓存完整性: $component" >&2
-	git -C "$cache" archive "${REV[$component]}" >/dev/null ||
-		die "无法完整获取锁定 revision 的 tree/blob: $component"
-	git -C "$cache" -c remote.origin.promisor=false archive "${REV[$component]}" >/dev/null ||
-		die "Git 缓存仍缺少锁定 revision 的对象: $component"
+	missing=$(git -C "$cache" rev-list --objects --no-walk --missing=print "${REV[$component]}" |
+		grep -c '^?' || true)
+	[ "${missing:-0}" -eq 0 ] ||
+		die "Git 缓存缺少 ${missing} 个对象: $component（请删除 $cache 后重试）"
 	printf '%s\n' "$cache"
 }
 
