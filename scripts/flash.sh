@@ -111,11 +111,33 @@ FW_DIR="${OUT_DIR}"
 QDL="${TOOLS_DIR}/qdl"
 SUDO="${SUDO:-sudo}"
 
+# qdl 是预编译 ELF, 需要 glibc >= 2.34 与 libzip.so.4 (Ubuntu 22.04 / 24.04)。
+# 旧发行版 (如 Ubuntu 20.04) 请先升级编译机, 这里提前给出明确提示。
+if ! "${QDL}" --help >/dev/null 2>&1; then
+    echo "[ERROR] 无法运行 ${QDL}"
+    echo "        依赖: glibc >= 2.34 与 libzip.so.4"
+    echo "        当前系统: $(. /etc/os-release 2>/dev/null && echo "${PRETTY_NAME:-unknown}")"
+    echo "        请将编译机升级到 Ubuntu 22.04 / 24.04 后重试"
+    exit 1
+fi
+
 # 固件完整性检查
 for f in prog_firehose_Qcm6490_ddr.elf efi.bin system.img dtb.bin; do
     [ -f "${FW_DIR}/${f}" ] || { echo "[ERROR] 固件缺少 ${f}, 请先运行 ./scripts/build-all.sh"; exit 1; }
 done
-[ -d "${FW_DIR}/partition_${FS_TYPE}" ] || { echo "[ERROR] 缺少 partition_${FS_TYPE} 目录"; exit 1; }
+# 兼容两种底包布局:
+#   旧版: rawprogram/patch XML 放在 partition_<fs>/ 子目录
+#   新版 (2026-11 起的厂商包): XML 直接平铺在固件根目录
+XML_PREFIX="partition_${FS_TYPE}/"
+if [ ! -d "${FW_DIR}/partition_${FS_TYPE}" ]; then
+    if [ -f "${FW_DIR}/rawprogram0.xml" ]; then
+        echo "[simple-h1] 底包为平铺布局, 使用固件根目录下的 rawprogram/patch XML"
+        XML_PREFIX=""
+    else
+        echo "[ERROR] 缺少 partition_${FS_TYPE} 目录, 也未见平铺的 rawprogram0.xml"
+        exit 1
+    fi
+fi
 
 echo "=========================================="
 echo "[simple-h1] 全盘烧录固件 (${FS_TYPE})"
@@ -142,7 +164,7 @@ echo "[simple-h1] qdl 全盘烧录中..."
 # 显式列出 0-5 全部 LUN (保证顺序, 不依赖 glob 顺序)
 XMLS=()
 for lun in 0 1 2 3 4 5; do
-    XMLS+=(partition_${FS_TYPE}/rawprogram${lun}.xml partition_${FS_TYPE}/patch${lun}.xml)
+    XMLS+=("${XML_PREFIX}rawprogram${lun}.xml" "${XML_PREFIX}patch${lun}.xml")
 done
 ${SUDO} "${QDL}" -s "${FS_TYPE}" -i . \
     "prog_firehose_Qcm6490_ddr.elf" \

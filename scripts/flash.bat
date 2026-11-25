@@ -55,9 +55,15 @@ for %%F in ("%FIREHOSE%" "efi.bin" "system.img" "dtb.bin") do (
 )
 
 set "PART_DIR=%FW_DIR%\partition_%FS_TYPE%"
+set "PART_PREFIX=partition_%FS_TYPE%\"
 if not exist "%PART_DIR%" (
-    echo [ERROR] partition dir missing: %PART_DIR%
-    exit /b 1
+    if exist "%FW_DIR%\rawprogram0.xml" (
+        echo       base pack uses flat layout ^(XMLs at firmware root^)
+        set "PART_PREFIX="
+    ) else (
+        echo [ERROR] partition dir missing: %PART_DIR%
+        exit /b 1
+    )
 )
 
 echo [1/3] Looking for Qualcomm 9008 EDL device ...
@@ -94,15 +100,15 @@ echo.
 echo [3/3] Firehose: full flash ^(LUN 0-5 rawprogram + patch^) ...
 set "XMLLIST="
 for %%L in (0 1 2 3 4 5) do (
-    if exist "partition_%FS_TYPE%\rawprogram%%L.xml" (
+    if exist "%PART_PREFIX%rawprogram%%L.xml" (
         if defined XMLLIST (
-            set "XMLLIST=!XMLLIST!,partition_%FS_TYPE%\rawprogram%%L.xml"
+            set "XMLLIST=!XMLLIST!,%PART_PREFIX%rawprogram%%L.xml"
         ) else (
-            set "XMLLIST=partition_%FS_TYPE%\rawprogram%%L.xml"
+            set "XMLLIST=%PART_PREFIX%rawprogram%%L.xml"
         )
     )
-    if exist "partition_%FS_TYPE%\patch%%L.xml" (
-        set "XMLLIST=!XMLLIST!,partition_%FS_TYPE%\patch%%L.xml"
+    if exist "%PART_PREFIX%patch%%L.xml" (
+        set "XMLLIST=!XMLLIST!,%PART_PREFIX%patch%%L.xml"
     )
 )
 
