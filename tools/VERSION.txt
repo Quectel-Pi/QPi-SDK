@@ -1,0 +1,24 @@
+# Quectel PI M1/L1 (SC200U / SC200E) SDK
+# 供 Quectel Pi VS Code 扩展做平台判定与 profile 匹配
+# 板卡: M1 / L1; SoC: SM6115 (M1) / QCM2290 (L1)
+SDK_PROFILE=m1-l1
+SDK_NAME=m1-l1
+BOARD=M1/L1
+SOC=SM6115/QCM2290
+SDK_TYPE=simple
+VENDOR=Quectel
+
+# 系统 (公开版仅交付 system.img, 内核/DTB 沿用原厂固件包)
+ROOTFS=Debian (A/B slot, system.img)
+KERNEL=Linux msm-5.15 (CodeLinaro)
+UPDATE_IMG_SUPPORTED=no
+
+# 编译入口: source build.sh 后调用函数 (buildenv/buildall/...)
+BUILD_ENTRY=build.sh
+BUILD_FUNCS=buildenv buildall buildclean buildkernel buildstage buildsystem buildapp
+
+# 烧录: adb 写入未运行的 A/B system 槽
+FLASH_PROTOCOL=Qualcomm ADB A/B slot
+FLASH_ENTRY=tools/flash.sh
+
+GENERATED_DATE=2026-11-23

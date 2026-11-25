@@ -225,8 +225,7 @@ ensure_git_cache() {
 	if [ ! -d "$cache" ]; then
 		component_status Downloading "Git clone"
 		temp=$(mktemp -d "$CACHE_ROOT/git/.${component}.XXXXXX")
-		local -a clone_progress=()
-		if [ -t 2 ]; then clone_progress=(--progress); else clone_progress=(--quiet); fi
+		local -a clone_progress=(--progress)
 		if git clone "${clone_progress[@]}" --filter=blob:none --no-checkout "${URL[$component]}" "$temp/repo"; then
 			:
 		else
@@ -246,8 +245,7 @@ ensure_git_cache() {
 		component_status Checking "using cache $cache"
 	fi
 	component_status Downloading "fetching locked revision ${REV[$component]}"
-	local -a fetch_progress=()
-	if [ -t 2 ]; then fetch_progress=(--progress); else fetch_progress=(--quiet); fi
+	local -a fetch_progress=(--progress)
 	if git -C "$cache" fetch "${fetch_progress[@]}" --no-tags --depth=1 origin "${REV[$component]}"; then
 		:
 	else
