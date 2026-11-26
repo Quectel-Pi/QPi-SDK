@@ -59,6 +59,21 @@ done
 say() { printf '\n=== %s ===\n' "$*"; }
 sub() { printf '  %s\n' "$*"; }
 
+# WSL + Windows 版 adb.exe: adb 运行在 Windows 侧, 读不到 WSL 路径,
+# 本机侧的 push 源路径需要转成 Windows 路径。
+# 原生 Linux / macOS 的 adb 不是 .exe, 原样返回, 行为与之前完全一致。
+adb_local_arg() {
+	case "$ADB" in
+		*.exe*) ;;
+		*) printf '%s' "$1"; return 0 ;;
+	esac
+	if command -v wslpath >/dev/null 2>&1; then
+		wslpath -w "$1"
+	else
+		printf '%s' "$1"
+	fi
+}
+
 # ---- 1. 前置检查 ----
 say "1/7 前置检查"
 [ -f "$IMG_SYS" ] || { echo "ERROR: 缺少 $IMG_SYS" >&2; exit 1; }
@@ -195,7 +210,7 @@ say "3/7 推送到设备 /data/local/tmp"
 #    所以下面每行先打印「目标」，免得把主机临时路径误当成设备路径。
 ADB_TMP=/data/local/tmp
 sub "$(basename "$RAW")  -> 设备 $ADB_TMP/sys.raw"
-$ADB push "$RAW"      "$ADB_TMP/sys.raw"  | tail -1 | sed 's/^/    /'
+$ADB push "$(adb_local_arg "$RAW")" "$ADB_TMP/sys.raw" | tail -1 | sed 's/^/    /'
 
 # ---- 4. 校验推送完整性 ----
 say "4/7 校验推送完整性"
